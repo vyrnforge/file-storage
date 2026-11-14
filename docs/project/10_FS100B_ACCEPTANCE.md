@@ -19,3 +19,6 @@ Application module depends on domain/kernel only; provider SPI used later for ex
 
 ## Exclusions / gates
 No live upload/download, completion, quota, malware scanner, admin API, database, provider SDK, UI, deployment, public API or release. Local verification unavailable (Maven absent/DNS failure); hosted CI evidence required, local gate remains open. No later increment authorized. Next FS-110 trusted IAM/authorization, then FS-120 persistence and reliable mutations.
+
+## Hosted verification
+[Run 43610564780](https://github.com/vyrnforge/file-storage/actions/runs/43610564780) at be6571f883df0942792bbe3653c4231586c8c2d3 passed: 8 domain + 2 SPI + 8 application tests (18 total), zero failures/errors/skips; Kernel checksum, hygiene, dependency boundary and Maven reactor success. PR #6 clean at evidence capture. B01–B08 hosted verified at synthetic application level. Local full build remains outstanding; no production security, durable persistence or real provider evidence. No merge performed.
