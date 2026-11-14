@@ -1,6 +1,6 @@
 # Delivery roadmap and initial backlog
 
-Approved direction 2026-11-14. Phase 1 FS-100A only authorized; later increments not authorized. IDs are stable planning identifiers, not created GitHub issues. Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
+Approved direction 2026-11-14. Phase 1 FS-100A merged; FS-100B authorized as next increment; FS-110 onward not authorized. IDs are stable planning identifiers, not created GitHub issues. Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
 
 | ID | Phase | Priority | Deliverable / acceptance |
 |---|---|---|---|
@@ -25,6 +25,6 @@ Approved direction 2026-11-14. Phase 1 FS-100A only authorized; later increments
 Security/reliability built into each phase, not deferred to Phase 5. Sequence may change after audit. No dates/estimates until requirements and team capacity established. For each task record Specified / Implemented / Applied / Verified separately, evidence links and remaining blockers. Phase 0 exit: owner approves explicit ADRs and roadmap; then create implementation issues.
 
 ## First increment refinement
-FS-100A ([scope and acceptance](07_FIRST_IMPLEMENTATION_INCREMENT.md)) splits FS-100 into pure domain/placement and provider SPI foundations; FS-100B follows with service composition and persistence contract design. FS-100A sequencing refinement explicitly approved; FS-100B remains future work. FS-002 repository rules and CI are partly verified; administrative security readback, licensing and remaining enforcement evidence stay open.
+FS-100A ([scope and acceptance](07_FIRST_IMPLEMENTATION_INCREMENT.md)) splits FS-100 into pure domain/placement and provider SPI foundations; FS-100B follows with service composition and persistence contract design. FS-100A sequencing refinement explicitly approved; FS-100B now in review. FS-002 repository rules and CI are partly verified; administrative security readback, licensing and remaining enforcement evidence stay open.
 
-FS-100A status: implementation on review branch (PR #5), hosted build and 10 tests passed; local verification, final review and merge pending. FS-100B / FS-110 / FS-120 not authorized.
+FS-100A: PR #5 merged, hosted final CI passed, local verification outstanding. FS-100B: [outcome and rules](09_PRODUCT_OUTCOMES_AND_RULES.md), [acceptance](10_FS100B_ACCEPTANCE.md); application foundation in review. FS-110 / FS-120 not authorized.
