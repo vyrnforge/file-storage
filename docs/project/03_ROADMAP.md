@@ -30,3 +30,5 @@ FS-100A ([scope and acceptance](07_FIRST_IMPLEMENTATION_INCREMENT.md)) splits FS
 FS-100A: PR #5 merged, hosted final CI passed, local verification outstanding. FS-100B: [outcome and rules](09_PRODUCT_OUTCOMES_AND_RULES.md), [acceptance](10_FS100B_ACCEPTANCE.md); application foundation merged (PR #6). FS-110A trusted boundary in review; FS-110B concrete verifier/deployment contract blocked pending inputs. FS-120 not authorized.
 
 FS-110 is split into A (Kernel context, binding/entitlement/domain authorization and negative tests) and B (actual credential verifier, authoritative binding/grant integration, runtime endpoint wiring and environment verification). A does not close B or the overall FS-110 production gate.
+
+FS-110A: hosted synthetic acceptance I01–I08 passed (25 total tests) in run 43611269131; review/merge and local verification pending. FS-110B: actual resource audience/authorized client binding and verifier integration not yet resolved. See security contract for precise source findings; FS-120 remains unstarted.
