@@ -1,0 +1,4 @@
+.PHONY: ci
+ci:
+	python3 scripts/check-foundation.py
+	python3 scripts/check-repository-hygiene.py
