@@ -1,0 +1,27 @@
+# Build / IDE
+target/
+build/
+out/
+node_modules/
+dist/
+coverage/
+.idea/
+.vscode/
+*.iml
+.DS_Store
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+application-local.yml
+application-local.yaml
+application-local.properties
+secrets/
+# Private legacy artifacts
+legacy/
+src.zip
+*.log
