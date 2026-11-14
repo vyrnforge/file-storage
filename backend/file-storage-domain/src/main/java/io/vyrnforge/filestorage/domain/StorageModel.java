@@ -103,8 +103,8 @@ public final class StorageModel {
     public record Policy(long revision, List<Rule> rules) {
         public Policy { StorageModel.revision(revision); rules=List.copyOf(rules); }
     }
-    public record Placement(LocationId location, long policyRevision, long configRevision) {
-        public Placement { Objects.requireNonNull(location); revision(policyRevision); revision(configRevision); }
+    public record Placement(Scope scope, LocationId location, long policyRevision, long configRevision) {
+        public Placement { Objects.requireNonNull(scope); Objects.requireNonNull(location); revision(policyRevision); revision(configRevision); }
     }
     public static Placement select(Scope scope, Policy policy, Map<LocationId,Location> locations,
                                    Map<BackendId,Backend> backends, Set<LocationId> authorized) {
@@ -120,7 +120,7 @@ public final class StorageModel {
         Backend backend=backends.get(loc.backend);
         if (backend==null || !loc.backend.equals(backend.id) || backend.status!=BackendStatus.ACTIVE)
             throw new IllegalStateException("backend not active");
-        return new Placement(id,policy.revision,backend.configRevision);
+        return new Placement(scope,id,policy.revision,backend.configRevision);
     }
     public enum FileState { ACTIVE, SOFT_DELETED, PURGE_PENDING, PURGED }
     public record File(FileId id, TenantId tenant, String name, FileState state) {
@@ -184,20 +184,20 @@ public final class StorageModel {
     public enum UploadState { INITIATED, UPLOADING, VERIFYING, COMPLETED, FAILED, CANCELLED, EXPIRED }
     public static final class UploadSession {
         private final SessionId id; private final FileId file; private final VersionId version; private final Scope scope;
-        private final Placement placement; private final Instant expires; private final UploadState state;
-        private UploadSession(SessionId id,FileId file,VersionId version,Scope scope,Placement placement,Instant expires,UploadState state) {
+        private final Placement placement; private final Locator expectedObject; private final Instant expires; private final UploadState state;
+        private UploadSession(SessionId id,FileId file,VersionId version,Scope scope,Placement placement,Locator expectedObject,Instant expires,UploadState state) {
             this.id=Objects.requireNonNull(id);this.file=Objects.requireNonNull(file);this.version=Objects.requireNonNull(version);
-            this.scope=Objects.requireNonNull(scope);this.placement=Objects.requireNonNull(placement);this.expires=Objects.requireNonNull(expires);this.state=state;
+            this.scope=Objects.requireNonNull(scope);this.placement=Objects.requireNonNull(placement);this.expectedObject=Objects.requireNonNull(expectedObject);this.expires=Objects.requireNonNull(expires);this.state=state;
         }
-        public static UploadSession initiate(SessionId id,File file,VersionId version,Scope scope,Placement placement,Instant expires,Instant now) {
-            if (!file.tenant.equals(scope.tenant) || file.state!=FileState.ACTIVE || !expires.isAfter(now)) throw new IllegalArgumentException("invalid session");
-            return new UploadSession(id,file.id,version,scope,placement,expires,UploadState.INITIATED);
+        public static UploadSession initiate(SessionId id,File file,VersionId version,Scope scope,Placement placement,Locator expectedObject,Instant expires,Instant now) {
+            if (!file.tenant.equals(scope.tenant) || !scope.equals(placement.scope) || !placement.location.equals(expectedObject.location) || file.state!=FileState.ACTIVE || !expires.isAfter(now)) throw new IllegalArgumentException("invalid session");
+            return new UploadSession(id,file.id,version,scope,placement,expectedObject,expires,UploadState.INITIATED);
         }
         public UploadSession start(Instant now){return advance(UploadState.INITIATED,UploadState.UPLOADING,now);}
         public UploadSession verify(Instant now){return advance(UploadState.UPLOADING,UploadState.VERIFYING,now);}
         public UploadSession complete(Version verified,Instant now){
             if(!verified.file.equals(file)||!verified.tenant.equals(scope.tenant)||!verified.id.equals(version)
-                ||!verified.locator.location.equals(placement.location)||verified.state!=VersionState.AVAILABLE)
+                ||!verified.locator.location.equals(expectedObject.location)||!verified.locator.objectKey.equals(expectedObject.objectKey)||verified.state!=VersionState.AVAILABLE)
                 throw new IllegalArgumentException("unverified or mismatched version");
             return advance(UploadState.VERIFYING,UploadState.COMPLETED,now);
         }
@@ -206,8 +206,8 @@ public final class StorageModel {
         public UploadSession expire(Instant now){requireOpen();if(now.isBefore(expires))throw new IllegalStateException("not expired");return copy(UploadState.EXPIRED);}
         private void requireOpen(){if(state!=UploadState.INITIATED&&state!=UploadState.UPLOADING&&state!=UploadState.VERIFYING)throw new IllegalStateException("terminal");}
         private UploadSession advance(UploadState from,UploadState to,Instant now){if(state!=from||!now.isBefore(expires))throw new IllegalStateException("invalid upload transition");return copy(to);}
-        private UploadSession copy(UploadState to){return new UploadSession(id,file,version,scope,placement,expires,to);}
-        public Placement placement(){return placement;} public UploadState state(){return state;} public SessionId id(){return id;}
+        private UploadSession copy(UploadState to){return new UploadSession(id,file,version,scope,placement,expectedObject,expires,to);}
+        public Placement placement(){return placement;} public Locator expectedObject(){return expectedObject;} public UploadState state(){return state;} public SessionId id(){return id;}
         public FileId fileId(){return file;} public VersionId versionId(){return version;} public Scope scope(){return scope;} public Instant expires(){return expires;}
     }
 }
