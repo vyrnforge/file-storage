@@ -25,3 +25,5 @@ Specified: approved architecture and FS-100A acceptance gates. Implemented on re
 
 ## Owner approval, 2026-11-14
 DEC-FS001–010, roadmap, Java 21/Maven/Spring Boot/PostgreSQL/Flyway, public visibility and Apache-2.0 approved. Remaining available GitHub security settings owner-confirmed, not independently read back. FS-100A authorized; no later runtime work. Full legacy build, credential hygiene and production targets remain open. See [FS-100A implementation evidence](08_FS100A_EVIDENCE.md) for actual test results.
+
+FS-100A hosted verification: run 43609642326, ten tests passed, zero failures/errors/skips, dependency boundaries and Kernel checksum verified. Local verification remains open; PR #5 unmerged at evidence capture.

@@ -27,4 +27,4 @@ Security/reliability built into each phase, not deferred to Phase 5. Sequence ma
 ## First increment refinement
 FS-100A ([scope and acceptance](07_FIRST_IMPLEMENTATION_INCREMENT.md)) splits FS-100 into pure domain/placement and provider SPI foundations; FS-100B follows with service composition and persistence contract design. FS-100A sequencing refinement explicitly approved; FS-100B remains future work. FS-002 repository rules and CI are partly verified; administrative security readback, licensing and remaining enforcement evidence stay open.
 
-FS-100A status: implementation on review branch (PR #5), initial hosted build and 9 tests passed; final review and merge pending. FS-100B / FS-110 / FS-120 not authorized.
+FS-100A status: implementation on review branch (PR #5), hosted build and 10 tests passed; local verification, final review and merge pending. FS-100B / FS-110 / FS-120 not authorized.
