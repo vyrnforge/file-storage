@@ -91,6 +91,9 @@ public final class FileApplication {
                        VersionState versionState,SessionId session,UploadState uploadState,
                        Instant expiresAt) {}
 
+    /** Metadata permission alone does not disclose the upload session. */
+    public record MetadataView(FileReference file,VersionId version,FileState fileState,VersionState versionState,String name,long declaredSize,String declaredMimeType) {}
+
     private final Transactions transactions;
     private final Authorization authorization;
     private final Clock clock;
@@ -142,13 +145,14 @@ public final class FileApplication {
             return view(entry,now);
         });
     }
-    public View metadata(Caller caller,FileId file) {
+    public MetadataView metadata(Caller caller,FileId file) {
         if(caller==null)throw new Failure(Code.DENIED);
         Objects.requireNonNull(file);
         return transactions.execute(unit->{
             Entry e=unit.byFile(caller.tenant(),file).orElseThrow(()->new Failure(Code.NOT_FOUND));
             if(!e.file().id().equals(file))throw new Failure(Code.NOT_FOUND);
-            return read(caller,e,Action.READ_METADATA);
+            requireAccess(caller,e,Action.READ_METADATA);
+            return new MetadataView(e.file().reference(),e.version().id(),e.file().state(),e.version().state(),e.file().name(),e.command().expectedSize(),e.command().mimeType());
         });
     }
     public View session(Caller caller,SessionId session) {
@@ -157,13 +161,13 @@ public final class FileApplication {
         return transactions.execute(unit->{
             Entry e=unit.bySession(caller.tenant(),session).orElseThrow(()->new Failure(Code.NOT_FOUND));
             if(!e.session().id().equals(session))throw new Failure(Code.NOT_FOUND);
-            return read(caller,e,Action.READ_SESSION);
+            requireAccess(caller,e,Action.READ_SESSION);
+            return view(e,clock.instant());
         });
     }
-    private View read(Caller caller,Entry e,Action action) {
+    private void requireAccess(Caller caller,Entry e,Action action) {
         if(!e.file().tenant().equals(caller.tenant()) || !authorization.mayAccess(caller,action,e.resource()))
             throw new Failure(Code.NOT_FOUND);
-        return view(e,clock.instant());
     }
     private static View view(Entry e,Instant now){
         UploadState state=e.session().state();

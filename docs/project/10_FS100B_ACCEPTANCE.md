@@ -8,7 +8,7 @@ Status: implementation review. Owner directed next increment after FS-100A merge
 | B01 | Authorized tenant A / Asset, OSS policy | Initiate synthetic attachment | FileReference, session ID, pending status; exactly one complete aggregate, pinned placement |
 | B02 | Existing OSS session; policy switched to S3 | Initiate new request and read previous | New S3, original OSS; views expose neither |
 | B03 | Missing/ambiguous/ineligible placement | Initiate | No writes; neutral placement failure |
-| B04 | Tenant B or denied consumer/actor | Read known file/session or initiate | No disclosure or mutation; lookup tenant-bound |
+| B04 | Tenant B or denied consumer/actor | Read known file/session or initiate | No disclosure or mutation; lookup tenant-bound; metadata-only grant cannot read session or replay initiation |
 | B05 | Same caller/request key | Replay same command, then changed command | Same IDs, no new placement; changed request conflicts; revoked access denied |
 | B06 | Open session expires exactly now | Read | Effective EXPIRED, no writes, no grant |
 | B07 | Repository transaction rejects insertion | Initiate | No partial file/version/session; retry with same key after rollback succeeds |

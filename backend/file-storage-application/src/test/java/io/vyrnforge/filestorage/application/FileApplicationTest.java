@@ -35,10 +35,10 @@ class FileApplicationTest {
         public Instant instant(){return now;}
     }
     static final class Grants implements Authorization {
-        boolean allowed=true;
+        boolean allowed=true; boolean sessionAllowed=true;
         public boolean mayInitiate(Caller caller,String purpose){return allowed&&caller.equals(ALICE)&&purpose.equals("attachment");}
         public boolean mayAccess(Caller caller,Action action,Resource r){
-            return allowed&&caller.equals(ALICE)&&r.tenant().equals(A)&&r.ownerConsumer().equals("asset");
+            return allowed&&(action!=Action.READ_SESSION||sessionAllowed)&&caller.equals(ALICE)&&r.tenant().equals(A)&&r.ownerConsumer().equals("asset");
         }
     }
     /** Copy-on-write unit of work simulates atomic rollback; no production persistence claim. */
@@ -74,7 +74,7 @@ class FileApplicationTest {
         assertEquals(1,db.rows.size());Entry e=db.rows.getFirst();
         assertEquals(OL,e.session().placement().location());assertEquals(1,e.session().placement().policyRevision());
         assertEquals(e.version().locator(),e.session().expectedObject());assertEquals(v.file().fileId(),e.file().id().value());
-        assertEquals(v,app.metadata(ALICE,e.file().id()));assertEquals(v,app.session(ALICE,v.session()));
+        var metadata=app.metadata(ALICE,e.file().id());assertEquals(v.file(),metadata.file());assertEquals("sample.txt",metadata.name());assertEquals(5,metadata.declaredSize());assertEquals(v,app.session(ALICE,v.session()));
         assertFalse(v.toString().contains("objects/"));assertFalse(v.toString().contains("oss-test"));
     }
     @Test void b02_policySwitchPreservesExisting(){
@@ -102,6 +102,12 @@ class FileApplicationTest {
             code(Code.DENIED,()->app.initiate(caller,command("b")));
         }
         code(Code.DENIED,()->app.initiate(null,command("b")));assertEquals(1,db.rows.size());
+    }
+    @Test void metadataPermissionDoesNotGrantSessionAccess(){
+        var v=app.initiate(ALICE,command("a"));grants.sessionAllowed=false;
+        var metadata=app.metadata(ALICE,new FileId(v.file().fileId()));assertEquals(v.file(),metadata.file());
+        assertFalse(Arrays.stream(MetadataView.class.getRecordComponents()).anyMatch(c->c.getName().equals("session")));
+        code(Code.NOT_FOUND,()->app.session(ALICE,v.session()));code(Code.DENIED,()->app.initiate(ALICE,command("a")));
     }
     @Test void b05_replayReauthorizesAndConflicts(){
         var first=app.initiate(ALICE,command("a"));db.config=config(2,SL);
