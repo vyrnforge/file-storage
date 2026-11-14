@@ -15,7 +15,7 @@ Owner reports security settings applied. Independent readback below.
 ## Remaining evidence
 - Secret scanning, push protection, Dependabot, private vulnerability reporting, Actions repository settings, collaborator/team/key inventory: not independently readable through connector. Owner reports settings applied; exact individual statuses not verified. Collect sanitized owner settings evidence.
 - Direct push rejection, deletion/force-push rejection: rules verified, negative operations not exercised to avoid any main mutation. Independent reviewer remains unassigned; zero approvals is a temporary solo exception.
-- License and public/private intent unresolved; legacy credential hygiene/private build evidence open.
+- Public visibility and Apache-2.0 approved 2026-11-14; legacy credential hygiene/private build evidence open.
 - CI validates documentation and tracked-path hygiene only, not secret content or runtime security. Extend when dependencies/code are introduced.
 
 Status: source controls implemented and merged; branch rules applied and read back; CI positive and negative merge state verified. Full security closure pending remaining evidence. No infrastructure or runtime changes. Architecture approval remains separate.

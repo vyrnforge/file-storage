@@ -4,6 +4,7 @@ import io.vyrnforge.filestorage.spi.StorageProvider.*;
 import org.junit.jupiter.api.Test;
 import java.io.*;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -32,6 +33,18 @@ class StorageProviderTest {
             return new Page(page,all.size()>limit?page.getLast().objectKey():null);
         }
         byte[] require(Locator l){byte[] b=objects.get(l);if(b==null)throw new StorageFailure(ErrorCode.NOT_FOUND);return b;}
+    }
+    @Test void optionalSigningAndMultipartFailExplicitly(){
+        StorageProvider p=new Memory();var a=new Locator(new LocationId(new UUID(0,1)),"a",null);
+        var call=new Call(Duration.ofSeconds(1));var expiry=Instant.parse("2026-01-01T00:01:00Z");
+        var upload=new Multipart(a,"synthetic-handle");
+        assertEquals(ErrorCode.UNSUPPORTED,assertThrows(StorageFailure.class,()->p.signUpload(a,1,expiry,call)).code());
+        assertEquals(ErrorCode.UNSUPPORTED,assertThrows(StorageFailure.class,()->p.signDownload(a,expiry,call)).code());
+        assertEquals(ErrorCode.UNSUPPORTED,assertThrows(StorageFailure.class,()->p.beginMultipart(a,call)).code());
+        assertEquals(ErrorCode.UNSUPPORTED,assertThrows(StorageFailure.class,()->p.putPart(upload,1,new ByteArrayInputStream(new byte[]{1}),1,call)).code());
+        assertEquals(ErrorCode.UNSUPPORTED,assertThrows(StorageFailure.class,()->p.completeMultipart(upload,List.of(new Part(1,"synthetic")),call)).code());
+        assertEquals(ErrorCode.UNSUPPORTED,assertThrows(StorageFailure.class,()->p.abortMultipart(upload,call)).code());
+        assertFalse(upload.toString().contains("synthetic"));
     }
     @Test void a08_neutralPortAndOptionalCapability() throws IOException {
         StorageProvider p=new Memory();var loc=new LocationId(new UUID(0,1));var a=new Locator(loc,"a",null);var b=new Locator(loc,"b",null);

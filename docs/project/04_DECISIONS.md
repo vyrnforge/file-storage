@@ -10,7 +10,7 @@ Owner approval recorded 2026-11-14 (explicit conversation instruction). DEC-FS00
 | DEC-FS004 | Console-managed backend/location/policy revisions | Approved | No consumer deployment for new configured backend |
 | DEC-FS005 | Compiled S3 and native OSS adapters, capability matrix | Approved | No arbitrary runtime executable plugins |
 | DEC-FS006 | Kernel 0.3.0 and IAM boundary; optional JDBC | Approved | Shared contracts, domain owns policy |
-| DEC-FS007 | Java 21/Maven/Spring Boot/PostgreSQL/Flyway | Approved | Legacy compatibility and kernel fit; confirm versions |
+| DEC-FS007 | Java 21/Maven/Spring Boot/PostgreSQL/Flyway | Approved | Legacy compatibility and kernel fit; exact framework/database/SDK versions later |
 | DEC-FS008 | Client in service repo; optional kernel adapter later | Approved | Avoid cyclic dependency and extra distribution |
 | DEC-FS009 | Private-by-default data, public repo only sanitized docs | Approved | Security and least privilege |
 | DEC-FS010 | Legacy migration via registered location, no forced byte copy | Approved | Preserve IDs; confirm actual data/compatibility |

@@ -3,6 +3,8 @@ package io.vyrnforge.filestorage.spi;
 import io.vyrnforge.filestorage.domain.StorageModel.*;
 import java.io.InputStream;
 import java.time.Duration;
+import java.time.Instant;
+import java.net.URI;
 import java.util.*;
 
 /** Internal provider port. No vendor types or externally visible locations.
@@ -37,5 +39,24 @@ public interface StorageProvider {
     Page list(LocationId location,String prefix,String cursor,int limit,Call call);
     /** Optional capabilities are negotiated; no capability is implemented by this default. */
     default Metadata copy(Locator source,Locator destination,Call call){throw new StorageFailure(ErrorCode.UNSUPPORTED);}
-    // Signing and multipart contracts are deferred until adapter-specific security design in FS-200.
+    /** Internal transport instructions only; never serialize as a consumer FileReference or log. */
+    record SignedRequest(URI uri, String method, Map<String,String> headers, Map<String,String> formFields, Instant expiresAt) {
+        public SignedRequest { Objects.requireNonNull(uri); Objects.requireNonNull(method); headers=Map.copyOf(headers); formFields=Map.copyOf(formFields); Objects.requireNonNull(expiresAt); }
+        @Override public String toString(){return "SignedRequest[redacted]";}
+    }
+    record Multipart(Locator object, String handle) {
+        public Multipart { Objects.requireNonNull(object); if(handle==null||handle.isBlank())throw new IllegalArgumentException("handle"); }
+        @Override public String toString(){return "Multipart[redacted]";}
+    }
+    record Part(int number, String receipt) {
+        public Part { if(number<1||receipt==null||receipt.isBlank())throw new IllegalArgumentException("part"); }
+        @Override public String toString(){return "Part[redacted]";}
+    }
+    default SignedRequest signUpload(Locator object,long expectedSize,Instant expiry,Call call){throw new StorageFailure(ErrorCode.UNSUPPORTED);}
+    default SignedRequest signDownload(Locator object,Instant expiry,Call call){throw new StorageFailure(ErrorCode.UNSUPPORTED);}
+    default Multipart beginMultipart(Locator object,Call call){throw new StorageFailure(ErrorCode.UNSUPPORTED);}
+    /** Caller closes part stream; adapter validates byte count and bounded I/O. */
+    default Part putPart(Multipart upload,int number,InputStream bytes,long expectedSize,Call call){throw new StorageFailure(ErrorCode.UNSUPPORTED);}
+    default Metadata completeMultipart(Multipart upload,List<Part> parts,Call call){throw new StorageFailure(ErrorCode.UNSUPPORTED);}
+    default void abortMultipart(Multipart upload,Call call){throw new StorageFailure(ErrorCode.UNSUPPORTED);}
 }
