@@ -1,1 +1,0 @@
-Synthetic governance test marker only. No legacy source, credentials or production data. Expected CI rejection by tracked path hygiene.
