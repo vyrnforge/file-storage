@@ -2,7 +2,7 @@
 
 Independent, multi-tenant, multi-provider enterprise file storage service for Asset Management, ITSM and other applications.
 
-**Status: Phase 1 — FS-100A authorized; domain foundation in review.** No deployed service or released version.
+**Status: Phase 1 — FS-100A merged; FS-100B application foundation in review.** No deployed service or released version.
 
 ## Start here
 - [Project constitution](docs/project/00_CONSTITUTION.md)
@@ -20,10 +20,13 @@ Independent, multi-tenant, multi-provider enterprise file storage service for As
 - [First implementation increment FS-100A](docs/project/07_FIRST_IMPLEMENTATION_INCREMENT.md)
 - [Repository security evidence](docs/security/REPOSITORY_SECURITY_EVIDENCE.md)
 
+- [Product outcomes and rules](docs/project/09_PRODUCT_OUTCOMES_AND_RULES.md)
+- [FS-100B acceptance and handoff](docs/project/10_FS100B_ACCEPTANCE.md)
+
 ## Ecosystem
 [Wyrmgate IAM](https://github.com/wyrmgate/iam) authenticates identities; [Platform Kernel v0.3.0](https://github.com/vyrnforge/platform-kernel/releases/tag/v0.3.0) provides shared context and reliability contracts; [VyrnForge UI](https://github.com/vyrnforge/vyrnforge-ui) provides console foundations; [VyrnRail](https://github.com/vyrnforge/vyrnrail) informs engineering governance. File Storage owns its own domain, database, storage and release.
 
 ## Layout
-Backend contains the FS-100A Maven reactor; console, SDK, contracts, deployment and tests remain reserved areas with README files. FS-100A is limited to domain and provider SPI; no service runtime, infrastructure or migrations. Verify with `make ci` (Java 21, Maven 3.9+, public Kernel release artifact). See [FS-100A evidence](docs/project/08_FS100A_EVIDENCE.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
+Backend contains the domain, provider SPI and application Maven reactor; console, SDK, contracts, deployment and tests remain reserved areas with README files. FS-100B is limited to application use cases and persistence ports; no service runtime, infrastructure or migrations. Verify with `make ci` (Java 21, Maven 3.9+, public Kernel release artifact). See [FS-100A evidence](docs/project/08_FS100A_EVIDENCE.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Public repository: never commit secrets, private legacy source, real file content or production configuration. Licensed under [Apache-2.0](LICENSE).

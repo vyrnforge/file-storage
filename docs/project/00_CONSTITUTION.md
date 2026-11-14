@@ -1,6 +1,6 @@
 # Project constitution
 
-Status: architecture direction approved 2026-11-14; FS-100A only authorized. Later work requires review.
+Status: architecture direction approved 2026-11-14; FS-100B authorized after FS-100A merge. Later work requires review.
 
 ## Mission
 Provide a standalone enterprise storage service that abstracts storage-provider details for authorized applications and administrators without losing durable file identity or operational control.

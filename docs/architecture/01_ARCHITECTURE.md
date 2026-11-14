@@ -1,6 +1,6 @@
 # Architecture and domain boundaries
 
-Approved architecture direction; FS-100A only authorized. Start with a modular monolith; separate worker execution if scale or reliability requires. Java 21 / Maven / Spring Boot / PostgreSQL / Flyway approved; exact framework/database versions selected in relevant later increments.
+Approved architecture direction; FS-100B authorized after FS-100A merge. Start with a modular monolith; separate worker execution if scale or reliability requires. Java 21 / Maven / Spring Boot / PostgreSQL / Flyway approved; exact framework/database versions selected in relevant later increments.
 
 ```mermaid
 flowchart TD

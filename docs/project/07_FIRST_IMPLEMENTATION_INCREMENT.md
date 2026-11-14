@@ -1,6 +1,6 @@
 # FS-100A — domain foundation and placement contract
 
-Status: AUTHORIZED 2026-11-14, implementation in review. Parent FS-100; prerequisite FS-000 and security gate. Goal: prove the central architectural invariant before building service infrastructure.
+Status: AUTHORIZED 2026-11-14, merged PR #5; hosted verification passed, local verification outstanding. Parent FS-100; prerequisite FS-000 and security gate. Goal: prove the central architectural invariant before building service infrastructure.
 
 ## Scope
 Create minimal Java 21/Maven 3.9+ reactor under backend; initial domain and provider-spi modules only (domain independent; SPI depends on domain types as needed). Use package io.vyrnforge.filestorage. Pin Kernel main 0.3.0 where FileReference mapping is needed; testkit only test scope if used. Use the public Kernel v0.3.0 release JAR, SHA-256 pinned, installed into local Maven repository by build bootstrap; no token required. Document reproducible dependency resolution before requiring build CI. Pin Maven plugins and test dependencies with version/security review; no Spring Boot or PostgreSQL dependency until subsequent increments need them.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FS-100A dependency policy: pure domain + SPI, no runtime framework/provider SDK."""
+"""FS-100B dependency policy: pure domain + SPI + application, no runtime framework/provider SDK."""
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import sys
@@ -7,6 +7,7 @@ root = Path(__file__).resolve().parents[1] / "backend"
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 allowed = {
     "file-storage-domain": {("io.vyrnforge.platform", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
+    "file-storage-application": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.platform", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-provider-spi": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
 }
 for module, expected in allowed.items():
@@ -19,4 +20,4 @@ for module, expected in allowed.items():
             if line.strip().startswith("import "):
                 if not any(line.strip().startswith("import " + prefix) for prefix in ("java.", "io.vyrnforge.platform.kernel.", "io.vyrnforge.filestorage.domain.")):
                     sys.exit(f"Unexpected import in {path}: {line}")
-print("FS-100A domain and provider SPI dependency boundaries OK")
+print("FS-100B domain, provider SPI and application dependency boundaries OK")
