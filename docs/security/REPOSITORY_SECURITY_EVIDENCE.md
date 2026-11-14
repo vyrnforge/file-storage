@@ -19,3 +19,6 @@ Owner reports security settings applied. Independent readback below.
 - CI validates documentation and tracked-path hygiene only, not secret content or runtime security. Extend when dependencies/code are introduced.
 
 Status: source controls implemented and merged; branch rules applied and read back; CI positive and negative merge state verified. Full security closure pending remaining evidence. No infrastructure or runtime changes. Architecture approval remains separate.
+
+## Owner confirmation 2026-11-14
+Owner explicitly confirmed available secret scanning, push protection, Dependabot and Actions restrictions configured; public repository and Apache-2.0 approved. Treat these security features as owner-confirmed, not independently verified. Prior active ruleset and negative CI evidence unchanged. Legacy credential rotation and independent reviewer remain open; no direct-push/destructive tests attempted.

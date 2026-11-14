@@ -1,6 +1,6 @@
 # Product scope and capability map
 
-Proposed, subject to approval. Primary consumers: Asset Management, ITSM, other tenant-aware applications; administrators operate storage via a first-class console.
+Approved direction, 2026-11-14; individual implementation increments require authorization. Primary consumers: Asset Management, ITSM, other tenant-aware applications; administrators operate storage via a first-class console.
 
 | Capability | Initial enterprise release | Later/conditional |
 |---|---|---|

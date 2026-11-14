@@ -1,6 +1,6 @@
 # Delivery roadmap and initial backlog
 
-Proposed. Phase 0 documentation is the current work. No runtime tasks authorized yet. IDs are stable planning identifiers, not created GitHub issues. Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
+Approved direction 2026-11-14. Phase 1 FS-100A only authorized; later increments not authorized. IDs are stable planning identifiers, not created GitHub issues. Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
 
 | ID | Phase | Priority | Deliverable / acceptance |
 |---|---|---|---|
@@ -25,4 +25,4 @@ Proposed. Phase 0 documentation is the current work. No runtime tasks authorized
 Security/reliability built into each phase, not deferred to Phase 5. Sequence may change after audit. No dates/estimates until requirements and team capacity established. For each task record Specified / Implemented / Applied / Verified separately, evidence links and remaining blockers. Phase 0 exit: owner approves explicit ADRs and roadmap; then create implementation issues.
 
 ## First increment refinement
-FS-100A ([scope and acceptance](07_FIRST_IMPLEMENTATION_INCREMENT.md)) splits FS-100 into pure domain/placement and provider SPI foundations; FS-100B follows with service composition and persistence contract design. This is a proposed sequencing refinement, not implementation approval. FS-002 repository rules and CI are partly verified; administrative security readback, licensing and remaining enforcement evidence stay open.
+FS-100A ([scope and acceptance](07_FIRST_IMPLEMENTATION_INCREMENT.md)) splits FS-100 into pure domain/placement and provider SPI foundations; FS-100B follows with service composition and persistence contract design. FS-100A sequencing refinement explicitly approved; FS-100B remains future work. FS-002 repository rules and CI are partly verified; administrative security readback, licensing and remaining enforcement evidence stay open.

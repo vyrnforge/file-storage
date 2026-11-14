@@ -1,9 +1,9 @@
 # FS-100A — domain foundation and placement contract
 
-Status: READY FOR OWNER REVIEW, not authorized or implemented. Parent FS-100; prerequisite FS-000 and security gate. Goal: prove the central architectural invariant before building service infrastructure.
+Status: AUTHORIZED 2026-11-14, implementation in review. Parent FS-100; prerequisite FS-000 and security gate. Goal: prove the central architectural invariant before building service infrastructure.
 
 ## Scope
-Create minimal Java 21/Maven 3.9+ reactor under backend; initial domain and provider-spi modules only (domain independent; SPI depends on domain types as needed). Use package io.vyrnforge.filestorage. Pin Kernel main 0.3.0 where FileReference mapping is needed; testkit only test scope if used. Resolve GitHub Packages with approved read-only credentials or published verified artifact path; no token in repository, no private package access from untrusted forks. Document reproducible dependency resolution before requiring build CI. Pin Maven plugins and test dependencies with version/security review; no Spring Boot or PostgreSQL dependency until subsequent increments need them.
+Create minimal Java 21/Maven 3.9+ reactor under backend; initial domain and provider-spi modules only (domain independent; SPI depends on domain types as needed). Use package io.vyrnforge.filestorage. Pin Kernel main 0.3.0 where FileReference mapping is needed; testkit only test scope if used. Use the public Kernel v0.3.0 release JAR, SHA-256 pinned, installed into local Maven repository by build bootstrap; no token required. Document reproducible dependency resolution before requiring build CI. Pin Maven plugins and test dependencies with version/security review; no Spring Boot or PostgreSQL dependency until subsequent increments need them.
 
 Deliver immutable IDs/value objects, tenant-bound file/version, storage backend/location/policy revision, pinned upload session, placement selection and lifecycle transition rules, neutral provider SPI and deterministic in-memory fixtures. Keep provider SDKs, HTTP, database, console and service authentication out of this increment. No legacy code import. No external storage or live secret.
 
@@ -21,7 +21,7 @@ Deliver immutable IDs/value objects, tenant-bound file/version, storage backend/
 | A09 | Kernel FileReference compatibility test with opaque ID and UUIDv7 tenant |
 | A10 | Maven clean verify plus existing make ci passes; negative regression tests and dependency boundary checks |
 
-## Implementation sequence after approval
+## Implementation sequence
 1. Confirm license/visibility, dependency access strategy and supported toolchain. Add Maven parent + two modules and reproducible CI build in a focused PR; retain stable ci job name.
 2. Add value objects and invariants with unit tests; no runtime framework.
 3. Add neutral provider SPI, placement policy and lifecycle tests; use synthetic fixtures.

@@ -22,3 +22,6 @@ Private security review, credential hygiene, full legacy repository/build manife
 
 ## New repo status
 Specified: initial architecture proposal and acceptance gates. Implemented: documentation skeleton and repository CI/hygiene controls. Applied: active default-branch ruleset and squash-only repository merge settings. Verified: PR/main CI passed, negative CI PR blocked. No service runtime or production security claims. See [repository security evidence](../security/REPOSITORY_SECURITY_EVIDENCE.md). Phase 0 remains open; architecture and first increment require explicit approval.
+
+## Owner approval, 2026-11-14
+DEC-FS001–010, roadmap, Java 21/Maven/Spring Boot/PostgreSQL/Flyway, public visibility and Apache-2.0 approved. Remaining available GitHub security settings owner-confirmed, not independently read back. FS-100A authorized; no later runtime work. Full legacy build, credential hygiene and production targets remain open. See FS-100A implementation evidence for actual test results.

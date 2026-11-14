@@ -1,6 +1,6 @@
 # Phase 0 architecture decision package
 
-Status: PROPOSED — owner approval required. Based on main d3e8de48c39e48ab9469ad7f7553084121ab57a7, project constitution, scope, current state and Kernel v0.3.0. This is not implementation authorization.
+Status: APPROVED direction — owner explicit approval 2026-11-14. Based on main d3e8de48c39e48ab9469ad7f7553084121ab57a7, project constitution, scope, current state and Kernel v0.3.0. FS-100A separately authorized; no later scope authorized.
 
 ## Decision slate
 
@@ -16,7 +16,7 @@ Status: PROPOSED — owner approval required. Based on main d3e8de48c39e48ab9469
 | DEC-FS008 | Client in service repo; optional kernel integration later | Keep core independent; avoid speculative common client abstraction. |
 | DEC-FS009 | Private objects by default, scoped grants, secrets external | Public source does not mean public bytes. Console endpoints need SSRF controls. |
 | DEC-FS010 | Legacy import at existing location, preserve IDs | No forced byte copy; migration conditional on inventory and actual compatibility. |
-| DEC-FS011 | Public repo as currently configured; recommend Apache-2.0 if open-source intent confirmed | License/visibility/versioning require explicit owner choice; no license grant yet. |
+| DEC-FS011 | Public repository; Apache-2.0 approved | License/visibility approved; release versioning remains open. |
 
 ## Proposed minimum release scope
 Two installed providers (S3 plus native OSS), dynamic backend/location/policy management, stable FileReference, secure upload/download and metadata, batch/session/quotas, scan/quarantine, lifecycle/delete/restore, durable audit/events/idempotency, bounded reconciliation, admin console, SDK and operational acceptance. Legacy migration conditional on actual data. Provider replication, advanced search, arbitrary plugins, filesystem protocols and generic workflow excluded.
@@ -30,4 +30,4 @@ Two installed providers (S3 plus native OSS), dynamic backend/location/policy ma
 - Governance: solo reviewer mode is temporary; owner confirms public/private and license, independent reviewer later. Security verification evidence in docs/security/REPOSITORY_SECURITY_EVIDENCE.md.
 
 ## Approval gate
-Approve DEC-FS001–010 as architectural direction, explicitly resolve DEC-FS011 (or authorize a docs-only review until licensing resolved), agree the roadmap and authorize FS-100A specifically. Record decision IDs, approver/date and exceptions in the register. No runtime implementation before that. Later increments need their own acceptance criteria and evidence. Approval of a documentation PR alone is not architecture approval.
+Owner approved DEC-FS001–010, roadmap, public/Apache-2.0 and FS-100A on 2026-11-14. Release numbering remains open. Record decision IDs, approver/date and exceptions in the register. No runtime implementation before that. Later increments need their own acceptance criteria and evidence. Approval of a documentation PR alone is not architecture approval.

@@ -1,6 +1,6 @@
 # Architecture and domain boundaries
 
-Proposed, no implementation. Start with a modular monolith; separate worker execution if scale or reliability requires. Java 21 / Spring Boot and PostgreSQL are candidates, not approved stack; select versions during Phase 0.
+Approved architecture direction; FS-100A only authorized. Start with a modular monolith; separate worker execution if scale or reliability requires. Java 21 / Maven / Spring Boot / PostgreSQL / Flyway approved; exact framework/database versions selected in relevant later increments.
 
 ```mermaid
 flowchart TD
