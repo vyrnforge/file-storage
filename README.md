@@ -2,7 +2,7 @@
 
 Independent, multi-tenant, multi-provider enterprise file storage service for Asset Management, ITSM and other applications.
 
-**Status: Phase 0 — architecture review; no runtime or released version.** This is a documentation-first skeleton, not a working storage service.
+**Status: Phase 1 — FS-100A authorized; domain foundation in review.** No deployed service or released version.
 
 ## Start here
 - [Project constitution](docs/project/00_CONSTITUTION.md)
@@ -24,6 +24,6 @@ Independent, multi-tenant, multi-provider enterprise file storage service for As
 [Wyrmgate IAM](https://github.com/wyrmgate/iam) authenticates identities; [Platform Kernel v0.3.0](https://github.com/vyrnforge/platform-kernel/releases/tag/v0.3.0) provides shared context and reliability contracts; [VyrnForge UI](https://github.com/vyrnforge/vyrnforge-ui) provides console foundations; [VyrnRail](https://github.com/vyrnforge/vyrnrail) informs engineering governance. File Storage owns its own domain, database, storage and release.
 
 ## Layout
-Backend, console, SDK, contracts, deployment and tests are reserved areas with README files. No runtime code, SDK dependencies, infrastructure or migrations are installed. Verify the documentation foundation with `python3 scripts/check-foundation.py`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Backend contains the FS-100A Maven reactor; console, SDK, contracts, deployment and tests remain reserved areas with README files. FS-100A is limited to domain and provider SPI; no service runtime, infrastructure or migrations. Verify with `make ci` (Java 21, Maven 3.9+, public Kernel release artifact). See [FS-100A evidence](docs/project/08_FS100A_EVIDENCE.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Public repository: never commit secrets, private legacy source, real file content or production configuration. License selection remains an owner decision; no license grant is implied by this skeleton.
+Public repository: never commit secrets, private legacy source, real file content or production configuration. Licensed under [Apache-2.0](LICENSE).

@@ -1,6 +1,6 @@
 # Domain and placement invariants
 
-Proposed design contract for FS-100A. No database or public API schema is defined here.
+Approved direction for FS-100A; implementation reviewed against acceptance tests. No database or public API schema is defined here.
 
 ## Identity and ownership
 FileId is a nonblank opaque string, never derived from bucket/key; preserve legacy IDs. Tenant ownership is mandatory for tenant-owned files; use kernel-compatible UUIDv7 tenant IDs. FileVersionId, StorageLocationId and UploadSessionId are independent identities; new platform-owned IDs may use UUIDv7. FileReference maps logical ID, tenant and logical service identifier only plus allowed snapshots; never expose locators. FileVersion content is immutable after verification; metadata changes are separate.
