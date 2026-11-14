@@ -21,4 +21,4 @@ Legacy source exposes /v1/files operations for listing, usage, reconciliation, d
 Private security review, credential hygiene, full legacy repository/build manifest and version inventory, regression execution, production data/traffic and backup evidence remain open. Legacy source is private input; retain it separately. Do not assume active production data or a working test suite.
 
 ## New repo status
-Specified: initial architecture proposal and acceptance gates. Implemented: documentation skeleton only. Applied/Verified: no service or hosted governance claims. Update this file as evidence changes.
+Specified: initial architecture proposal and acceptance gates. Implemented: documentation skeleton and repository CI/hygiene controls. Applied: active default-branch ruleset and squash-only repository merge settings. Verified: PR/main CI passed, negative CI PR blocked. No service runtime or production security claims. See [repository security evidence](../security/REPOSITORY_SECURITY_EVIDENCE.md). Phase 0 remains open; architecture and first increment require explicit approval.

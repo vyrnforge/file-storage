@@ -23,3 +23,6 @@ Proposed. Phase 0 documentation is the current work. No runtime tasks authorized
 | FS-810 | Later | P2 | Optional kernel client adapter decision based on real usage |
 
 Security/reliability built into each phase, not deferred to Phase 5. Sequence may change after audit. No dates/estimates until requirements and team capacity established. For each task record Specified / Implemented / Applied / Verified separately, evidence links and remaining blockers. Phase 0 exit: owner approves explicit ADRs and roadmap; then create implementation issues.
+
+## First increment refinement
+FS-100A ([scope and acceptance](07_FIRST_IMPLEMENTATION_INCREMENT.md)) splits FS-100 into pure domain/placement and provider SPI foundations; FS-100B follows with service composition and persistence contract design. This is a proposed sequencing refinement, not implementation approval. FS-002 repository rules and CI are partly verified; administrative security readback, licensing and remaining enforcement evidence stay open.
