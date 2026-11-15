@@ -774,4 +774,35 @@ class DurableUploadAuthorityTest {
         assertEquals(VersionState.AVAILABLE,secured.session("user",TENANT,null,view.session()).value().versionState());
         assertEquals(3,fixture.opens.get());assertEquals(3,fixture.closes.get());
     }
+
+    @Test void explicitWorkerRuntimeSchedulesDurableVerificationAndScan() throws Exception {
+        allow();var issued=issue();authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        var scans=scans(CLOCK,3);var work=completionWork(CLOCK,scans);
+        var fixture=new IntegrityFixture();fixture.bytes="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var commands=new CompletionCommands(secured,new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5),work);
+        commands.complete("user",TENANT,view.session(),sha256(fixture.bytes),null);
+        var verify=new UploadVerificationWorker(work,fixture,new TransferLimits(1024,1,1024,Duration.ofSeconds(5)),CLOCK);
+        var scan=worker(scans,fixture,scanner(Scan.CLEAN,"text/plain"),CLOCK);
+        var app=RuntimeApplication.application(UploadWorkerConfiguration.class);
+        app.addInitializers(ctx->{
+            ctx.getBeanFactory().registerSingleton("uploadVerificationWorker",verify);
+            ctx.getBeanFactory().registerSingleton("uploadScanWorker",scan);
+        });
+        try(var ctx=app.run("--server.port=0","--fs.role=WORKER","--fs.upload-worker.delay-ms=25")){
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(8);
+            while(scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'")==0&&System.nanoTime()<deadline)
+                Thread.sleep(25);
+            assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'"));
+            assertEquals(2,scalar("SELECT count(*) FROM fs.storage_operation WHERE status='SUCCEEDED'"));
+            assertEquals(2,fixture.opens.get());assertEquals(2,fixture.closes.get());
+        }
+        var wrong=RuntimeApplication.application(UploadWorkerConfiguration.class);
+        wrong.addInitializers(ctx->{
+            ctx.getBeanFactory().registerSingleton("uploadVerificationWorker",verify);
+            ctx.getBeanFactory().registerSingleton("uploadScanWorker",scan);
+        });
+        assertThrows(RuntimeException.class,()->{try(var ctx=wrong.run("--server.port=0","--fs.role=API","--fs.upload-worker.delay-ms=25")){
+            fail("API must not run upload workers");
+        }});
+    }
 }

@@ -102,3 +102,5 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 2026-11-15: PR #74 approved/merged cbc61eff70a98243eb807e0a5f3130ca7da61acd; CI 43702277359 passed 155 tests. #57 isolated native OSS/combined integration accepted; live gates deferred. #31 authorized: V6 durable integrity request and independently measured matching evidence in review, no AVAILABLE transition. [Upload integrity](../architecture/24_UPLOAD_INTEGRITY.md).
 
 2026-11-15: PR #75 approved/merged 15015ec1c555f80ef761e444c57dc148eb7fbb05; CI 43703039804 passed 157 tests. #31 durable integrity accepted. V7 isolated scan lifecycle and operation lease fencing in review. [Scan lifecycle](../architecture/25_UPLOAD_SCAN_LIFECYCLE.md). Synthetic scanner only; no production availability or deployment.
+
+2026-11-15: PR #76 approved/merged 05b6b8d87b69c2af37ff4ec6492d2ae34f44fac9; CI 43704441936 passed 165 tests. #31 V7 scan lifecycle accepted; isolated completion commands and V3 durable verification worker in review. [Completion API/worker](../architecture/26_COMPLETION_API_WORKER.md). No production availability claim.

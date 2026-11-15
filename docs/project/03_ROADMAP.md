@@ -111,3 +111,5 @@ PR #73 accepted/merged 771ed70 (154 tests). #57 isolated native OSS gateway and 
 PR #74 accepted/merged cbc61ef (155 verified tests); isolated #57 accepted. Owner authorized #31: first V6 integrity evidence and read-only reconciliation; next durable verification/scan lifecycle; #32 scanner decisions, #33 quota, #35 download and live/deployment gates remain separate.
 
 PR #75 accepted/merged 15015ec (157 verified tests). #31 next V7 durable scan queue, trusted exact-content verdict and lifecycle CAS; then completion HTTP, worker scheduling/expiry/reconciliation and quota #33. #32 production scanner/content policy and #35 download remain gated.
+
+PR #76 accepted/merged 05b6b8d (165 verified tests). #31 next isolated upload commands, durable verification and scan handoff, opt-in worker scheduling; terminal reconciliation/reissue/cleanup remains, #32/#33 production policy and #35 download separate.

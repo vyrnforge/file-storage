@@ -54,7 +54,7 @@ public final class JdbcCompletionWork {
                 return existing(c,pin);
             }
             var job=verification.request(c,events,audits,caller,session,digest,correlation);
-            UUID id=operations.enqueue(c,new JdbcOperations.Request(caller.tenant(),pin.file(),pin.version(),
+            operations.enqueue(c,new JdbcOperations.Request(caller.tenant(),pin.file(),pin.version(),
                     pin.locator().location(),JdbcOperations.Kind.VERIFY_UPLOAD,session.value().toString(),
                     correlation.correlationId(),attempts));
             return existing(c,job.pin());

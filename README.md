@@ -82,3 +82,5 @@ PR #73 accepted/merged 771ed70 (154 tests). [Native OSS and combined gateway](do
 PR #74 accepted/merged cbc61ef (155 tests). [Upload integrity verification](docs/architecture/24_UPLOAD_INTEGRITY.md) — #31 V6 durable matching evidence in review; no available state or scan verdict.
 
 PR #75 accepted/merged 15015ec (157 tests). [Durable scan lifecycle](docs/architecture/25_UPLOAD_SCAN_LIFECYCLE.md) — #31 isolated scan work and guarded availability in review; no real scanner/deployment.
+
+PR #76 accepted/merged 05b6b8d (165 tests). [Upload completion commands and worker](docs/architecture/26_COMPLETION_API_WORKER.md) — isolated HTTP/durable verification orchestration in review.
