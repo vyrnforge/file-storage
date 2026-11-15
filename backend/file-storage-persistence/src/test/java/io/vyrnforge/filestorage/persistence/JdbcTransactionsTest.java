@@ -449,14 +449,14 @@ class JdbcTransactionsTest {
     void backendActivationFailureRollsBackDrain() throws SQLException {
         draft(2, true);
         sql("""
-                CREATE FUNCTION fs.test_reject_activation() RETURNS trigger LANGUAGE plpgsql AS $
+                CREATE FUNCTION fs.test_reject_activation() RETURNS trigger LANGUAGE plpgsql AS $test$
                 BEGIN
                     IF NEW.config_revision = 2 AND NEW.status = 'ACTIVE' THEN
                         RAISE EXCEPTION 'synthetic activation failure' USING ERRCODE = '23514';
                     END IF;
                     RETURN NEW;
                 END;
-                $
+                $test$
                 """);
         try {
             sql("""
