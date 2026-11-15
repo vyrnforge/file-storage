@@ -6,7 +6,7 @@ import sys
 root = Path(__file__).resolve().parents[1] / "backend"
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 allowed = {
-    "file-storage-runtime": {("io.vyrnforge.filestorage", "file-storage-persistence", "compile"), ("org.springframework.boot", "spring-boot-starter-webmvc", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
+    "file-storage-runtime": {("org.testcontainers", "postgresql", "test"), ("io.vyrnforge.filestorage", "file-storage-persistence", "compile"), ("org.springframework.boot", "spring-boot-starter-webmvc", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-domain": {("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-application": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-security": {("com.nimbusds", "nimbus-jose-jwt", "compile"), ("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
@@ -33,7 +33,7 @@ for module, expected in allowed.items():
                 if module == "file-storage-provider-s3":
                     prefixes += ("io.vyrnforge.filestorage.spi.", "software.amazon.awssdk.")
                 if module == "file-storage-security":
-                    prefixes += ("io.vyrnforge.filestorage.application.", "com.nimbusds.")
+                    prefixes += ("io.vyrnforge.filestorage.application.", "io.vyrnforge.filestorage.security.", "com.nimbusds.")
                 if module == "file-storage-persistence":
                     prefixes += ("javax.sql.", "org.flywaydb.", "io.vyrnforge.filestorage.application.", "io.vyrnforge.filestorage.security.")
                 if module == "file-storage-runtime":
