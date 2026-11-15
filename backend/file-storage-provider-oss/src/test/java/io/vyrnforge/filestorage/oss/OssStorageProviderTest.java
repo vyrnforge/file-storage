@@ -4,7 +4,7 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.ClientBuilderConfiguration;
 import com.aliyun.oss.common.auth.DefaultCredentialProvider;
-import com.aliyun.oss.common.auth.SignVersion;
+import com.aliyun.oss.common.comm.SignVersion;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.vyrnforge.filestorage.domain.StorageModel.*;

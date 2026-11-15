@@ -59,7 +59,7 @@ public final class OssStorageProvider implements StorageProvider, AutoCloseable 
     private final Duration cursorTtl;
     private final Map<String, Cursor> cursors = new LinkedHashMap<>();
 
-    public OssStorageProvider(S3Client client, Map<LocationId, Location> locations, Path spool,
+    public OssStorageProvider(OSS client, Map<LocationId, Location> locations, Path spool,
                              long maxBytes, int maxConcurrentSpools, Duration maxTimeout,
                              int maxCursors, Duration cursorTtl, int maxRequests) {
         this.client = Objects.requireNonNull(client);

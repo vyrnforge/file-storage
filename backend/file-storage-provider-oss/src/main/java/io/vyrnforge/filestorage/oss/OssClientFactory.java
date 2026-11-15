@@ -4,7 +4,7 @@ import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.ClientBuilderConfiguration;
 import com.aliyun.oss.common.auth.CredentialsProvider;
-import com.aliyun.oss.common.auth.SignVersion;
+import com.aliyun.oss.common.comm.SignVersion;
 import io.vyrnforge.filestorage.domain.StorageModel.Target;
 import io.vyrnforge.filestorage.domain.StorageModel.Provider;
 import io.vyrnforge.filestorage.spi.StorageProvider.ErrorCode;
