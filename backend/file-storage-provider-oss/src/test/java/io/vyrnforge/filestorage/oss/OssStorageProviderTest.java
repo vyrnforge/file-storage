@@ -146,8 +146,17 @@ class OssStorageProviderTest extends ProviderContract {
             switch (exchange.getRequestMethod()) {
                 case "PUT" -> {
                     byte[] bytes = exchange.getRequestBody().readAllBytes();
+                    String length = exchange.getRequestHeaders().getFirst("Content-Length");
+                    String encoding = exchange.getRequestHeaders().getFirst("Transfer-Encoding");
+                    // OSS supports ordinary Content-Length and chunked upload.
+                    // The SDK may frame a zero-byte body as empty chunked data.
+                    // Never accept an ambiguous or mismatching nonempty length.
+                    boolean exact = Integer.toString(bytes.length).equals(length)
+                            && encoding == null;
+                    boolean emptyChunked = bytes.length == 0 && length == null
+                            && "chunked".equalsIgnoreCase(encoding);
                     if (!"true".equals(exchange.getRequestHeaders().getFirst("x-oss-forbid-overwrite"))
-                            || !Integer.toString(bytes.length).equals(exchange.getRequestHeaders().getFirst("Content-Length"))) {
+                            || !(exact || emptyChunked)) {
                         error(exchange, 400, "InvalidArgument");
                     } else if (OBJECTS.putIfAbsent(identity, bytes) != null) {
                         error(exchange, 409, "FileAlreadyExists");

@@ -36,3 +36,5 @@ The suite writes only unique synthetic contract prefixes and deletes its own tes
 CI 43676179408 compiled native SDK code but failed test admission because the SDK returned absent Status for the empty unversioned configuration. Corrected to accept the documented successful empty response, reject enabled/suspended/unknown. No tests disabled.
 
 CI 43676317334: 11/12 OSS loopback tests passed; zero-byte upload failed because native SDK InputStream request did not satisfy the fixture's exact Content-Length requirement. Use SDK file-based PutObjectRequest with the already validated staged file; preserve strict wire test, conditional header, exact bytes and cleanup. Fresh CI required.
+
+CI 43676444118 still failed only the zero-byte request against the fixture's strict Content-Length rule. Correct fixture HTTP framing: accept exact Content-Length or an explicitly empty chunked body, as OSS PutObject supports chunked transfer; require the native forbid-overwrite header and exact decoded bytes. Shared ProviderContract zero-byte read-back remains unchanged. No relaxation of input-size or overwrite guarantees. Fresh CI required.
