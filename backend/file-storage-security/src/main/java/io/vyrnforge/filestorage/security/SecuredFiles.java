@@ -159,8 +159,9 @@ public final class SecuredFiles {
     }
     private boolean matches(Caller caller,Action action,String purpose,Resource resource){
         try{
+            List<Grant> current = List.copyOf(grants.current(caller));
             Instant now=clock.instant();
-            for(Grant g:List.copyOf(grants.current(caller))){
+            for(Grant g:current){
                 if(!g.active(now)||!g.tenant().equals(caller.tenant())||!g.actor().equals(caller.actor())
                         ||!g.consumer().equals(caller.consumer())||g.action()!=action||!g.purpose().equals(purpose))continue;
                 if(g.scope()==GrantScope.INITIATE_PURPOSE&&resource==null)return true;
