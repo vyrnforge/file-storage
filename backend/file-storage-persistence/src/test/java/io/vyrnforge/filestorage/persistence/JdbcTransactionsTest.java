@@ -1218,4 +1218,128 @@ class JdbcTransactionsTest {
         }));
         assertEquals(1, count("file"));
     }
+
+    private static JdbcRegistry registry() {
+        return new JdbcRegistry(dataSource, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static Target registryTarget(Provider provider, String endpoint) {
+        return new Target(provider, java.net.URI.create(endpoint), "test", Addressing.AUTO);
+    }
+
+    private static CredentialRef registryRef(String version) {
+        return new CredentialRef("ref:synthetic/registry/" + version);
+    }
+
+    @Test
+    void registryRegistersTwoBackendsAndRejectsOverlappingLocations() throws SQLException {
+        var registry = registry();
+        var ctx = CorrelationContext.create();
+        var s3 = registry.registerBackend(ADMIN, ctx,
+                registryTarget(Provider.S3, "https://REGISTRY.example.test:443/"), registryRef("v1"));
+        var oss = registry.registerBackend(ADMIN, ctx,
+                registryTarget(Provider.OSS, "https://oss-registry.example.test"), registryRef("v1"));
+        var location = registry.registerLocation(ADMIN, ctx, s3, "registry-bucket", "files");
+        var other = registry.registerLocation(ADMIN, ctx, oss, "registry-bucket", "files");
+        assertNotEquals(s3, oss);
+        assertNotEquals(location, other);
+        var second = registry();
+        assertEquals(List.of(new JdbcRegistry.LocationView(location, s3)), second.locations(s3, null, 10));
+        assertEquals(List.of(new JdbcRegistry.LocationView(other, oss)), second.locations(oss, null, 10));
+        assertTrue(second.active(s3).isEmpty());
+        assertEquals(BackendStatus.DRAFT, second.history(s3, 0, 1).getFirst().status());
+        assertEquals(Provider.OSS, second.history(oss, 0, 1).getFirst().provider());
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.registerLocation(ADMIN, ctx, s3, "registry-bucket", "files/nested")).code());
+        assertEquals(Code.INVALID, assertThrows(Failure.class, () ->
+                registry.registerLocation(ADMIN, ctx, s3, "registry-bucket", "../escape")).code());
+        assertEquals("23514", assertThrows(SQLException.class, () ->
+                sql("UPDATE fs.storage_location SET bucket='other-bucket' WHERE location_id=?", location.value())).getSQLState());
+        assertEquals("23514", assertThrows(SQLException.class, () ->
+                sql("UPDATE fs.backend SET endpoint='https://other.example.test' WHERE backend_id=?", s3.value())).getSQLState());
+        assertEquals(2, intents("platform_event_outbox", "event_type", "file-storage.backend.registered"));
+        assertEquals(2, intents("platform_audit_event", "action", "file-storage.location.registered"));
+        assertEquals(0, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type IN ('file-storage.backend.registered','file-storage.location.registered') AND (payload_json::text LIKE '%ref:%' OR payload_json::text LIKE '%registry-bucket%' OR payload_json::text LIKE '%https://%')"));
+    }
+
+    private static final class SyntheticCredential implements AutoCloseable {
+        boolean closed;
+        @Override public void close() { closed = true; }
+    }
+
+    @Test
+    void registryRotationPinsExactRevisionAndFailsClosedOnRevocation() throws SQLException {
+        var registry = registry();
+        var ctx = CorrelationContext.create();
+        var backend = registry.registerBackend(ADMIN, ctx,
+                registryTarget(Provider.S3, "https://rotation.example.test"), registryRef("v1"));
+        var location = registry.registerLocation(ADMIN, ctx, backend, "rotation-bucket", "files");
+        // Synthetic trusted validator fixture only; FS-210B owns actual validation.
+        sql("UPDATE fs.backend_revision SET validated_revision=1 WHERE backend_id=? AND config_revision=1", backend.value());
+        configuration().activateBackend(ADMIN, ctx, backend, 0, 1);
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.registerLocation(ADMIN, ctx, backend, "rotation-bucket", "new")).code());
+        assertEquals(2, registry.reviseCredential(ADMIN, ctx, backend, 1, registryRef("v2")));
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.reviseCredential(ADMIN, ctx, backend, 1, registryRef("stale"))).code());
+        assertEquals(1, registry().active(backend).orElseThrow().revision());
+        var seen = new ArrayList<CredentialRef>();
+        io.vyrnforge.filestorage.application.CredentialResolver<SyntheticCredential> resolver = ref -> {
+            seen.add(ref);
+            return new SyntheticCredential();
+        };
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class, () ->
+                registry.resolveExisting(backend, 2, location, resolver)).code());
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class, () ->
+                registry.resolveExisting(backend, 1, new LocationId(OL), resolver)).code());
+        assertTrue(seen.isEmpty());
+        sql("UPDATE fs.backend_revision SET validated_revision=2 WHERE backend_id=? AND config_revision=2", backend.value());
+        configuration().activateBackend(ADMIN, ctx, backend, 1, 2);
+        var old = registry.resolveExisting(backend, 1, location, resolver);
+        try (old; var current = registry.resolveExisting(backend, 2, location, resolver)) {
+            assertEquals(List.of(registryRef("v1"), registryRef("v2")), seen);
+            assertEquals(old.location(), current.location());
+            assertEquals("Resolved[redacted]", old.toString());
+        }
+        assertTrue(old.credential().closed);
+        assertEquals(2, registry().active(backend).orElseThrow().revision());
+        assertEquals(BackendStatus.DRAINING, registry.history(backend, 2, 1).getFirst().status());
+        seen.clear();
+        var denied = assertThrows(Failure.class, () -> registry.resolveExisting(backend, 1, location, ref -> {
+            seen.add(ref);
+            throw new IllegalStateException("synthetic secret-store error");
+        }));
+        assertEquals(Code.DENIED, denied.code());
+        assertEquals(List.of(registryRef("v1")), seen);
+        // Rollback is a new candidate, not reactivation or rewriting history.
+        assertEquals(3, registry.reviseCredential(ADMIN, ctx, backend, 2, registryRef("v1")));
+        sql("UPDATE fs.backend_revision SET validated_revision=3 WHERE backend_id=? AND config_revision=3", backend.value());
+        configuration().activateBackend(ADMIN, ctx, backend, 2, 3);
+        assertEquals(3, registry().active(backend).orElseThrow().revision());
+        try (var rolledBack = registry.resolveExisting(backend, 3, location, resolver)) {
+            assertEquals(3, rolledBack.revision());
+            assertEquals(registryRef("v1"), seen.getLast());
+        }
+    }
+
+    @Test
+    void registryRequiredIntentFailureRollsBackRegistration() throws SQLException {
+        var registry = registry();
+        long backends = count("backend");
+        long revisions = count("backend_revision");
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_test_registry CHECK (event_type <> 'file-storage.backend.registered') NOT VALID");
+        try {
+            assertThrows(Failure.class, () -> registry.registerBackend(ADMIN, CorrelationContext.create(),
+                    registryTarget(Provider.S3, "https://rollback.example.test"), registryRef("v1")));
+            assertEquals(backends, count("backend"));
+            assertEquals(revisions, count("backend_revision"));
+            assertEquals(0, intents("platform_audit_event", "action", "file-storage.backend.registered"));
+        } finally {
+            sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_test_registry");
+        }
+        registry.registerBackend(ADMIN, CorrelationContext.create(),
+                registryTarget(Provider.S3, "https://rollback.example.test"), registryRef("v1"));
+        assertEquals(backends + 1, count("backend"));
+    }
+
 }
