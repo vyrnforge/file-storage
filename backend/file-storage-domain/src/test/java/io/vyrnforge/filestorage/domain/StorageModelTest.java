@@ -103,6 +103,8 @@ class StorageModelTest {
         assertFalse(REF.toString().contains("synthetic"));
     }
     @Test void a09_kernelReferenceActualArtifact(){
+        assertThrows(IllegalArgumentException.class, () -> new FileId("x".repeat(513)));
+        assertEquals("x".repeat(512), File.create(new FileId("x".repeat(512)), T, "file").reference().fileId());
         FileReference ref=FILE.reference();assertEquals(T.value(),ref.ownerTenantId());assertEquals("file-storage",ref.storageService());
         assertEquals("legacy:opaque-42",ref.fileId());assertNull(ref.name());assertNull(ref.mimeType());assertNull(ref.size());
         assertEquals(Set.of("fileId","ownerTenantId","storageService","name","mimeType","size","createdAt"),

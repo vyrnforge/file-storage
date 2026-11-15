@@ -9,7 +9,7 @@ Owner approval recorded 2026-11-14 (explicit conversation instruction). DEC-FS00
 | DEC-FS003 | Stable file ID, separate physical locator, pinned sessions | Approved | Safe provider change and migration |
 | DEC-FS004 | Console-managed backend/location/policy revisions | Approved | No consumer deployment for new configured backend |
 | DEC-FS005 | Compiled S3 and native OSS adapters, capability matrix | Approved | No arbitrary runtime executable plugins |
-| DEC-FS006 | Kernel 0.3.0 and IAM boundary; optional JDBC | Approved | Shared contracts, domain owns policy |
+| DEC-FS006 | Kernel 0.3.2 and IAM boundary; optional JDBC | Approved | Shared contracts, domain owns policy |
 | DEC-FS007 | Java 21/Maven/Spring Boot/PostgreSQL/Flyway | Approved | Legacy compatibility and kernel fit; exact framework/database/SDK versions later |
 | DEC-FS008 | Client in service repo; optional kernel adapter later | Approved | Avoid cyclic dependency and extra distribution |
 | DEC-FS009 | Private-by-default data, public repo only sanitized docs | Approved | Security and least privilege |
@@ -29,4 +29,9 @@ Decision approval must record date, approver, rationale, alternatives, consequen
 
 2026-11-14: Owner completed FS-100B review and directed proceeding to next increment. PR #6 merge verified. Interpreted as FS-110 authorization within approved DEC-FS006/009, not new policy exceptions or later work. FS-110A implements deny-by-default exact grants and trusted verifier/binding ports; live issuer/audience, machine identity, grant administration and production integration remain unresolved (FS-110B). See [security contract](../security/FS110_IDENTITY_AUTHORIZATION.md).
 
+
+## Approved dependency maintenance amendment to DEC-FS006
+2026-11-15: Owner authorized completion and merge of the kernel remediation adoption. Upgrade from io.vyrnforge.platform:platform-kernel:0.3.0 to io.github.vyrnforge:platform-kernel:0.3.2 across all current modules including FS-110A security. Rationale: use verified signed public artifact and audit fixes; alternatives retain unpatched artifact or source candidate. Preserve Java imports, v0.2 wire contracts, opaque IDs (512-character released FileReference limit), domain ownership and existing security rules. Remove old manual bootstrap; use anonymous Maven Central and strict checksums. PR #8 initial FS-100B CI passed 18 tests; fresh combined CI required. No authorization of later product increments or deployment.
+
 2026-11-15: Owner directed next after PR #7 merged. Implement FS-110B verifier slice only. Implementation choice: Nimbus JOSE+JWT 10.10 (Apache-2.0), explicit trusted RSA key snapshots, exact single-client access-token profile matching pinned Wyrmgate issuer. Dedicated File Storage client registration is proposed deployment direction, not applied or approved IAM configuration. No new machine/delegation policy, cross-repo changes, deployment or FS-120 authorization.
+2026-11-15: Resolved PR #9 conflicts against merged PR #8; retain approved Kernel 0.3.2 Central coordinates and all FS-110B changes. No new scope, merge or deployment authorization.

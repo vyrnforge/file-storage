@@ -31,8 +31,10 @@ FS-100A: PR #5 merged, hosted final CI passed, local verification outstanding. F
 
 FS-110 is split into A (Kernel context, binding/entitlement/domain authorization and negative tests) and B (actual credential verifier, authoritative binding/grant integration, runtime endpoint wiring and environment verification). A does not close B or the overall FS-110 production gate.
 
-FS-110A: hosted synthetic acceptance I01–I08 passed (25 total tests) in run 43611269131; review/merge and local verification pending. FS-110B: actual resource audience/authorized client binding and verifier integration not yet resolved. See security contract for precise source findings; FS-120 remains unstarted.
+FS-110A: hosted synthetic acceptance I01–I08 passed (25 total tests) in run 43611269131; merged PR #7; local verification pending. FS-110B: actual resource audience/authorized client binding and verifier integration not yet resolved. See security contract for precise source findings; FS-120 remains unstarted.
 
 2026-11-15: FS-110A PR #7 merged; FS-110B verifier slice authorized by owner continuation. Verify real RSA signatures, dedicated audience/client profile and trusted key rotation snapshots. Live registration, JWKS transport and authoritative bindings/grants remain open; FS-110 overall production gate not closed. FS-120 not authorized.
 
 FS-110B verifier slice implemented on PR #9; hosted CI 43665624103 passed 31 tests. Remaining FS-110B deployment/integration gates: exact intended audience/client registration, live JWKS transport/rotation, authoritative identity/bindings/grants and machine/delegation, runtime wiring and staging evidence. Do not mark overall FS-110 complete. FS-120 separate approval.
+
+PR #8 Kernel 0.3.2 maintenance merged; PR #9 synchronized with main. Combined CI required; historical 0.3.0 evidence not a substitute.

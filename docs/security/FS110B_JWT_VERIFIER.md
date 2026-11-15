@@ -21,3 +21,6 @@ Owner/IAM operator must confirm intended client registration and live issuer/JWK
 
 ## Hosted verification
 [CI 43665624103](https://github.com/vyrnforge/file-storage/actions/runs/43665624103) at 1526242d5191216b527c49f7c6390d2bcf68ceb1 succeeded. Actual job logs show 31 tests (8 domain, 2 SPI, 8 application, 7 security facade, 6 JWT verifier), zero failures/errors/skips; four-module Maven BUILD SUCCESS, Kernel SHA-256, dependency boundaries and hygiene passed. J01–J07 hosted acceptance passed with generated RSA keys and trusted synthetic authority snapshots; not a live IAM test. Local Java 21 present but Maven absent and GitHub DNS unresolved, rechecked 2026-11-15. PR #9 unmerged. Live FS-110B gate remains open; no waiver or FS-120 authorization.
+
+## Kernel maintenance synchronization
+PR #8 merged into main at 43f1c5552a3202ad0724e516fe51c03886373591 after this branch was created. The resolved branch uses io.github.vyrnforge:platform-kernel:0.3.2 from Maven Central and strict checksums, preserves FileReference length validation, and retains Nimbus JWT verification. The earlier CI evidence is historical (Kernel 0.3.0); combined head CI required.

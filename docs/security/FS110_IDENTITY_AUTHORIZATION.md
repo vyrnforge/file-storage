@@ -35,3 +35,5 @@ FS-110A tests use synthetic verifier, binding, membership/entitlement/grant and 
 
 ## Subsequent merge and verifier slice
 PR #7 merged at 69d0ef978a5f04c283331851c00368632639de5c; final CI [43611373559](https://github.com/vyrnforge/file-storage/actions/runs/43611373559) succeeded. FS-110B implements concrete cryptographic verification using trusted JWKS snapshots; live IAM integration remains open. See [verifier contract](FS110B_JWT_VERIFIER.md).
+
+Current dependency after PR #8: Kernel 0.3.2 from Maven Central; original 0.3.0 references above describe historical FS-110A verification.

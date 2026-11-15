@@ -1,6 +1,6 @@
 # Current state and legacy capability baseline
 
-Date: 2026-11-14. Phase 1 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier on review branch. Java/Maven domain, provider SPI, application and security; no service runtime, database, deployment or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
+Date: 2026-11-15. Phase 1 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier on review branch. Java/Maven domain, provider SPI, application and security; no service runtime, database, deployment or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
 
 ## Legacy inventory (sanitized)
 | Capability | Legacy evidence | Proposed treatment |
@@ -32,8 +32,11 @@ FS-100B: product outcome, decision rules, acceptance scenarios, application use 
 
 FS-100B PR #6 merged at 0f08b3054c6835c8f40913c38ca09c8d359d6ce1; final hosted CI 43610665807 passed. FS-110A implements actual Kernel pipeline, trusted verifier/binding ports and exact file grants; no live JWT verifier, IAM deployment, durable grant store or HTTP. See [identity security contract](../security/FS110_IDENTITY_AUTHORIZATION.md). Local full build remains outstanding; Java 21 present, Maven absent and GitHub DNS unavailable in execution environment.
 
-FS-110A hosted CI 43611269131 passed 25 tests, four-module Maven reactor, checksum and dependency checks. PR #7 open; local verification and FS-110B live verifier/authority integration pending. Wyrmgate source shows aud=clientId, not a separate storage resource audience; no arbitrary client login token accepted by design.
+FS-110A hosted CI 43611269131 passed 25 tests, four-module Maven reactor, checksum and dependency checks. PR #7 merged; local verification and FS-110B live verifier/authority integration pending. Wyrmgate source shows aud=clientId, not a separate storage resource audience; no arbitrary client login token accepted by design.
 
 2026-11-15: PR #7 merged at 69d0ef978a5f04c283331851c00368632639de5c; final CI 43611373559 successful. Owner directed next. FS-110B verifier slice uses Nimbus JOSE+JWT and explicit trusted JWKS snapshots, tests real signed synthetic access tokens. Live IAM registration/key transport/authority store remain unconfigured. See [FS-110B](../security/FS110B_JWT_VERIFIER.md). FS-120 not started.
 
 FS-110B verifier implementation hosted CI 43665624103 passed 31 tests (including 6 real-signature test methods), no failures/errors/skips. PR #9 review pending; no live Wyrmgate registration, retrieval, binding or HTTP runtime. Local toolchain/DNS gap reconfirmed.
+
+2026-11-15: Owner approved Kernel v0.3.2 dependency maintenance. PR #8 initially passed 18 tests against Central on the FS-100B baseline; rebased/merged with current FS-110A to preserve all security work. Fresh CI required on combined revision. No live verifier, DB or deployment claim.
+PR #8 merged at 43f1c5552a3202ad0724e516fe51c03886373591. PR #9 conflict resolution preserves Kernel 0.3.2 Central resolution, FileReference length enforcement and JWT verifier. Previous FS-110B CI used Kernel 0.3.0; combined head requires fresh CI.
