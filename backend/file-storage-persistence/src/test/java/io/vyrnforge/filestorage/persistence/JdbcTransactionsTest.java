@@ -276,7 +276,7 @@ class JdbcTransactionsTest {
         StorageMigrations.migrate(dataSource);
         try (var connection = dataSource.getConnection();
              var statement = connection.createStatement();
-             var rs = statement.executeQuery("SELECT count(*) FROM fs.flyway_schema_history WHERE version IN ('1', '2', '3', '4') AND success")) {
+             var rs = statement.executeQuery("SELECT count(*) FROM fs.flyway_schema_history WHERE version IN ('1', '2', '3', '4', '5') AND success")) {
             rs.next();
             assertEquals(4, rs.getLong(1));
         }
