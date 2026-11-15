@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
 final class OpenApiContract {
     private OpenApiContract() {}
     private static final JsonMapper JSON = JsonMapper.builder().build();
-    private static final List<String> DOCUMENTS = List.of("file-storage-v1.yaml", "policy-admin-v1.yaml", "backend-admin-v1.yaml");
+    private static final List<String> DOCUMENTS = List.of("file-storage-v1.yaml", "policy-admin-v1.yaml", "backend-admin-v1.yaml", "upload-commands-v1.yaml");
 
     private record Operation(Map<?, ?> document, Map<?, ?> operation) {}
 
@@ -36,6 +36,7 @@ final class OpenApiContract {
     static Set<String> operations() throws Exception {
         Set<String> result = new HashSet<>();
         for (String name : DOCUMENTS) {
+            if (name.equals("upload-commands-v1.yaml")) continue; // separate opt-in route group
             var doc = document(name);
             assertEquals("3.1.0", doc.get("openapi"));
             for (var path : map(doc.get("paths")).entrySet()) {
