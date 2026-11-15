@@ -147,6 +147,11 @@ class DurableUploadAuthorityTest {
         allow();var issued=issue();
         sql("UPDATE fs.file_grant SET revoked=true WHERE action='UPLOAD_TRANSFER'");
         deny(authority(),"user",issued.handle());
+        // Even a caller authorized before revocation cannot consume against a now-revoked local grant.
+        var handles = new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5);
+        var caller = new Caller(TENANT,USER.actorId(),"asset");
+        var denied = assertThrows(Failure.class,()->handles.claim(issued.handle(),caller,view.session(),CorrelationContext.create()));
+        assertEquals(Code.DENIED,denied.code());
         sql("UPDATE fs.file_grant SET revoked=false WHERE action='UPLOAD_TRANSFER'");
         deny(authority(Clock.fixed(NOW.plusSeconds(60),ZoneOffset.UTC)),"user",issued.handle());
         assertEquals(0,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));

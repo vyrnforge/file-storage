@@ -48,7 +48,7 @@ public final class JdbcUploadTransfers {
                       long revision, Locator locator, long size, Instant expiresAt) {
         @Override public String toString() { return "Pin[redacted]"; }
     }
-    private record Resource(Pin pin, Instant sessionExpiry) {}
+    private record Resource(Pin pin, Instant sessionExpiry, String purpose) {}
 
     public Issued issue(Caller caller, SessionId session, CorrelationContext correlation) {
         Objects.requireNonNull(caller); Objects.requireNonNull(session); Objects.requireNonNull(correlation);
@@ -58,6 +58,7 @@ public final class JdbcUploadTransfers {
         byte[] hash = hash(handle);
         return execute((connection, events, audits) -> {
             Resource resource = resource(connection, caller, session);
+            lockCurrentGrant(connection, resource);
             Instant now = now();
             Instant expiry = now.plus(ttl).truncatedTo(ChronoUnit.MICROS);
             if (resource.sessionExpiry().isBefore(expiry)) expiry = resource.sessionExpiry().truncatedTo(ChronoUnit.MICROS);
@@ -96,6 +97,7 @@ public final class JdbcUploadTransfers {
         return execute((connection, events, audits) -> {
             // Lock current session/resource/revision before consuming; concurrent claims serialize on session.
             var resource = resource(connection, caller, session);
+            lockCurrentGrant(connection, resource);
             Pin pin = resource.pin();
             Instant now = now();
             try (var ps = statement(connection, """
@@ -123,7 +125,7 @@ public final class JdbcUploadTransfers {
     private Resource resource(Connection connection, Caller caller, SessionId session) throws SQLException {
         try (var ps = statement(connection, """
                 SELECT s.file_id,s.version_id,s.location_id,s.backend_id,s.config_revision,v.object_key,
-                       r.expected_size,s.expires_at,s.expires_nano_remainder
+                       r.expected_size,s.expires_at,s.expires_nano_remainder,s.purpose
                 FROM fs.upload_session s
                 JOIN fs.file f ON f.tenant_id=s.tenant_id AND f.file_id=s.file_id
                 JOIN fs.file_version v ON v.tenant_id=s.tenant_id AND v.file_id=s.file_id
@@ -143,7 +145,26 @@ public final class JdbcUploadTransfers {
                     session, new BackendId(rows.getObject(4, UUID.class)), rows.getLong(5),
                     new Locator(new LocationId(rows.getObject(3, UUID.class)), rows.getString(6), null),
                     rows.getLong(7), expiry);
-            return new Resource(pin, expiry);
+            return new Resource(pin, expiry, rows.getString(10));
+        }
+    }
+
+    /** Same-database grant revocation is fenced until commit. External IAM is still check-time. */
+    private void lockCurrentGrant(Connection connection, Resource resource) throws SQLException {
+        Pin pin = resource.pin();
+        Caller caller = pin.caller();
+        Instant now = now();
+        try (var ps = statement(connection, """
+                SELECT expires_at FROM fs.file_grant
+                WHERE tenant_id=? AND actor=? AND consumer=? AND purpose=? AND action='UPLOAD_TRANSFER'
+                  AND NOT revoked AND not_before<=? AND expires_at>?
+                  AND (scope='OWNED_FILE' OR (scope='EXACT_FILE' AND file_id=?))
+                ORDER BY grant_id LIMIT 1 FOR SHARE
+                """, caller.tenant().value(), caller.actor(), caller.consumer(), resource.purpose(),
+                now.atOffset(ZoneOffset.UTC), now.atOffset(ZoneOffset.UTC), pin.file().value());
+             var rows = ps.executeQuery()) {
+            if (!rows.next() || !clock.instant().isBefore(rows.getObject(1, OffsetDateTime.class).toInstant()))
+                throw denied();
         }
     }
 
