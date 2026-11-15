@@ -1,0 +1,206 @@
+openapi: 3.1.0
+info:
+  title: VyrnForge File Storage
+  version: 0.1.0-draft
+  description: Isolated FS-300A contract, not a published or live API. No byte transfers or administration.
+security:
+  - bearer: []
+paths:
+  /v1/uploads:
+    post:
+      operationId: initiateUpload
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Correlation'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Initiation'
+      responses:
+        '200':
+          $ref: '#/components/responses/Session'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /v1/uploads/{sessionId}:
+    get:
+      operationId: readUploadSession
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Correlation'
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          $ref: '#/components/responses/Session'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /v1/files/{fileId}:
+    get:
+      operationId: readFileMetadata
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Correlation'
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 512
+      responses:
+        '200':
+          description: Safe metadata, no upload session or provider locator.
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/Correlation'
+            X-Request-Id:
+              $ref: '#/components/headers/Request'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Metadata'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  parameters:
+    Tenant:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      description: Requested tenant UUIDv7, checked against authoritative identity.
+      schema:
+        type: string
+        format: uuid
+    Correlation:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+  headers:
+    Correlation:
+      schema:
+        type: string
+        format: uuid
+    Request:
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Session:
+      description: Initiated or replayed session; no direct provider access.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/Correlation'
+        X-Request-Id:
+          $ref: '#/components/headers/Request'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Session'
+    Error:
+      description: Neutral service error, no provider details.
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/Correlation'
+        X-Request-Id:
+          $ref: '#/components/headers/Request'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Initiation:
+      type: object
+      additionalProperties: false
+      required: [purpose, name, expectedSize, mimeType]
+      properties:
+        purpose: {type: string, minLength: 1, maxLength: 128}
+        name: {type: string, minLength: 1, maxLength: 512}
+        expectedSize: {type: integer, minimum: 0, format: int64}
+        mimeType: {type: string, minLength: 1, maxLength: 255}
+    FileReference:
+      type: object
+      description: Kernel v0.3.2 FileReference, logical reference only.
+      required: [fileId, ownerTenantId, storageService]
+      properties:
+        fileId: {type: string, maxLength: 512}
+        ownerTenantId: {type: string, format: uuid}
+        storageService: {type: string}
+        name: {type: [string, 'null']}
+        mimeType: {type: [string, 'null']}
+        size: {type: [integer, 'null'], format: int64}
+        createdAt: {type: [string, 'null'], format: date-time}
+    Session:
+      type: object
+      required: [file, versionId, fileState, versionState, sessionId, uploadState, expiresAt]
+      properties:
+        file: {$ref: '#/components/schemas/FileReference'}
+        versionId: {type: string, format: uuid}
+        fileState: {type: string}
+        versionState: {type: string}
+        sessionId: {type: string, format: uuid}
+        uploadState: {type: string}
+        expiresAt: {type: string, format: date-time}
+    Metadata:
+      type: object
+      required: [file, versionId, fileState, versionState, name, declaredSize, declaredMimeType]
+      properties:
+        file: {$ref: '#/components/schemas/FileReference'}
+        versionId: {type: string, format: uuid}
+        fileState: {type: string}
+        versionState: {type: string}
+        name: {type: string}
+        declaredSize: {type: integer, format: int64}
+        declaredMimeType: {type: string}
+    Error:
+      type: object
+      required: [code, correlationId, requestId]
+      properties:
+        code:
+          type: string
+          enum: [INVALID, AUTHENTICATION_FAILED, ACCESS_DENIED, DENIED, NOT_FOUND, CONFLICT, IN_PROGRESS, NO_PLACEMENT, UNAVAILABLE]
+        correlationId: {type: string, format: uuid}
+        requestId: {type: string, format: uuid}
