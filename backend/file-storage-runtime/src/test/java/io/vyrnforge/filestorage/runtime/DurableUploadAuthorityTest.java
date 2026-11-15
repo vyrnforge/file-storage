@@ -14,6 +14,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
 import io.vyrnforge.filestorage.s3.S3StorageProvider;
+import io.vyrnforge.filestorage.oss.OssStorageProvider;
+import io.vyrnforge.filestorage.oss.OssWireFixture;
 import io.vyrnforge.filestorage.spi.StorageProvider;
 import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.containers.GenericContainer;
@@ -329,5 +331,108 @@ class DurableUploadAuthorityTest {
                 new Locator(location,"outside-prefix/object",null),instruction.size(),instruction.expiresAt());
         assertThrows(TransferFailure.class,()->resolver.resolve(outside));
         assertEquals(2,opened.get());assertEquals(2,closed.get());
+    }
+
+    @Test void nativeOssCombinedRuntimeSharesMetadataAndDurableTransferAuthority() throws Exception {
+        Target ossTarget = new Target(Provider.OSS, URI.create("https://oss.example.test"), "cn-hangzhou", Addressing.PATH);
+        var registry = new JdbcRegistry(source,CLOCK);
+        var config = new JdbcConfiguration(source,CLOCK);
+        var correlation = CorrelationContext.create();
+        BackendId oss = registry.registerBackend(ADMIN,correlation,ossTarget,new CredentialRef("ref:fixture/oss:v1"));
+        LocationId ossLocation = registry.registerLocation(ADMIN,correlation,oss,"fixture-oss","private-oss");
+        registry.validateDraft(ADMIN,correlation,oss,1,Set.of(ossTarget),candidate->{
+            Map<LocationId,Set<BackendValidator.Check>> checks=new HashMap<>();
+            for(var item:candidate.locations()) checks.put(item.id(),EnumSet.allOf(BackendValidator.Check.class));
+            return new BackendValidator.Report(candidate.backend(),candidate.revision(),checks);
+        });
+        config.activateBackend(ADMIN,correlation,oss,0,1);
+        config.publishPolicy(ADMIN,correlation,SCOPE,1,List.of(new JdbcConfiguration.PolicyRule(ossLocation,0,true)));
+        allow();
+        grant("fixture-user","asset","READ_METADATA","OWNED_FILE",null);
+        try(var fixture=new OssWireFixture()) {
+            var opened=new AtomicInteger();var closed=new AtomicInteger();var adapterCloses=new AtomicInteger();
+            var resolver=new RegistryTransferProviderResolver<FixtureCredential>(registry,ref->{
+                assertEquals(new CredentialRef("ref:fixture/oss:v1"),ref);
+                opened.incrementAndGet();return new FixtureCredential(ref,closed);
+            },Set.of(TARGET,ossTarget),Map.of(Provider.OSS,(target,loc,revision,credential)->{
+                assertEquals(ossTarget,target);assertEquals(oss,loc.backend());assertEquals(ossLocation,loc.id());assertEquals(1,revision);
+                var sdk=fixture.client();
+                OssStorageProvider adapter;
+                try {adapter=new OssStorageProvider(sdk,Map.of(loc.id(),loc),spool,1024*1024,1,Duration.ofSeconds(15),128,Duration.ofMinutes(1),2);}
+                catch(RuntimeException ex){sdk.shutdown();throw ex;}
+                try{adapter.validateUnversioned(new StorageProvider.Call(Duration.ofSeconds(10)));}
+                catch(RuntimeException ex){adapter.close();throw ex;}
+                return new TransferProviderResolver.Lease(){
+                    @Override public StorageProvider provider(){return adapter;}
+                    @Override public void close(){try{adapter.close();}finally{adapterCloses.incrementAndGet();}}
+                };
+            }));
+            var dependencies=new ApiRuntimeDependencies(source,CLOCK,Duration.ofMinutes(5),Duration.ofSeconds(30),
+                new Trust(ISS,AUD),bearer->{
+                    if(!Set.of("user","admin").contains(bearer))throw new IllegalArgumentException("fixture proof");
+                    return new VerifiedAccess(ISS,bearer,Set.of(AUD),TokenKind.ACCESS,NOW,NOW.plusSeconds(3600),NOW);
+                },(actor,tenant)->TENANT.value().equals(tenant),
+                (tenant,module)->new ModuleEntitlement(TENANT.value(),"file-storage",true,NOW),
+                new ApiRuntimeDependencies.ConsumerAuthority((issuer,subject,audience)->"user".equals(subject)
+                    ?Optional.of(new Binding(USER,TENANT,"asset",Set.of(Action.values()))):Optional.empty(),
+                    new JdbcGrants(source,CLOCK,100,5)),
+                new ApiRuntimeDependencies.PolicyAdministration((issuer,subject,audience,tenant)->"admin".equals(subject)&&TENANT.equals(tenant)
+                    ?Optional.of(ADMIN):Optional.empty(),(actor,scope,action)->ADMIN.equals(actor)&&SCOPE.equals(scope),
+                    (actor,scope,locations)->ADMIN.equals(actor)&&SCOPE.equals(scope)),
+                new ApiRuntimeDependencies.BackendAuthority((issuer,subject,audience)->"admin".equals(subject)?Optional.of(ADMIN):Optional.empty(),
+                    (actor,action,id)->ADMIN.equals(actor),Set.of(TARGET,ossTarget),candidate->{
+                        Map<LocationId,Set<BackendValidator.Check>> checks=new HashMap<>();
+                        for(var item:candidate.locations())checks.put(item.id(),EnumSet.allOf(BackendValidator.Check.class));
+                        return new BackendValidator.Report(candidate.backend(),candidate.revision(),checks);
+                    }),()->true);
+            var app=RuntimeApplication.application(ApiRuntimeConfiguration.class,TransferHttpConfiguration.class);
+            // Both route groups use the same secured facade; no separate metadata authority.
+            app.addInitializers(ctx->{
+                ctx.getBeanFactory().registerSingleton("apiRuntimeDependencies",dependencies);
+                ((org.springframework.context.support.GenericApplicationContext)ctx).registerBean("durableUploadAuthority",DurableUploadAuthority.class,()->new DurableUploadAuthority(
+                    ctx.getBean(SecuredFiles.class),new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5)));
+                ((org.springframework.context.support.GenericApplicationContext)ctx).registerBean("privateTransferGateway",PrivateTransferGateway.class,()->new PrivateTransferGateway(
+                    ctx.getBean(DurableUploadAuthority.class),resolver,new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(15)),CLOCK));
+            });
+            try(var ctx=app.run("--server.port=0","--fs.role=COMBINED");var http=HttpClient.newHttpClient()){
+                String base="http://127.0.0.1:"+ctx.getEnvironment().getProperty("local.server.port");
+                byte[] payload=new byte[32768];new Random(42).nextBytes(payload);
+                String body="{\"purpose\":\"attachment\",\"name\":\"oss.bin\",\"expectedSize\":"+payload.length+",\"mimeType\":\"application/octet-stream\"}";
+                var initiate=HttpRequest.newBuilder(URI.create(base+"/v1/uploads")).header("Authorization","Bearer user")
+                    .header("X-Tenant-Id",TENANT.value().toString()).header("Idempotency-Key","oss-combined")
+                    .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build();
+                var result=http.send(initiate,HttpResponse.BodyHandlers.ofString());assertEquals(200,result.statusCode(),result.body());
+                OpenApiContract.assertResponse(result);
+                var json=tools.jackson.databind.json.JsonMapper.builder().build().readTree(result.body());
+                var session=new SessionId(UUID.fromString(json.get("sessionId").asText()));
+                var file=json.get("file").get("fileId").asText();
+                var handle=ctx.getBean(DurableUploadAuthority.class).issue("user",TENANT,session,null);
+                var upload=HttpRequest.newBuilder(URI.create(base+"/transfer/v1/upload")).header("Authorization","Bearer user")
+                    .header("X-Transfer-Handle",handle.handle()).header("Content-Type","application/octet-stream")
+                    .PUT(HttpRequest.BodyPublishers.ofByteArray(payload)).build();
+                var response=http.send(upload,HttpResponse.BodyHandlers.ofString());
+                assertEquals(204,response.statusCode(),response.body());assertTrue(response.headers().firstValue("Location").isEmpty());
+                assertEquals(403,http.send(upload,HttpResponse.BodyHandlers.ofString()).statusCode());
+                String key;
+                try(var connection=source.getConnection();var ps=connection.prepareStatement("SELECT object_key FROM fs.file_version WHERE file_id=?")){
+                    ps.setString(1,file);try(var rows=ps.executeQuery()){assertTrue(rows.next());key=rows.getString(1);}
+                }
+                assertArrayEquals(payload,fixture.bytes("fixture-oss",key));
+                assertEquals(1,opened.get());assertEquals(1,closed.get());assertEquals(1,adapterCloses.get());
+                try(var files=Files.list(spool)){assertEquals(0,files.count());}
+                var metadata=HttpRequest.newBuilder(URI.create(base+"/v1/files/"+file)).header("Authorization","Bearer user")
+                    .header("X-Tenant-Id",TENANT.value().toString()).GET().build();
+                var read=http.send(metadata,HttpResponse.BodyHandlers.ofString());assertEquals(200,read.statusCode(),read.body());
+                OpenApiContract.assertResponse(read);assertFalse(read.body().contains("private-oss"));assertFalse(read.body().contains(handle.handle()));
+                var download=HttpRequest.newBuilder(URI.create(base+"/transfer/v1/download")).header("Authorization","Bearer user")
+                    .header("X-Transfer-Handle",handle.handle()).GET().build();
+                assertEquals(403,http.send(download,HttpResponse.BodyHandlers.ofString()).statusCode());
+                var admin=HttpRequest.newBuilder(URI.create(base+"/v1/admin/backends")).header("Authorization","Bearer admin").GET().build();
+                var adminResult=http.send(admin,HttpResponse.BodyHandlers.ofString());assertEquals(200,adminResult.statusCode());OpenApiContract.assertResponse(adminResult);
+                assertEquals(503,http.send(HttpRequest.newBuilder(URI.create(base+"/health/ready")).GET().build(),HttpResponse.BodyHandlers.ofString()).statusCode());
+                assertEquals(2,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
+                assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
+            }
+        }
     }
 }
