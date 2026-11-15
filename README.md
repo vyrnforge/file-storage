@@ -84,3 +84,5 @@ PR #74 accepted/merged cbc61ef (155 tests). [Upload integrity verification](docs
 PR #75 accepted/merged 15015ec (157 tests). [Durable scan lifecycle](docs/architecture/25_UPLOAD_SCAN_LIFECYCLE.md) — #31 isolated scan work and guarded availability in review; no real scanner/deployment.
 
 PR #76 accepted/merged 05b6b8d (165 tests). [Upload completion commands and worker](docs/architecture/26_COMPLETION_API_WORKER.md) — isolated HTTP/durable verification orchestration in review.
+
+PR #77 accepted/merged 4f65a0d (168 tests). [Terminal upload recovery](docs/architecture/27_TERMINAL_UPLOAD_RECOVERY.md) — terminal replay and logical recovery in review; physical cleanup HOLD.

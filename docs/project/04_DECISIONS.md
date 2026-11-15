@@ -94,3 +94,5 @@ Alternatives reviewed: in-process streaming (combined profile only), direct prov
 2026-11-15: Owner approved PR #75 (15015ec, 157 tests) and continuation. Proposed V7 scan lifecycle uses existing V3 operation ledger SCAN_UPLOAD, exact V6 digest, full-stream scan, conservative exact MIME match for isolated CLEAN, explicit dead reconciliation; no production scanner/limits/quotas or deployment selected.
 
 2026-11-15: Owner approved PR #76 (05b6b8d, 165 tests) and continuation #31. Proposed opt-in logical handle/complete commands, 202 durable VERIFY_UPLOAD with atomic SCAN_UPLOAD handoff, explicit bounded worker tick. No production policy or deployment.
+
+2026-11-15: Owner approved PR #77 (4f65a0d, 168 tests) and continuation. Proposed V8 bounded recovery and immutable cleanup HOLD; terminal replay current grant and original digest, 200 with logical states. Logical expiry does not prove remote write stopped; no delete/reissue without reviewed evidence.

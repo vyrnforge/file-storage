@@ -20,7 +20,7 @@ public final class UploadCommandRoutes {
     public record HandleResponse(String handle,Instant expiresAt){
         @Override public String toString(){return "HandleResponse[redacted]";}
     }
-    public record AcceptedResponse(UUID sessionId,UUID operationId,String status){}
+    public record AcceptedResponse(UUID sessionId,UUID operationId,String status,String uploadState,String versionState){}
 
     @PostMapping(value="/transfer-handle",consumes="application/json",produces="application/json")
     public ResponseEntity<HandleResponse> issue(HttpServletRequest request,@PathVariable("sessionId") String sessionId,
@@ -37,6 +37,11 @@ public final class UploadCommandRoutes {
         var result=commands.complete(context.bearer(),context.tenant(),new SessionId(ApiRequest.uuid(sessionId)),
                 body.sha256(),context.correlationId());
         var accepted=result.value();
-        return ApiResponses.accepted(result.correlation(),new AcceptedResponse(accepted.session().value(),accepted.operation(),accepted.status()));
+        var response=new AcceptedResponse(accepted.session().value(),accepted.operation(),accepted.status(),
+                accepted.uploadState().name(),accepted.versionState().name());
+        return switch(accepted.uploadState()){
+            case COMPLETED,FAILED,EXPIRED -> ApiResponses.success(result.correlation(),response);
+            default -> ApiResponses.accepted(result.correlation(),response);
+        };
     }
 }

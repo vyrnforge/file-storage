@@ -113,3 +113,5 @@ PR #74 accepted/merged cbc61ef (155 verified tests); isolated #57 accepted. Owne
 PR #75 accepted/merged 15015ec (157 verified tests). #31 next V7 durable scan queue, trusted exact-content verdict and lifecycle CAS; then completion HTTP, worker scheduling/expiry/reconciliation and quota #33. #32 production scanner/content policy and #35 download remain gated.
 
 PR #76 accepted/merged 05b6b8d (165 verified tests). #31 next isolated upload commands, durable verification and scan handoff, opt-in worker scheduling; terminal reconciliation/reissue/cleanup remains, #32/#33 production policy and #35 download separate.
+
+PR #77 accepted/merged 4f65a0d (168 tests). #31 next terminal replay and logical expiry/dead recovery; physical cleanup/reissue require remote-write quiescence evidence and quota policy, then independent #35 authorized download. Live gates deferred.
