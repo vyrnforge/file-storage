@@ -1254,4 +1254,64 @@ class JdbcTransactionsTest {
         }));
         assertEquals(1, count("file"));
     }
+
+    @Test
+    void explicitDrainStopsNewPlacementButPreservesExistingPin() throws SQLException {
+        var first = application().initiate(ALICE, command("before-drain"));
+        var backend = new BackendId(OSS);
+        var ctx = CorrelationContext.create();
+        var config = configuration();
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class,
+                () -> config.drainBackend(ADMIN, ctx, backend, 2)).code());
+        assertEquals(1, config.drainBackend(ADMIN, ctx, backend, 1));
+        assertTrue(registry().active(backend).isEmpty());
+        assertEquals(BackendStatus.DRAINING, registry().history(backend, 0, 1).getFirst().status());
+        assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
+                () -> application().initiate(ALICE, command("after-drain"))).code());
+        assertEquals(first, application().initiate(ALICE, command("before-drain")));
+        try (var resolved = registry().resolveExisting(backend, 1, new LocationId(OL),
+                ref -> new SyntheticCredential(ref.value()))) {
+            assertEquals(1, resolved.revision());
+            assertEquals("ref:synthetic/oss", resolved.credential().reference);
+        }
+        assertEquals(2, config.publishPolicy(ADMIN, ctx, SCOPE, 1, List.of(rule(SL, 0, true))));
+        var next = application().initiate(ALICE, command("replacement"));
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
+        assertEquals(SL, jdbc.execute(u -> u.bySession(A, next.session()).orElseThrow()).session().placement().location().value());
+        assertEquals(OL, jdbc.execute(u -> u.bySession(A, first.session()).orElseThrow()).session().placement().location().value());
+        assertEquals(1, intents("platform_audit_event", "action", "file-storage.backend.drained"));
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.backend.drained"));
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class,
+                () -> config.drainBackend(ADMIN, ctx, backend, 1)).code());
+    }
+
+    @Test
+    void concurrentDrainAndActivationHaveOneWinner() throws Exception {
+        draft(2, true);
+        var backend = new BackendId(OSS);
+        var results = competing(
+                () -> configuration().drainBackend(ADMIN, CorrelationContext.create(), backend, 1),
+                () -> configuration().activateBackend(ADMIN, CorrelationContext.create(), backend, 1, 2));
+        assertEquals(1, results.stream().filter(v -> v == Code.CONFLICT).count());
+        assertEquals(1, results.stream().filter(v -> v.equals(1L) || v.equals(2L)).count());
+        assertEquals(BackendStatus.DRAINING, registry().history(backend, 2, 1).getFirst().status());
+        assertEquals(results.contains(2L), registry().active(backend).isPresent());
+    }
+
+    @Test
+    void requiredDrainIntentFailureRollsBackStatus() throws SQLException {
+        var backend = new BackendId(OSS);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_test_drain CHECK (event_type <> 'file-storage.backend.drained') NOT VALID");
+        try {
+            assertThrows(RuntimeException.class, () ->
+                    configuration().drainBackend(ADMIN, CorrelationContext.create(), backend, 1));
+            assertEquals(1, registry().active(backend).orElseThrow().revision());
+            assertEquals(0, intents("platform_audit_event", "action", "file-storage.backend.drained"));
+            assertEquals(0, intents("platform_event_outbox", "event_type", "file-storage.backend.drained"));
+        } finally {
+            sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_test_drain");
+        }
+        assertEquals(1, configuration().drainBackend(ADMIN, CorrelationContext.create(), backend, 1));
+    }
+
 }
