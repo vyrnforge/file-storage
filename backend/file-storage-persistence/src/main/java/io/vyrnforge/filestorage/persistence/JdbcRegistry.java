@@ -48,6 +48,7 @@ public final class JdbcRegistry {
     public record RevisionView(BackendId backend, Provider provider, long revision,
                                BackendStatus status, boolean validated) {}
     public record LocationView(LocationId location, BackendId backend) {}
+    public record BackendView(BackendId backend, Provider provider, long latestRevision, Long activeRevision) {}
 
     public BackendId registerBackend(ActorReference actor, CorrelationContext correlation,
                                      Target target, CredentialRef credential) {
@@ -142,6 +143,25 @@ public final class JdbcRegistry {
                     "file-storage.backend", backend.value(),
                     Map.of("previousRevision", latest, "revision", latest + 1));
             return latest + 1;
+        });
+    }
+
+    /** Bounded keyset page of logical backend summaries; no physical config. */
+    public List<BackendView> backends(UUID after, int limit) {
+        bound(limit);
+        return execute((c, events, audits) -> {
+            try (var ps = statement(c, """
+                    SELECT b.backend_id, b.provider, max(r.config_revision),
+                        max(r.config_revision) FILTER (WHERE r.status='ACTIVE')
+                    FROM fs.backend b JOIN fs.backend_revision r USING (backend_id)
+                    WHERE (?::uuid IS NULL OR b.backend_id>?)
+                    GROUP BY b.backend_id, b.provider ORDER BY b.backend_id LIMIT ?
+                    """, after, after, limit); var rs = ps.executeQuery()) {
+                List<BackendView> result = new ArrayList<>();
+                while (rs.next()) result.add(new BackendView(new BackendId(rs.getObject(1, UUID.class)),
+                        Provider.valueOf(rs.getString(2)), rs.getLong(3), rs.getObject(4, Long.class)));
+                return List.copyOf(result);
+            }
         });
     }
 

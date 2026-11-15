@@ -17,3 +17,5 @@ Current next: FS-200B #25 conditional on reviewed isolated test profile and acce
 Current increment: #24 accepted and PR #56 merged at c2c3c9a8a5f18a6d66f859097ae3031ec73bb508. #25 S3 profile implemented, owner reviewed, CI 43675256063 passed 91 tests (13 MinIO, 38 PostgreSQL); final reconciliation and merge required. #26 native OSS requires separate authorization. No production deployment.
 
 Current increment: #25 S3 profile accepted/merged at e567b2fc4df8ac4fcdcdde549c02cea3eaab9e71; #26 native OSS authorized for bounded implementation and local native SDK wire tests. Real OSS staging and legacy parity remain gated; no #27 or later work, production deployment or credentials authorized.
+
+Current increment: #26 implementation accepted/merged at 972e091004725f1d3eef11d550fa773e4897545e; actual OSS staging and #14 legacy parity remain open. #27 authorized for internal registry/reference port only. Actual secret manager/workload identity #16, validation #28, live admin authorization and deployment remain gated.

@@ -1,6 +1,6 @@
 # Delivery roadmap and initial backlog
 
-Approved direction 2026-11-14. Phase 2 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged; FS-120B2B merged; FS-120C1 merged; FS-120C2 merged; FS-200A merged (PR #56); DEC-FS012 approved; FS-200B isolated S3 profile merged (PR #59); FS-200C #26 authorized; FS-210 and later increments not authorized. Stable FS planning identifiers now map to GitHub issues via [master delivery tracker #13](https://github.com/vyrnforge/file-storage/issues/13). Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
+Approved direction 2026-11-14. Phase 2 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged; FS-120B2B merged; FS-120C1 merged; FS-120C2 merged; FS-200A merged (PR #56); DEC-FS012 approved; FS-200B isolated S3 profile merged (PR #59); FS-200C implementation merged (PR #60; staging pending); FS-210A #27 authorized; FS-210B and later increments not authorized. Stable FS planning identifiers now map to GitHub issues via [master delivery tracker #13](https://github.com/vyrnforge/file-storage/issues/13). Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
 
 | ID | Phase | Priority | Deliverable / acceptance |
 |---|---|---|---|
@@ -81,3 +81,5 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 2026-11-15: #24 accepted and merged at c2c3c9a8a5f18a6d66f859097ae3031ec73bb508; #25 reviewed, 91 tests passed in CI 43675256063, reconcile and verify final head before merge. #26 remains next candidate pending separate authorization and native OSS profile prerequisites.
 
 2026-11-15: #25 accepted and merged at e567b2fc4df8ac4fcdcdde549c02cea3eaab9e71; #26 authorized for native OSS adapter and local SDK wire tests. Actual OSS staging, #14 full legacy parity and owner acceptance remain gates; #27 separately gated.
+
+2026-11-15: #26 implementation merged at 972e091004725f1d3eef11d550fa773e4897545e; actual OSS staging and #14 parity remain open. #27 internal registry/reference port authorized, #16 secret manager/workload identity decision and #28 provider validation still gates. No later implementation or deployment approved.
