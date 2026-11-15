@@ -141,6 +141,37 @@ public final class JdbcConfiguration {
     }
 
     /**
+     * Retire a drained revision only after all backend-wide references are gone.
+     * PostgreSQL V4 independently enforces the guard and fences stale snapshots.
+     * No object deletion or credential revocation occurs.
+     */
+    public long retireBackend(ActorReference actor, CorrelationContext correlation,
+                              BackendId backend, long expected) {
+        Objects.requireNonNull(actor);
+        Objects.requireNonNull(correlation);
+        Objects.requireNonNull(backend);
+        if (expected < 1) throw new Failure(Code.INVALID);
+        return execute((connection, events, audits) -> {
+            try (var ps = statement(connection, "SELECT backend_id FROM fs.backend WHERE backend_id=? FOR UPDATE",
+                    backend.value()); var rs = ps.executeQuery()) {
+                if (!rs.next()) throw new Failure(Code.NOT_FOUND);
+            }
+            try (var ps = statement(connection, "SELECT fs.backend_retirement_blocked(?)",
+                    backend.value()); var rs = ps.executeQuery()) {
+                if (!rs.next() || rs.getBoolean(1)) throw new Failure(Code.CONFLICT);
+            }
+            requireOne(update(connection, """
+                    UPDATE fs.backend_revision SET status='RETIRED'
+                    WHERE backend_id=? AND config_revision=? AND status='DRAINING'
+                    """, backend.value(), expected));
+            MutationIntents.record(events, audits, clock, correlation, actor, null,
+                    "file-storage.backend.retired", "file-storage.backend", backend.value().toString(),
+                    Map.of("revision", expected));
+            return expected;
+        });
+    }
+
+    /**
      * Publish a new revision (expected + 1). Zero denotes initial publication.
      * Rollback of routing is a new revision with the historical rule content.
      * The caller supplies already-authorized eligible locations; this is not a grant API.
