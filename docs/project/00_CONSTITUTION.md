@@ -1,6 +1,6 @@
 # Project constitution
 
-Status: architecture direction approved 2026-11-14; Phase 1 through FS-120B1 merged (PR #12); later work requires owner authorization.
+Status: architecture direction approved 2026-11-14; Phase 2 through FS-120C2 merged (PR #55); later work requires owner authorization.
 
 ## Mission
 Provide a standalone enterprise storage service that abstracts storage-provider details for authorized applications and administrators without losing durable file identity or operational control.
@@ -15,7 +15,7 @@ Provide a standalone enterprise storage service that abstracts storage-provider 
 - No runtime implementation before approval of scope, decisions and roadmap. No claim of production readiness without acceptance evidence.
 
 ## Engineering method
-Characterize legacy behavior; identify evidence; propose decisions; implement bounded increments; verify negative paths and recovery; record results. Prefer a modular monolith with clear internal interfaces before distributed services. Keep the initial architecture minimal; introduce abstractions only for proven variation. Public-facing contracts version separately from artifacts; backward-compatible changes preferred.
+Characterize legacy behavior; identify evidence; propose decisions; implement bounded increments; verify negative paths and recovery; record results. Prefer one modular product with clear internal interfaces. DEC-FS012 approves independent API, transfer and worker runtime roles without separate business ownership; combined deployment permitted. Keep the initial architecture minimal; introduce abstractions only for proven variation. Public-facing contracts version separately from artifacts; backward-compatible changes preferred.
 
 ## Governance
 Owner approves ADRs, scope expansion, technology selection, production releases and migration/cutover. Track Specified / Implemented / Applied / Verified separately. Changes to shared ecosystem repos require separate approval. Repository PR approval does not automatically approve every proposed architecture decision.

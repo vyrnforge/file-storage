@@ -1,22 +1,26 @@
 # Architecture and domain boundaries
 
-Approved architecture direction; FS-120C2 merged; FS-200A provider contract/test work authorized. Start with a modular monolith; separate worker execution if scale or reliability requires. Java 21 / Maven / Spring Boot / PostgreSQL / Flyway approved; exact framework/database versions selected in relevant later increments.
+Approved architecture direction; FS-120C2 merged; FS-200A provider contract/test work authorized. DEC-FS012 approved: one modular product with independently deployable API, transfer gateway and worker roles; combined development profile permitted. Java 21 / Maven / Spring Boot / PostgreSQL / Flyway approved; exact framework/database versions selected in relevant later increments.
 
-```mermaid
+ ```mermaid
 flowchart TD
-  IAM[Trusted IAM] --> API[File Storage API]
-  APPS[Asset / ITSM / other consumers] --> API
-  UI[Admin console / Shared UI] --> CP[Control plane API]
-  API --> DOMAIN[File domain / application]
-  CP --> DOMAIN
+  IAM[Trusted IAM] --> API[File Storage API / control plane]
+  APPS[Asset / ITSM / consumers] --> API
+  APPS --> TRANSFER[Private transfer gateway]
+  UI[Admin console / Shared UI] --> API
+  API --> DOMAIN[Shared file domain / application]
+  TRANSFER --> DOMAIN
+  WORKER[Durable worker role] --> DOMAIN
   DOMAIN --> META[(Service metadata and reliability DB)]
-  DOMAIN --> ROUTER[Placement router and provider SPI]
+  DOMAIN --> K[Kernel 0.3.2 library]
+  TRANSFER --> ROUTER[Trusted placement and provider SPI]
+  WORKER --> ROUTER
   ROUTER --> S3[S3 adapter]
   ROUTER --> OSS[Alibaba OSS adapter]
-  S3 --> B1[(S3 locations)]
-  OSS --> B2[(OSS locations)]
-  DOMAIN --> K[Kernel 0.3.2 library]
-  WORKER[Durable worker] --> DOMAIN
+  S3 --> B1[(Private S3 locations)]
+  OSS --> B2[(Private OSS locations)]
+  APPS -. optional authorized downloads .-> CDN[Private CDN / edge]
+  CDN -. private origin .-> TRANSFER
 ```
 
 ## Boundaries
@@ -38,8 +42,8 @@ Logical file ID never changes on migration. Old location remains readable until 
 Initiate -> uploading -> verifying/scanning -> available or quarantined/failed. Expired/cancelled sessions release reservations and clean staged objects. Available -> soft deleted -> restored or purge pending -> purged only after retention/hold checks and verified deletion. Use optimistic concurrency or locked transitions, durable job leases/fencing, unique object keys and idempotent commands. Object store and DB do not share a transaction: stage, verify, commit metadata + required intents, reconcile uncertain effects. Never advertise availability before required verification.
 
 ## Deployment
-One independent API/service release, console build, optional worker deployment. Service-owned metadata database, backend connections and secrets. No live credentials or deployment targets yet. Configuration control plane must converge revisions across instances and preserve existing reads during drain. Health distinguishes process liveness, readiness and per-backend degradation.
+One product release with separately scalable API, transfer and worker runtime roles, plus console build. Combined profile permitted; separated API does not carry file bytes. Gateway and worker roles use restricted identities and shared authoritative metadata; optional private CDN requires approved cache policy and evidence. Service-owned metadata database, backend connections and secrets. No live credentials or deployment targets yet. Configuration control plane must converge revisions across instances and preserve existing reads during drain. Health distinguishes process liveness, readiness and per-backend degradation.
 
 FS-120C2 internal work ledger and Kernel outbox dispatcher: [recovery contract](09_DURABLE_RECOVERY.md). No external side effects in DB transactions; actual worker deployment and provider handlers later.
 
-FS-200A: [provider and private transfer contract](10_PROVIDER_TRANSFER_CONTRACT.md). Preserve service ownership of authorization, bytes and physical location. No deployed transfer gateway or provider adapter yet.
+FS-200A: [provider and private transfer contract](10_PROVIDER_TRANSFER_CONTRACT.md). Preserve service ownership of authorization, bytes and physical location. Approved runtime topology is specified only; no deployed gateway or provider adapter yet.

@@ -2,7 +2,7 @@
 
 Independent, multi-tenant, multi-provider enterprise file storage service for Asset Management, ITSM and other applications.
 
-**Status: Phase 2 — FS-100A and FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 idempotency merged; FS-120B2A configuration CAS merged; FS-120B2B durable grants merged; FS-120C1 atomic intents merged; FS-120C2 recovery merged; FS-200A provider contract in review.** No deployed service or released version.
+**Status: Phase 2 — FS-100A and FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 idempotency merged; FS-120B2A configuration CAS merged; FS-120B2B durable grants merged; FS-120C1 atomic intents merged; FS-120C2 recovery merged; FS-200A provider contract in review; DEC-FS012 approved.** No deployed service or released version.
 
 ## Start here
 - [Project constitution](docs/project/00_CONSTITUTION.md)
