@@ -22,3 +22,6 @@ No live upload/download, completion, quota, malware scanner, admin API, database
 
 ## Hosted verification
 [Run 43610564780](https://github.com/vyrnforge/file-storage/actions/runs/43610564780) at be6571f883df0942792bbe3653c4231586c8c2d3 passed: 8 domain + 2 SPI + 8 application tests (18 total), zero failures/errors/skips; Kernel checksum, hygiene, dependency boundary and Maven reactor success. PR #6 clean at evidence capture. B01–B08 hosted verified at synthetic application level. Local full build remains outstanding; no production security, durable persistence or real provider evidence. No merge performed.
+
+## Subsequent merge
+PR #6 merged to main at 0f08b3054c6835c8f40913c38ca09c8d359d6ce1; final CI [43610665807](https://github.com/vyrnforge/file-storage/actions/runs/43610665807) succeeded. Local full build still outstanding; no explicit waiver. FS-110 is the next authorized increment.

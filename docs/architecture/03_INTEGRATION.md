@@ -3,7 +3,7 @@
 Proposed contracts, not published API. Use [Kernel v0.3.2](https://github.com/vyrnforge/platform-kernel/tree/v0.3.2), [identity boundary](https://github.com/vyrnforge/platform-kernel/blob/v0.3.2/docs/integration/identity-boundary.md), [reliability semantics](https://github.com/vyrnforge/platform-kernel/blob/v0.3.2/docs/contracts/reliability-semantics.md), [three-JAR distribution](https://github.com/vyrnforge/platform-kernel/blob/v0.3.2/docs/integration/three-jar-distribution.md).
 
 ## Kernel adoption
-Maven io.github.vyrnforge:platform-kernel:0.3.2; optional platform-kernel-jdbc:0.3.2 if PostgreSQL chosen; platform-kernel-testkit test scope. Java 21 baseline; wire schemas remain v0.2. Resolve all kernel artifacts from Maven Central; no local GitHub-release bootstrap, custom repository or credential. Do not mix old/new coordinates or versions. IAM verifies credentials and emits trusted ValidatedIdentityCredential; never decode unsigned token claims into context. Resolve membership, entitlement and domain authorization separately. Authoritative tenant-scoped lookup on every operation, including replay, worker and signed URL issuance. Resource access not implied by FileReference.
+Maven io.github.vyrnforge:platform-kernel:0.3.2; optional platform-kernel-jdbc:0.3.2 if PostgreSQL chosen; platform-kernel-testkit test scope. Java 21 baseline; wire schemas remain v0.2. Resolve all kernel artifacts from Maven Central without custom repositories or credentials. Do not mix old/new coordinates or versions. IAM verifies credentials and emits trusted ValidatedIdentityCredential; never decode unsigned token claims into context. Resolve membership, entitlement and domain authorization separately. Authoritative tenant-scoped lookup on every operation, including replay, worker and signed URL issuance. Resource access not implied by FileReference.
 
 FileReference: opaque fileId, ownerTenantId (UUIDv7 if present), logical storageService, optional name/mimeType/size/createdAt snapshots. Never expose bucket/key, signed URL or provider secrets as reference. Tenant-owned file requires tenant. Stable ID across physical migration.
 
@@ -18,3 +18,6 @@ Asset/ITSM own business association and permissions; File Storage validates tena
 
 ## Observability
 Preserve business correlation; fresh request ID for each invocation; trace metadata opaque. Avoid raw tokens, filenames, URLs and high-cardinality tenant dimensions by default. Separate liveness/readiness. Define metrics and SLOs after workload evidence.
+
+## FS-110A security boundary
+See [identity authorization contract](../security/FS110_IDENTITY_AUTHORIZATION.md). Actual Kernel RequestContextPipeline and ValidatedIdentityAdapter are used after a trusted verifier returns a validated access-token projection, mapped through exact server-side issuer/subject/audience binding. Wyrmgate opaque public sub is not a platform tenant or actor ID. No raw claim roles/scopes authorize resources. Real verifier and deployment binding remain FS-110B.

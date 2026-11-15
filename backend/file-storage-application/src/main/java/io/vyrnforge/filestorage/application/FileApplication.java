@@ -41,8 +41,8 @@ public final class FileApplication {
     public record RequestIdentity(Caller caller,String key) {
         public RequestIdentity {Objects.requireNonNull(caller);text(key);}
     }
-    public record Resource(FileId file,TenantId tenant,String ownerConsumer,String purpose) {
-        public Resource {Objects.requireNonNull(file);Objects.requireNonNull(tenant);text(ownerConsumer);text(purpose);}
+    public record Resource(FileId file,TenantId tenant,String ownerConsumer,String purpose,String ownerActor) {
+        public Resource {Objects.requireNonNull(file);Objects.requireNonNull(tenant);text(ownerConsumer);text(purpose);text(ownerActor);}
     }
     public interface Authorization {
         boolean mayInitiate(Caller caller,String purpose);
@@ -69,7 +69,7 @@ public final class FileApplication {
                     || !request.key().equals(command.requestKey()))
                 throw new Failure(Code.INVALID);
         }
-        Resource resource(){return new Resource(file.id(),file.tenant(),request.caller().consumer(),command.purpose());}
+        Resource resource(){return new Resource(file.id(),file.tenant(),request.caller().consumer(),command.purpose(),request.caller().actor());}
     }
     /**
      * Future DB implementation must ensure one consistent configuration snapshot,
