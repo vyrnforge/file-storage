@@ -98,3 +98,5 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 2026-11-15: PR #72 approved/merged 4880a42b941c0d3dfb1979ad34f8a00220bfa953; CI 43699722472 passed 152 tests. #57 durable upload authorization accepted. Registry-pinned adapter integration and real PostgreSQL/MinIO HTTP upload in review; native OSS gateway integration and verified lifecycle pending. [Registry provider integration](../architecture/22_REGISTRY_PROVIDER_TRANSFER.md).
 
 2026-11-15: PR #73 approved/merged 771ed70c2881e7ae0cba033f19dd5f20b8e86443; CI 43700750262 passed 154 tests. Real PostgreSQL/MinIO staged upload accepted. #57 native OSS loopback and combined API/transfer runtime integration in review. [Evidence scope](../architecture/23_OSS_COMBINED_GATEWAY.md).
+
+2026-11-15: PR #74 approved/merged cbc61eff70a98243eb807e0a5f3130ca7da61acd; CI 43702277359 passed 155 tests. #57 isolated native OSS/combined integration accepted; live gates deferred. #31 authorized: V6 durable integrity request and independently measured matching evidence in review, no AVAILABLE transition. [Upload integrity](../architecture/24_UPLOAD_INTEGRITY.md).

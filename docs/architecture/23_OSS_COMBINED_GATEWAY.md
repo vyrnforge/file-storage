@@ -9,3 +9,5 @@ Combined development integration uses actual PostgreSQL V1–V5, ApiRuntimeConfi
 
 ## Evidence and remaining scope
 Exact-head CI required; one new integrated test (155 expected), existing adapter contracts unchanged in semantics. After acceptance, isolated #57 foundation can be recorded as accepted with live authorization, provider validation, independent process deployment/load/readiness and production limits still gated. #31 upload verification/completion/reconciliation, #32 scanner policy and #35 download availability remain separate. No real OSS staging, live IAM, production deployment or migration.
+
+Owner approved PR #74; squash merged cbc61eff70a98243eb807e0a5f3130ca7da61acd. Final CI 43702277359 at ab5b583 passed 155 tests; first CI stopped at POM readability formatting, corrected. Isolated #57 accepted. [Upload integrity verification](24_UPLOAD_INTEGRITY.md) next. Live OSS/IAM, deployment, measured capacity and worker readiness remain gated.
