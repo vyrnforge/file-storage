@@ -1,6 +1,6 @@
 # Current state and legacy capability baseline
 
-Date: 2026-11-15. Phase 1 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A persistence in review. Java/Maven domain, provider SPI, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
+Date: 2026-11-15. Phase 1 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 in review. Java/Maven domain, provider SPI, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
 
 ## Legacy inventory (sanitized)
 | Capability | Legacy evidence | Proposed treatment |
@@ -45,4 +45,8 @@ PR #8 merged at 43f1c5552a3202ad0724e516fe51c03886373591. PR #9 conflict resolut
 
 2026-11-15: PR #9 merged at 1ecf31bb4ebebbc3f89c90712a7de0ab53beb159; PR #10 merged at 37a49f3c2488d919ebfeb7f53933c552e499d91b with POM readability guard and 31 passing tests (43666571277). Owner directed next implementation: FS-120A only. Service-owned PostgreSQL schema and JDBC transaction adapter in review; no production migration or live IAM. See [persistence contract](../architecture/05_POSTGRESQL_PERSISTENCE.md). Kernel 0.3.2 remains baseline; FS-120B/C and live IAM remain open.
 
-FS-120A code commit 7d64bf3868ea80bbccd4fb76c955968e7513b071 hosted CI 43667089332 passed 40 tests (9 on disposable PostgreSQL 17.12); migration V1 applied only to test database. PR #11 review pending; local build unavailable, no production application or later increment authorization.
+FS-120A code commit 7d64bf3868ea80bbccd4fb76c955968e7513b071 hosted CI 43667089332 passed 40 tests (9 on disposable PostgreSQL 17.12); migration V1 applied only to test database. PR #11 merged; local build unavailable, no production application or later increment authorization.
+
+2026-11-15: PR #11 merged at b4a421dde33fc712a884f83b515719ef62d1c5be; final CI 43667199550 passed 40 tests, including 9 PostgreSQL. Owner reported merge in continuation of approved roadmap; next bounded FS-120B1 implements Kernel JDBC lease/atomic initiation/replay. FS-120B2 (configuration CAS and durable grants), FS-120C (audit/outbox/recovery) and live IAM remain open. No production migration. See [transactional initiation](../architecture/06_TRANSACTIONAL_INITIATION.md).
+
+FS-120B1 hosted CI 43667699481 passed 46 tests, 15 on PostgreSQL 17.12. Kernel V1–V3 applied in disposable fs_kernel schema only. PR #12 open; local verification and owner review pending. B2/C, actual IAM and production gates remain open.
