@@ -19,3 +19,6 @@ Register S3 and OSS; validate/activate both; upload via OSS; switch policy to S3
 
 ## FS-120B2A persistence implementation
 See [configuration revision contract](07_CONFIGURATION_REVISIONS.md). Internal CAS activation and immutable publication implemented for review; provider validation evidence must be written by a trusted validator in FS-210B. Public administration, cache convergence, audit and retirement reference guards remain future work.
+
+## FS-200A provider contract
+[Provider and private transfer contract](10_PROVIDER_TRANSFER_CONTRACT.md) defines create-only writes, exact byte count and version targeting, stream ownership, neutral failure semantics and a shared acceptance suite. Service-controlled transfer is proposed for owner approval; raw provider signatures are internal only, not public DTOs. Actual provider validation and capability evidence required in #25/#26/#28.

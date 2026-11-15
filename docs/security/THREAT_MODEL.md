@@ -19,3 +19,6 @@ Proposed baseline; no assertion controls are implemented. Trust boundaries: exte
 
 ## Security gate
 Run isolation/authorization negative matrix, expired/revoked identity, replay, malicious-content tests, signed upload constraints, alternate download paths, config endpoint SSRF, credentials redaction, worker crash and recovery, restore and migration tests. Verify infrastructure bucket privacy, encryption, TLS and credential scope. Capture actual test evidence; never use real secrets or files in fixtures. Private legacy source review and credential hygiene are owner follow-ups.
+
+## FS-200A transfer threat refinement
+Provider-signed instructions remain internal; redaction of toString alone is not serialization protection. Proposed service-controlled transfer endpoints enforce authoritative resource/tenant/actor/app/action/session/state/expiry checks, bounded streaming and no provider redirects. See [provider transfer contract](../architecture/10_PROVIDER_TRANSFER_CONTRACT.md). Actual runtime, negative route matrix, transport deadlines, rate limits, SSRF and real provider privacy evidence remain release gates.

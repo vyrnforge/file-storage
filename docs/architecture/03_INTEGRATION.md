@@ -27,3 +27,6 @@ See [identity authorization contract](../security/FS110_IDENTITY_AUTHORIZATION.m
 
 ## FS-120C2
 [Durable recovery](09_DURABLE_RECOVERY.md) uses Kernel JdbcOutboxPublisher with the fs_kernel schema and explicit injected transport. File Storage owns operation records pinned to tenant/file/version/location. No broker delivery evidence or public consumer dedup implementation; synthetic durable receiver tests demonstrate at-least-once stable event identity.
+
+## FS-200A privacy gate
+[Provider transfer contract](10_PROVIDER_TRANSFER_CONTRACT.md) clarifies earlier direct-grant language: no raw provider URL, signature, bucket/key or provider credential in consumer contracts. Proposed opaque, service-controlled transfer endpoints/tickets require owner approval; no redirect to private provider URL. Any exception requires explicit architecture/security approval and proof of the existing privacy invariant. No exception currently approved.

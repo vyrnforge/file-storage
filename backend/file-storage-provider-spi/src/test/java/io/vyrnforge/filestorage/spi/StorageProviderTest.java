@@ -8,12 +8,18 @@ import java.time.Instant;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
-class StorageProviderTest {
+class StorageProviderTest extends ProviderContract {
+    private final Memory fixture = new Memory();
+    @Override protected StorageProvider provider() { return fixture; }
+    @Override protected LocationId location() { return new LocationId(new UUID(0, 1)); }
+    @Override protected LocationId otherLocation() { return new LocationId(new UUID(0, 2)); }
+
     /** Synthetic fixture only, no production guarantees. */
     static final class Memory implements StorageProvider {
-        private final Map<Locator,byte[]> objects=new HashMap<>();
+        private final Map<Locator,byte[]> objects=new java.util.concurrent.ConcurrentHashMap<>();
         public Set<Capability> capabilities(){return Set.of();}
         public Metadata put(Locator l,InputStream input,long expected,Call call){
+            version(l);
             try {
                 if(expected<0||expected>1024)throw new StorageFailure(ErrorCode.INVALID);
                 byte[] bytes=input.readNBytes((int)expected+1);
@@ -24,15 +30,26 @@ class StorageProviderTest {
         }
         public InputStream get(Locator l,Call call){return new ByteArrayInputStream(require(l));}
         public Metadata head(Locator l,Call call){return new Metadata(require(l).length,null,"application/octet-stream");}
-        public void delete(Locator l,Call call){objects.remove(l);}
+        public void delete(Locator l,Call call){version(l);objects.remove(l);}
+        private record Cursor(LocationId location, String prefix, String after) {}
+        private final Map<String, Cursor> cursors = new java.util.concurrent.ConcurrentHashMap<>();
         public Page list(LocationId location,String prefix,String cursor,int limit,Call call){
             if(limit<1)throw new StorageFailure(ErrorCode.INVALID);
+            Cursor token = cursor == null ? null : cursors.get(cursor);
+            if (cursor != null && (token == null || !token.location().equals(location) || !token.prefix().equals(prefix)))
+                throw new StorageFailure(ErrorCode.INVALID);
             var all=objects.keySet().stream().filter(l->l.location().equals(location)&&l.objectKey().startsWith(prefix))
-                .filter(l->cursor==null||l.objectKey().compareTo(cursor)>0).sorted(Comparator.comparing(Locator::objectKey)).toList();
+                .filter(l->token==null||l.objectKey().compareTo(token.after())>0).sorted(Comparator.comparing(Locator::objectKey)).toList();
             var page=all.stream().limit(limit).toList();
-            return new Page(page,all.size()>limit?page.getLast().objectKey():null);
+            String next = null;
+            if (all.size() > limit) {
+                next = UUID.randomUUID().toString();
+                cursors.put(next, new Cursor(location, prefix, page.getLast().objectKey()));
+            }
+            return new Page(page, next);
         }
-        byte[] require(Locator l){byte[] b=objects.get(l);if(b==null)throw new StorageFailure(ErrorCode.NOT_FOUND);return b;}
+        void version(Locator l){if(l.providerVersion()!=null)throw new StorageFailure(ErrorCode.UNSUPPORTED);}
+        byte[] require(Locator l){version(l);byte[] b=objects.get(l);if(b==null)throw new StorageFailure(ErrorCode.NOT_FOUND);return b;}
     }
     @Test void optionalSigningAndMultipartFailExplicitly(){
         StorageProvider p=new Memory();var a=new Locator(new LocationId(new UUID(0,1)),"a",null);

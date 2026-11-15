@@ -1,0 +1,39 @@
+# FS-200A — Provider contract and private transfer boundary
+
+Owner authorized [#24](https://github.com/vyrnforge/file-storage/issues/24) after PR #55 merged at b5e8159843fb41121eeabe309497899c3bcd7257. DEC-FS003/004/005/009 remain approved; Kernel 0.3.2 unchanged. This increment defines an internal contract and reusable synthetic acceptance suite. No SDK adapters, credentials, provider calls, runtime transfer endpoints or deployment.
+
+## Required provider behavior
+| Operation | Contract |
+|---|---|
+| put | Create-only staged key, exact expected byte length including zero; short/long stream INVALID and no committed new object; no overwrite, including competing writers. No HEAD-then-unconditional-PUT emulation. Bounded prevalidation/spooling or staged multipart may be needed; storage profile must prove atomic create-only semantics. |
+| get | Stream exact target, missing NOT_FOUND, caller closes even on early termination; no whole-file buffering requirement. Exact provider version if present; never fall back to latest. |
+| head | Size, MIME (fallback application/octet-stream), optional lowercase hex SHA-256 of actual bytes; ETag/CRC or multipart composite checksum is not SHA-256. Missing NOT_FOUND. No claim of verified content from HEAD alone. |
+| delete | Exact target; absent success, permission denial FORBIDDEN. If versioning/delete markers leave retained bytes, profile must document and prove exact deletion/absence before purge. No silent fallback to latest. |
+| list | Bounded page of keys in specified location and prefix, no cross-location results; opaque continuation scoped to location/prefix, null ends. Static listing covers keys without duplicates; no snapshot/ordering guarantee under mutation. Required key inventory is unversioned locators; historical versions need explicit later profile support. |
+
+Call timeout covers connection and stream I/O, including close/cancellation as applicable; adapters must prove bounded network/resource behavior, not just accept a timeout field. Caller closes put/part input, caller closes get output. Exact provider version unsupported => UNSUPPORTED/INVALID, never ignore. Write target must be unversioned new staged key. Adapter owns SDK clients and cleanup; never close caller input. Use unique service-generated keys and immutable verified versions. No whole-file memory materialization; temporary storage needs limits and cleanup. No network calls in metadata transactions. TIMEOUT/TRANSIENT may leave uncertain object effects: reconcile using exact pinned target before retry. Neutral codes only (NOT_FOUND, CONFLICT, FORBIDDEN, TIMEOUT, TRANSIENT, UNSUPPORTED, INVALID); no raw SDK exceptions, endpoint/key/credential in public errors.
+
+## Optional capabilities
+COPY, PRESIGN, MULTIPART explicitly advertised only after evidence; all absent methods fail UNSUPPORTED. COPY is create-only and source version exact; verify destination bytes before migration cutover. Multipart session pins target; parts exact-size, ordered unique receipts, abort cleanup, completion create-only and uncertain completion reconciliation. No generic claim that every S3-compatible backend supports every operation. PRESIGN remains internal: exact method/key, expiry, bounds and overwrite protection must be proved per supported operation. The current signUpload/download pair cannot describe partial signing support; advertise only if both satisfy contract, otherwise leave unsupported. No optional capability substitutes for required create-only writes. Actual provider profiles must add positive tests for every advertised capability (including real HTTP if signing), invalid cursor reuse, timeout/stream cleanup, credential/permission errors, concurrent create conflicts, versioning/purge behavior and cleanup. Synthetic suite is not evidence for those profiles.
+
+## DEC-FS012 — private transfer design (PROPOSED; owner approval pending)
+Problem: legacy direct OSS upload responses included provider-specific information. A normal signed provider URL typically exposes a provider host/path or authorization query, even without a secret access key. That is not acceptable under the approved private-location boundary. A CNAME alone does not hide object keys or signature parameters. SignedRequest is internal, not a public DTO; redacted toString is not a serialization guard.
+
+Recommended initial profile: service-controlled HTTPS upload/download endpoints, opaque short-lived transfer handles bound server-side to tenant, canonical actor/authorized delegated consumer, exact action, logical file/version/session, expected size/content constraints, pinned placement and expiry. Consumer sees FileReference plus logical status and service endpoint/handle only; never bucket, key, location, private endpoint, provider version, signature/header/form field or credential. Service resolves placement/credential privately, streams with bounded buffers/backpressure, and enforces current authorization plus lifecycle and expiry on use. No redirect exposing provider URL. Handles are sensitive, never logged, not sufficient alone for authorization; replay/refresh reauthorize and preserve original pins. Exact handle representation, TTL, one-time/reuse rules, range/resume, browser auth/CSRF, quota, size, rate and concurrency limits await #16 and runtime contracts. Download only verified available content; upload completion verifies actual bytes and scan. No DB transaction spans streaming.
+
+Alternative: service-owned gateway/CDN with opaque routes and private origin, same authorization and privacy invariants. Consider after workload evidence; no ordinary direct-provider URL exception by default. Raw direct provider transfer is rejected unless owner explicitly approves a design proving no private placement/credential exposure, with security evidence. Do not infer such exception from legacy behavior or this PR.
+
+Tradeoff: service-controlled streaming consumes service bandwidth and connections; measured throughput/cost and large-file handling determine scaling, not speculative production targets. Provider adapters remain reusable regardless of service transfer implementation. No actual runtime implemented here.
+
+## Shared acceptance
+ProviderContract in SPI test sources is packaged as a test-only tests classifier by existing Maven jar plugin. Adapter modules extend it with stable isolated fixture provider, two test locations, unique synthetic prefixes, deterministic cleanup and profile-specific tests. Use Maven verify (package needed for classifier), explicit test-scope JUnit. No new dependency version.
+P01 exact bytes/zero size, HEAD digest if present, caller input ownership and early get close.
+P02 wrong-size rejection and no overwrite; concurrent writers one winner.
+P03 bounded location/prefix listing with continuation and termination.
+P04 missing get/head, idempotent deletion, absent version never falls back.
+P05 absent optional methods explicitly unsupported; neutral failure messages.
+P06 original regressions, POM readability and dependency boundaries; synthetic fixture only.
+P07 owner accepts private transfer decision and relevant #16 limits/profile choices before #24 closure/adapter authorization; actual SDK profile proof in #25/#26.
+
+## Handoff
+#25 S3 and #26 native OSS: select reviewed SDK versions and isolated test targets; execute shared suite and profile-specific matrix, do not advertise untested capabilities. #28 validation, #30/#31/#35 real service transfer boundary, #32 integrity/scan, #33 quotas, #43 threat matrix, #44 workload limits. #16 open decisions: file size/types, transfer TTL/reuse/range, target profiles, throughput and cost; no production defaults. #14 legacy full build evidence remains open; no raw legacy source publication. #24 remains open pending owner decision/acceptance. No later implementation, merge or deployment authorized.

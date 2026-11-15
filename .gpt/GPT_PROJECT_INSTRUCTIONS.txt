@@ -8,3 +8,5 @@ Current increment: FS-120B2A merged (#52, issue #20 accepted); FS-120B2B #21 aut
 Current increment: FS-120C1 #22 authorized after #53 merged; no #23 or later work, production deployment or public API authorized.
 
 Current increment: FS-120C1 merged (#54); FS-120C2 #23 authorized for internal worker foundation only. No #24 or later scope, broker/provider deployment or public API authorized.
+
+Current increment: FS-120C2 merged (#55); FS-200A #24 authorized for contract/test work; service-controlled transfer proposal pending explicit owner decision. No SDK adapters, provider-signed consumer URLs, production deployment or later increments authorized.
