@@ -177,6 +177,11 @@ public final class JdbcConfiguration {
      * The caller supplies already-authorized eligible locations; this is not a grant API.
      */
     public long publishPolicy(ActorReference actor, CorrelationContext correlation, Scope scope, long expected, List<PolicyRule> input) {
+        return publishPolicy(actor, correlation, scope, expected, input, null);
+    }
+
+    long publishPolicy(ActorReference actor, CorrelationContext correlation, Scope scope,
+                       long expected, List<PolicyRule> input, Long rollbackSource) {
         Objects.requireNonNull(actor);
         Objects.requireNonNull(correlation);
         Objects.requireNonNull(scope);
@@ -254,8 +259,12 @@ public final class JdbcConfiguration {
             });
             MutationIntents.record(events, audits, clock, correlation, actor, tenant,
                     "file-storage.policy.published", "file-storage.policy", MutationIntents.policyId(scope),
-                    Map.of("previousRevision", expected, "revision", revision,
-                            "consumer", scope.consumer(), "purpose", scope.purpose()));
+                    rollbackSource == null
+                            ? Map.of("previousRevision", expected, "revision", revision,
+                                    "consumer", scope.consumer(), "purpose", scope.purpose())
+                            : Map.of("previousRevision", expected, "revision", revision,
+                                    "consumer", scope.consumer(), "purpose", scope.purpose(),
+                                    "rollbackSourceRevision", rollbackSource));
             return revision;
         });
     }
