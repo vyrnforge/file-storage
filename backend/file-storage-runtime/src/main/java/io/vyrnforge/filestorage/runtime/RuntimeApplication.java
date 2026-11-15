@@ -30,8 +30,7 @@ public class RuntimeApplication {
             var env = context.getEnvironment();
             if (!"127.0.0.1".equals(env.getProperty("server.address")))
                 throw new IllegalStateException("isolated runtime requires loopback");
-            if (!Set.of("API", "TRANSFER", "WORKER", "COMBINED").contains(env.getProperty("fs.role", "")))
-                throw new IllegalStateException("invalid runtime role");
+            RuntimeRole.parse(env.getProperty("fs.role"));
         });
         return app;
     }
