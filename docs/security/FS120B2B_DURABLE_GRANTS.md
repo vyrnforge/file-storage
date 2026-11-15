@@ -20,3 +20,5 @@ G07 existing regression, V1/V2 service and Kernel V1–V3 migration tests, POM r
 
 ## Handoff
 QA: verify G01–G07 on compatible head. Security/IAM: authoritative grant issuance, revocation guarantees and actual membership/entitlement sources under #17/#19; no public exposure. Platform: production pool reset, least privilege and acquisition/network timeout policy. Next #22 audit/event intents requires separate owner authorization.
+
+Accepted and merged PR #53 at 137ebeab9a8e83b33219f9d3ae3ccc83f775abd1; [CI 43669360900](https://github.com/vyrnforge/file-storage/actions/runs/43669360900) passed 57 tests (26 PostgreSQL). Issue #21 closed. No live authority or issuance proof.

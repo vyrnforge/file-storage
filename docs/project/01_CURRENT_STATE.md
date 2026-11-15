@@ -1,6 +1,6 @@
 # Current state and legacy capability baseline
 
-Date: 2026-11-15. Phase 1 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged (PR #52); FS-120B2B in review. Java/Maven domain, provider SPI, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
+Date: 2026-11-15. Phase 1 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged (PR #52); FS-120B2B merged (PR #53); FS-120C1 in review. Java/Maven domain, provider SPI, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
 
 ## Legacy inventory (sanitized)
 | Capability | Legacy evidence | Proposed treatment |
@@ -57,3 +57,5 @@ PR #12 merged at `f28e9093105e5620e2b9a0eb8e36b2de6595c9f2`; final hosted CI [43
 2026-11-15: owner directed next implementation using Backend & Domain Engineering after PR #51 merged at d48e250c3bd289ff463a9fac44136979bc5c502c. FS-120B2A [#20](https://github.com/vyrnforge/file-storage/issues/20) authorized: V2 revision guards, internal Kernel JDBC transactional backend activation and policy publication; no live provider validation/admin API/production migration. [Configuration contract](../architecture/07_CONFIGURATION_REVISIONS.md). B2B #21 and later work require separate authorization.
 
 2026-11-15: owner accepted PR #52 and explicitly authorized squash merge; main 32b387cd1b3ee2113832e4eff0ab224da53926d0, CI 43668967693 passed 51 tests (20 real PostgreSQL). Issue #20 closed, master #13 checked. Next authorized #21: durable grant read adapter and actual secured facade integration; see [grant contract](../security/FS120B2B_DURABLE_GRANTS.md). No production migration or live authority configuration; #22 separately gated.
+
+2026-11-15: owner accepted continuation and merge of PR #53 at 137ebeab9a8e83b33219f9d3ae3ccc83f775abd1; CI 43669360900 passed 57 tests (26 PostgreSQL). #21 closed, #22 authorized. FS-120C1 uses actual Kernel transaction-bound audit/event writers for initiation, backend activation and policy publication; no dispatch/runtime or production migration. See [atomic intents](../architecture/08_ATOMIC_MUTATION_INTENTS.md).

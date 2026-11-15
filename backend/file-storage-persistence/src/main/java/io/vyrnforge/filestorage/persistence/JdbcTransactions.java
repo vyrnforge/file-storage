@@ -3,6 +3,10 @@ package io.vyrnforge.filestorage.persistence;
 import io.vyrnforge.filestorage.application.FileApplication.*;
 import io.vyrnforge.filestorage.domain.StorageModel;
 import io.vyrnforge.filestorage.domain.StorageModel.*;
+import io.vyrnforge.platform.kernel.context.CorrelationContext;
+import io.vyrnforge.platform.kernel.persistence.jdbc.JdbcReliabilityTransaction;
+import io.vyrnforge.platform.kernel.persistence.jdbc.JacksonRecordCodec;
+import java.util.function.Consumer;
 import java.net.URI;
 import java.sql.*;
 import java.time.Instant;
@@ -17,23 +21,37 @@ import javax.sql.DataSource;
  * Persistence for the initial create/read aggregate only. No external side effects or live provider access. Initiation uses Kernel JDBC leases.
  */
 public final class JdbcTransactions implements Transactions {
-    private final DataSource dataSource;
+    private final JdbcReliabilityTransaction transaction;
+    private final java.time.Clock clock;
     private final InitiationReliability reliability;
 
     public JdbcTransactions(DataSource dataSource, java.time.Clock clock, java.time.Duration leaseTtl) {
-        this.dataSource = Objects.requireNonNull(dataSource);
+        this.clock = Objects.requireNonNull(clock);
+        this.transaction = new JdbcReliabilityTransaction(
+                new KernelDataSource(Objects.requireNonNull(dataSource), Connection.TRANSACTION_REPEATABLE_READ),
+                new JacksonRecordCodec(), clock);
         this.reliability = new InitiationReliability(dataSource, clock, leaseTtl);
     }
 
     @Override
     public View initiate(RequestIdentity identity, Initiate command,
                          Function<Unit, View> work, Function<Unit, View> replay) {
-        return reliability.initiate(identity, command, work, replay, this);
+        return initiate(identity, command, CorrelationContext.create(), work, replay);
+    }
+
+    @Override
+    public View initiate(RequestIdentity identity, Initiate command, CorrelationContext correlation,
+                         Function<Unit, View> work, Function<Unit, View> replay) {
+        return reliability.initiate(identity, command, Objects.requireNonNull(correlation), work, replay, this);
     }
 
     /** Kernel owns the connection and commit; this helper owns only the callback scope. */
     static <T> T onConnection(Connection connection, Function<Unit, T> work) {
-        JdbcUnit unit = new JdbcUnit(connection);
+        return onConnection(connection, work, entry -> { throw new PersistenceFailure(); });
+    }
+
+    static <T> T onConnection(Connection connection, Function<Unit, T> work, Consumer<Entry> inserted) {
+        JdbcUnit unit = new JdbcUnit(connection, inserted);
         try {
             T result = work.apply(unit);
             if (unit.failed) throw new PersistenceFailure();
@@ -65,46 +83,34 @@ public final class JdbcTransactions implements Transactions {
     @Override
     public <T> T execute(Function<Unit, T> work) {
         Objects.requireNonNull(work);
-        try (Connection connection = dataSource.getConnection()) {
-            connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
-            connection.setAutoCommit(false);
-            JdbcUnit unit = new JdbcUnit(connection);
-            try {
-                T result = work.apply(unit);
-                if (unit.failed) {
-                    throw new PersistenceFailure();
-                }
-                connection.commit();
-                return result;
-            } catch (SQLException | RuntimeException | Error ex) {
+        CorrelationContext correlation = CorrelationContext.create();
+        // Preserve internal callback failures; map infrastructure failures to a neutral code.
+        var callbackFailure = new java.util.concurrent.atomic.AtomicReference<RuntimeException>();
+        try {
+            return transaction.execute((connection, events, audits) -> {
                 try {
-                    connection.rollback();
-                } catch (SQLException rollbackFailure) {
-                    // No auto-commit reset after uncertain rollback. Close the connection.
-                    // Never attach a raw SQL exception to a consumer-facing failure.
+                    return onConnection(connection, work,
+                            entry -> MutationIntents.initiated(events, audits, clock, correlation, entry));
+                } catch (RuntimeException ex) {
+                    callbackFailure.set(ex);
+                    throw ex;
                 }
-                if (ex instanceof SQLException sql) {
-                    throw translate(sql);
-                }
-                if (ex instanceof RuntimeException runtime) {
-                    throw runtime;
-                }
-                throw (Error) ex;
-            } finally {
-                unit.active = false;
-            }
-        } catch (SQLException ex) {
-            throw translate(ex);
+            });
+        } catch (RuntimeException ex) {
+            if (ex == callbackFailure.get()) throw ex;
+            throw new PersistenceFailure();
         }
     }
 
     private static final class JdbcUnit implements Unit {
         private final Connection connection;
+        private final Consumer<Entry> inserted;
         private boolean active = true;
         private boolean failed;
 
-        private JdbcUnit(Connection connection) {
+        private JdbcUnit(Connection connection, Consumer<Entry> inserted) {
             this.connection = connection;
+            this.inserted = inserted;
         }
 
         private void requireActive() {
@@ -325,6 +331,12 @@ public final class JdbcTransactions implements Transactions {
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         """, tenant, entry.request().caller().actor(), scope.consumer(), entry.request().key(),
                         sessionId, command.expectedSize(), command.mimeType());
+                try {
+                    inserted.accept(entry);
+                } catch (RuntimeException ex) {
+                    failed = true;
+                    throw new PersistenceFailure();
+                }
             } catch (SQLException ex) {
                 throw failure(ex);
             }

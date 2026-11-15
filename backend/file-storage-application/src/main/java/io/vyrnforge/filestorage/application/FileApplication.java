@@ -3,6 +3,7 @@ package io.vyrnforge.filestorage.application;
 import io.vyrnforge.filestorage.domain.StorageModel;
 import io.vyrnforge.filestorage.domain.StorageModel.*;
 import io.vyrnforge.platform.kernel.file.FileReference;
+import io.vyrnforge.platform.kernel.context.CorrelationContext;
 import io.vyrnforge.platform.kernel.ids.UuidV7;
 import java.time.*;
 import java.util.*;
@@ -84,6 +85,11 @@ public final class FileApplication {
                               Function<Unit, View> work, Function<Unit, View> replay) {
             return execute(work);
         }
+
+        default View initiate(RequestIdentity identity, Initiate command, CorrelationContext correlation,
+                              Function<Unit, View> work, Function<Unit, View> replay) {
+            return initiate(identity, command, work, replay);
+        }
     }
     public interface Unit {
         Optional<Configuration> configuration(Scope scope);
@@ -119,12 +125,16 @@ public final class FileApplication {
         return id;
     }
     public View initiate(Caller caller,Initiate command) {
+        return initiate(caller, command, CorrelationContext.create());
+    }
+    public View initiate(Caller caller, Initiate command, CorrelationContext correlation) {
+        Objects.requireNonNull(correlation);
         if(caller==null)throw new Failure(Code.DENIED);
         Objects.requireNonNull(command);
         if(!authorization.mayInitiate(caller,command.purpose()))throw new Failure(Code.DENIED);
         var identity=new RequestIdentity(caller,command.requestKey());
         var scope=new Scope(caller.tenant(),caller.consumer(),command.purpose());
-        return transactions.initiate(identity, command, unit->{
+        return transactions.initiate(identity, command, correlation, unit->{
             if (!authorization.mayInitiate(caller, command.purpose())) throw new Failure(Code.DENIED);
             var existing=unit.byRequest(identity);
             if(existing.isPresent()){

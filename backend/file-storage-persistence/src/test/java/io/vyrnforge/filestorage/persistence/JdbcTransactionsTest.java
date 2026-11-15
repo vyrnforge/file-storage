@@ -61,7 +61,7 @@ class JdbcTransactionsTest {
 
     @BeforeEach
     void seed() throws SQLException {
-        sql("TRUNCATE fs.backend, fs.policy_revision, fs.file, fs.file_grant, fs_kernel.platform_idempotency CASCADE");
+        sql("TRUNCATE fs.backend, fs.policy_revision, fs.file, fs.file_grant, fs_kernel.platform_idempotency, fs_kernel.platform_audit_event, fs_kernel.platform_event_outbox CASCADE");
         sql("""
                 INSERT INTO fs.backend VALUES (?, 'OSS', 'https://oss.example.test', 'test', 'AUTO'),
                     (?, 'S3', 'https://s3.example.test', 'test', 'PATH')
@@ -71,12 +71,14 @@ class JdbcTransactionsTest {
                     (?, 1, 'ref:synthetic/s3', 'DRAFT', NULL)
                 """, OSS, S3);
         sql("UPDATE fs.backend_revision SET validated_revision=config_revision");
-        configuration().activateBackend(new BackendId(OSS), 0, 1);
-        configuration().activateBackend(new BackendId(S3), 0, 1);
+        configuration().activateBackend(ADMIN, CorrelationContext.create(), new BackendId(OSS), 0, 1);
+        configuration().activateBackend(ADMIN, CorrelationContext.create(), new BackendId(S3), 0, 1);
         sql("INSERT INTO fs.storage_location VALUES (?, ?, 'oss-test', 'objects/'), (?, ?, 's3-test', 'objects/')",
                 OL, OSS, SL, S3);
-        configuration().publishPolicy(SCOPE, 0, List.of(rule(OL, 0, true)));
+        configuration().publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 0, List.of(rule(OL, 0, true)));
     }
+
+    private static final ActorReference ADMIN = new ActorReference(ActorType.USER, "synthetic-admin", null, null);
 
     private static JdbcConfiguration configuration() {
         return new JdbcConfiguration(dataSource, Clock.fixed(NOW, ZoneOffset.UTC));
@@ -180,7 +182,7 @@ class JdbcTransactionsTest {
             rs.next();
             assertEquals(0, rs.getLong(1));
         }
-        configuration().publishPolicy(SCOPE, 2, List.of(rule(OL, 0, true)));
+        configuration().publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 2, List.of(rule(OL, 0, true)));
         assertNotNull(application().initiate(ALICE, command("retry")));
         assertEquals(1, count("file"));
     }
@@ -303,7 +305,7 @@ class JdbcTransactionsTest {
     }
 
     private static void switchPolicy() throws SQLException {
-        configuration().publishPolicy(SCOPE, 1, List.of(rule(SL, 0, true)));
+        configuration().publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(SL, 0, true)));
         sql("UPDATE fs.backend_revision SET status='DRAINING' WHERE backend_id=?", OSS);
     }
 
@@ -410,14 +412,14 @@ class JdbcTransactionsTest {
         var first = application().initiate(ALICE, command("before"));
         draft(2, false);
         assertEquals(Code.INVALID, assertThrows(Failure.class,
-                () -> configuration().activateBackend(new BackendId(OSS), 1, 2)).code());
+                () -> configuration().activateBackend(ADMIN, CorrelationContext.create(), new BackendId(OSS), 1, 2)).code());
         assertEquals(1, scalar("SELECT config_revision FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='ACTIVE'"));
         assertEquals("23514", assertThrows(SQLException.class, () -> sql(
                 "UPDATE fs.backend_revision SET validated_revision=1 WHERE backend_id=? AND config_revision=2", OSS)).getSQLState());
         sql("UPDATE fs.backend_revision SET validated_revision=2 WHERE backend_id=? AND config_revision=2", OSS);
-        assertEquals(2, configuration().activateBackend(new BackendId(OSS), 1, 2));
+        assertEquals(2, configuration().activateBackend(ADMIN, CorrelationContext.create(), new BackendId(OSS), 1, 2));
         assertEquals(Code.CONFLICT, assertThrows(Failure.class,
-                () -> configuration().activateBackend(new BackendId(OSS), 1, 2)).code());
+                () -> configuration().activateBackend(ADMIN, CorrelationContext.create(), new BackendId(OSS), 1, 2)).code());
         var second = application().initiate(ALICE, command("after"));
         var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
         assertEquals(1, jdbc.execute(u -> u.bySession(A, first.session()).orElseThrow()).session().placement().configRevision());
@@ -467,7 +469,7 @@ class JdbcTransactionsTest {
                     FOR EACH ROW EXECUTE FUNCTION fs.test_reject_activation()
                     """);
             assertEquals(Code.INVALID, assertThrows(Failure.class,
-                    () -> configuration().activateBackend(new BackendId(OSS), 1, 2)).code());
+                    () -> configuration().activateBackend(ADMIN, CorrelationContext.create(), new BackendId(OSS), 1, 2)).code());
             assertEquals(1, scalar("SELECT config_revision FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='ACTIVE'"));
             assertEquals(1, scalar("SELECT count(*) FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='DRAFT'"));
             assertEquals(0, scalar("SELECT count(*) FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='DRAINING'"));
@@ -475,15 +477,15 @@ class JdbcTransactionsTest {
             sql("DROP TRIGGER IF EXISTS test_reject_activation ON fs.backend_revision");
             sql("DROP FUNCTION fs.test_reject_activation()");
         }
-        assertEquals(2, configuration().activateBackend(new BackendId(OSS), 1, 2));
+        assertEquals(2, configuration().activateBackend(ADMIN, CorrelationContext.create(), new BackendId(OSS), 1, 2));
     }
 
     @Test
     void concurrentBackendActivationHasOneWinner() throws Exception {
         draft(2, true);
         draft(3, true);
-        var results = competing(() -> configuration().activateBackend(new BackendId(OSS), 1, 2),
-                () -> configuration().activateBackend(new BackendId(OSS), 1, 3));
+        var results = competing(() -> configuration().activateBackend(ADMIN, CorrelationContext.create(), new BackendId(OSS), 1, 2),
+                () -> configuration().activateBackend(ADMIN, CorrelationContext.create(), new BackendId(OSS), 1, 3));
         assertEquals(1, results.stream().filter(r -> r instanceof Long).count());
         assertEquals(1, results.stream().filter(r -> r == Code.CONFLICT).count());
         long winner = (Long) results.stream().filter(r -> r instanceof Long).findFirst().orElseThrow();
@@ -493,16 +495,16 @@ class JdbcTransactionsTest {
 
     @Test
     void concurrentPolicyPublicationHasOneWinner() throws Exception {
-        var results = competing(() -> configuration().publishPolicy(SCOPE, 1, List.of(rule(OL, 0, true))),
-                () -> configuration().publishPolicy(SCOPE, 1, List.of(rule(SL, 0, true))));
+        var results = competing(() -> configuration().publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(OL, 0, true))),
+                () -> configuration().publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(SL, 0, true))));
         assertEquals(1, results.stream().filter(r -> r.equals(2L)).count());
         assertEquals(1, results.stream().filter(r -> r == Code.CONFLICT).count());
         assertEquals(2, count("policy_revision"));
         assertEquals(2, scalar("SELECT policy_revision FROM fs.active_policy"));
         assertEquals(2, count("policy_rule"));
         var initial = new Scope(B, "asset", "attachment");
-        var first = competing(() -> configuration().publishPolicy(initial, 0, List.of(rule(OL, 0, true))),
-                () -> configuration().publishPolicy(initial, 0, List.of(rule(SL, 0, true))));
+        var first = competing(() -> configuration().publishPolicy(ADMIN, CorrelationContext.create(), initial, 0, List.of(rule(OL, 0, true))),
+                () -> configuration().publishPolicy(ADMIN, CorrelationContext.create(), initial, 0, List.of(rule(SL, 0, true))));
         assertEquals(1, first.stream().filter(r -> r.equals(1L)).count());
         assertEquals(1, first.stream().filter(r -> r == Code.CONFLICT).count());
         assertEquals(3, count("policy_revision"));
@@ -512,15 +514,15 @@ class JdbcTransactionsTest {
     void invalidPolicyRollsBackAndPublishedHistoryIsImmutable() throws SQLException {
         var config = configuration();
         assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
-                () -> config.publishPolicy(SCOPE, 1, List.of(rule(OL, 0, false), rule(SL, 1, true)))).code());
+                () -> config.publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(OL, 0, false), rule(SL, 1, true)))).code());
         assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
-                () -> config.publishPolicy(SCOPE, 1, List.of(rule(OL, 0, true), rule(SL, 0, true)))).code());
+                () -> config.publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(OL, 0, true), rule(SL, 0, true)))).code());
         assertEquals(Code.INVALID, assertThrows(Failure.class,
-                () -> config.publishPolicy(SCOPE, 1, List.of(rule(id(99), 0, true)))).code());
+                () -> config.publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(id(99), 0, true)))).code());
         assertEquals(1, count("policy_revision"));
         assertEquals(1, count("policy_rule"));
         assertEquals(1, scalar("SELECT policy_revision FROM fs.active_policy"));
-        assertEquals(2, config.publishPolicy(SCOPE, 1, List.of(rule(SL, 0, true))));
+        assertEquals(2, config.publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(SL, 0, true))));
         assertEquals("23514", assertThrows(SQLException.class, () -> sql(
                 "UPDATE fs.policy_rule SET priority=5 WHERE policy_revision=1")).getSQLState());
         assertEquals("23514", assertThrows(SQLException.class, () -> sql(
@@ -531,7 +533,7 @@ class JdbcTransactionsTest {
                 "UPDATE fs.policy_revision SET sealed=false WHERE policy_revision=1")).getSQLState());
         assertEquals("23514", assertThrows(SQLException.class, () -> sql(
                 "UPDATE fs.active_policy SET policy_revision=1")).getSQLState());
-        assertEquals(3, config.publishPolicy(SCOPE, 2, List.of(rule(OL, 0, true))));
+        assertEquals(3, config.publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 2, List.of(rule(OL, 0, true))));
     }
 
     private static final Caller ITSM = new Caller(A, "actor-a", "itsm");
@@ -712,6 +714,122 @@ class JdbcTransactionsTest {
         assertTrue(grants().current(new Caller(A, "actor-a' OR '1'='1", "asset")).isEmpty());
         assertTrue(grants().current(new Caller(A, "actor-a", "asset' OR '1'='1")).isEmpty());
         assertTrue(grants().current(new Caller(B, "actor-a", "asset")).isEmpty());
+    }
+
+    private static long intents(String table, String column, String type) throws SQLException {
+        // Constants supplied by test methods only.
+        return scalar("SELECT count(*) FROM fs_kernel." + table + " WHERE " + column + "='" + type + "'");
+    }
+
+    @Test
+    void initiationIntentsHaveTrustedCorrelationAndMinimalPayload() throws SQLException {
+        var facade = secured(grants());
+        grant(ALICE, Action.INITIATE, GrantScope.INITIATE_PURPOSE, null);
+        grant(ALICE, Action.READ_SESSION, GrantScope.OWNED_FILE, null);
+        UUID correlation = id(901);
+        var command = new Initiate("attachment", "private-name.txt", 5, "text/plain", "private-request");
+        var first = facade.initiate("alice", A, correlation, command);
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.upload.initiated"));
+        assertEquals(1, intents("platform_audit_event", "action", "file-storage.upload.initiated"));
+        try (var c = dataSource.getConnection(); var ps = c.prepareStatement("""
+                SELECT e.subject_id, e.tenant_id, e.actor_id, e.correlation_id,
+                       e.event_version, e.status, e.payload_json::text,
+                       a.changes_json->>'requestId', a.outcome, a.actor_id, a.correlation_id
+                FROM fs_kernel.platform_event_outbox e JOIN fs_kernel.platform_audit_event a
+                  ON a.resource_id=e.subject_id AND a.action=e.event_type
+                WHERE e.event_type='file-storage.upload.initiated'
+                """); var rs = ps.executeQuery()) {
+            assertTrue(rs.next());
+            assertEquals(first.value().file().fileId(), rs.getString(1));
+            assertEquals(A.value(), rs.getObject(2, UUID.class));
+            assertEquals(ALICE.actor(), rs.getString(3));
+            assertEquals(correlation, rs.getObject(4, UUID.class));
+            assertEquals(1, rs.getInt(5));
+            assertEquals("PENDING", rs.getString(6));
+            String payload = rs.getString(7);
+            assertTrue(payload.contains(first.value().session().value().toString()));
+            assertTrue(payload.contains(first.value().version().value().toString()));
+            for (String forbidden : List.of("private-name", "private-request", "text/plain", "objects/", "ref:", "oss-test")) {
+                assertFalse(payload.contains(forbidden));
+            }
+            assertEquals(first.correlation().requestId().toString(), rs.getString(8));
+            assertEquals("SUCCESS", rs.getString(9));
+            assertEquals(ALICE.actor(), rs.getString(10));
+            assertEquals(correlation, rs.getObject(11, UUID.class));
+            assertFalse(rs.next());
+        }
+        assertEquals(first.value(), facade.initiate("alice", A, id(902), command).value());
+        sql("UPDATE fs_kernel.platform_idempotency SET expires_at=now()-interval '100 years'");
+        assertEquals(first.value(), facade.initiate("alice", A, id(903), command).value());
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.upload.initiated"));
+        assertEquals(1, intents("platform_audit_event", "action", "file-storage.upload.initiated"));
+        assertEquals(1, count("file"));
+        assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_idempotency WHERE status='COMPLETED'"));
+    }
+
+    @Test
+    void configIntentsAreAtomicAndAuditIsAppendOnly() throws SQLException {
+        draft(2, true);
+        UUID correlation = id(904);
+        var ctx = CorrelationContext.create(correlation);
+        assertEquals(2, configuration().activateBackend(ADMIN, ctx, new BackendId(OSS), 1, 2));
+        assertEquals(2, configuration().publishPolicy(ADMIN, ctx, SCOPE, 1, List.of(rule(SL, 0, true))));
+        assertEquals(2, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE correlation_id='" + correlation + "'"));
+        assertEquals(2, scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE correlation_id='" + correlation + "'"));
+        assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE correlation_id='" + correlation + "' AND tenant_id IS NULL AND event_type='file-storage.backend.activated'"));
+        assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE correlation_id='" + correlation + "' AND tenant_id='" + A.value() + "' AND event_type='file-storage.policy.published'"));
+        assertEquals(0, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE correlation_id='" + correlation + "' AND (payload_json::text LIKE '%ref:%' OR payload_json::text LIKE '%oss-test%' OR payload_json::text LIKE '%https://%')"));
+        assertEquals("55000", assertThrows(SQLException.class, () -> sql(
+                "UPDATE fs_kernel.platform_audit_event SET outcome='FAILURE'")).getSQLState());
+        assertEquals("55000", assertThrows(SQLException.class, () -> sql(
+                "DELETE FROM fs_kernel.platform_audit_event")).getSQLState());
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                configuration().publishPolicy(ADMIN, ctx, SCOPE, 1, List.of(rule(OL, 0, true)))).code());
+        assertEquals(2, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE correlation_id='" + correlation + "'"));
+    }
+
+    @Test
+    void requiredIntentFailureRollsBackMetadataAndLease() throws SQLException {
+        for (String table : List.of("platform_audit_event", "platform_event_outbox")) {
+            String column = table.equals("platform_audit_event") ? "action" : "event_type";
+            sql("ALTER TABLE fs_kernel." + table + " ADD CONSTRAINT reject_test_intent CHECK (" + column +
+                    " <> 'file-storage.upload.initiated') NOT VALID");
+            try {
+                assertThrows(JdbcTransactions.PersistenceFailure.class,
+                        () -> application().initiate(ALICE, command("intent-failure")));
+                assertEquals(0, count("file"));
+                assertEquals(0, count("file_version"));
+                assertEquals(0, count("upload_session"));
+                assertEquals(0, count("initiation_request"));
+                assertEquals(0, intents("platform_event_outbox", "event_type", "file-storage.upload.initiated"));
+                assertEquals(0, intents("platform_audit_event", "action", "file-storage.upload.initiated"));
+                assertEquals(0, scalar("SELECT count(*) FROM fs_kernel.platform_idempotency"));
+            } finally {
+                sql("ALTER TABLE fs_kernel." + table + " DROP CONSTRAINT reject_test_intent");
+            }
+        }
+        assertNotNull(application().initiate(ALICE, command("intent-failure")));
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.upload.initiated"));
+        assertEquals(1, intents("platform_audit_event", "action", "file-storage.upload.initiated"));
+    }
+
+    @Test
+    void requiredConfigEventFailureRollsBackPointerAndAudit() throws SQLException {
+        long audits = intents("platform_audit_event", "action", "file-storage.policy.published");
+        long events = intents("platform_event_outbox", "event_type", "file-storage.policy.published");
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_test_policy CHECK (event_type <> 'file-storage.policy.published') NOT VALID");
+        try {
+            assertThrows(JdbcTransactions.PersistenceFailure.class, () ->
+                    configuration().publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(SL, 0, true))));
+            assertEquals(1, scalar("SELECT policy_revision FROM fs.active_policy"));
+            assertEquals(1, count("policy_revision"));
+            assertEquals(1, count("policy_rule"));
+            assertEquals(audits, intents("platform_audit_event", "action", "file-storage.policy.published"));
+            assertEquals(events, intents("platform_event_outbox", "event_type", "file-storage.policy.published"));
+        } finally {
+            sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_test_policy");
+        }
+        assertEquals(2, configuration().publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(SL, 0, true))));
     }
 
     @Test

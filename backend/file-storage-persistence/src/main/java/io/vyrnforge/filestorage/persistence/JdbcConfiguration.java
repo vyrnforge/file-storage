@@ -7,6 +7,11 @@ import io.vyrnforge.filestorage.domain.StorageModel.BackendId;
 import io.vyrnforge.filestorage.domain.StorageModel.LocationId;
 import io.vyrnforge.filestorage.domain.StorageModel.Scope;
 import io.vyrnforge.platform.kernel.persistence.jdbc.JacksonRecordCodec;
+import io.vyrnforge.platform.kernel.context.ActorReference;
+import io.vyrnforge.platform.kernel.context.CorrelationContext;
+import io.vyrnforge.platform.kernel.audit.AuditIntentPort;
+import io.vyrnforge.platform.kernel.event.EventIntentPort;
+import java.util.Map;
 import io.vyrnforge.platform.kernel.persistence.jdbc.JdbcReliabilityTransaction;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -25,8 +30,10 @@ import javax.sql.DataSource;
  */
 public final class JdbcConfiguration {
     private final JdbcReliabilityTransaction transactions;
+    private final Clock clock;
 
     public JdbcConfiguration(DataSource dataSource, Clock clock) {
+        this.clock = Objects.requireNonNull(clock);
         transactions = new JdbcReliabilityTransaction(
                 new KernelDataSource(Objects.requireNonNull(dataSource), Connection.TRANSACTION_READ_COMMITTED),
                 new JacksonRecordCodec(), Objects.requireNonNull(clock));
@@ -45,12 +52,14 @@ public final class JdbcConfiguration {
      * Zero means first activation only. Replacing an active credential revision
      * drains the previous revision but never rewrites a session's pinned identity.
      */
-    public long activateBackend(BackendId backend, long expected, long candidate) {
+    public long activateBackend(ActorReference actor, CorrelationContext correlation, BackendId backend, long expected, long candidate) {
+        Objects.requireNonNull(actor);
+        Objects.requireNonNull(correlation);
         Objects.requireNonNull(backend);
         if (expected < 0 || candidate <= expected) {
             throw new Failure(Code.INVALID);
         }
-        return execute(connection -> {
+        return execute((connection, events, audits) -> {
             try (var ps = statement(connection, "SELECT backend_id FROM fs.backend WHERE backend_id=? FOR UPDATE",
                     backend.value()); var rs = ps.executeQuery()) {
                 if (!rs.next()) {
@@ -95,6 +104,9 @@ public final class JdbcConfiguration {
                     WHERE backend_id=? AND config_revision=? AND status='DRAFT'
                       AND validated_revision=config_revision
                     """, backend.value(), candidate));
+            MutationIntents.record(events, audits, clock, correlation, actor, null,
+                    "file-storage.backend.activated", "file-storage.backend", backend.value().toString(),
+                    Map.of("previousRevision", expected, "revision", candidate));
             return candidate;
         });
     }
@@ -104,7 +116,9 @@ public final class JdbcConfiguration {
      * Rollback of routing is a new revision with the historical rule content.
      * The caller supplies already-authorized eligible locations; this is not a grant API.
      */
-    public long publishPolicy(Scope scope, long expected, List<PolicyRule> input) {
+    public long publishPolicy(ActorReference actor, CorrelationContext correlation, Scope scope, long expected, List<PolicyRule> input) {
+        Objects.requireNonNull(actor);
+        Objects.requireNonNull(correlation);
         Objects.requireNonNull(scope);
         List<PolicyRule> rules = List.copyOf(input);
         if (expected < 0 || expected == Long.MAX_VALUE || rules.isEmpty()
@@ -112,7 +126,7 @@ public final class JdbcConfiguration {
             throw new Failure(Code.INVALID);
         }
         long revision = expected + 1;
-        return execute(connection -> {
+        return execute((connection, events, audits) -> {
             // Stable backend locks prevent concurrent activation from changing the
             // selected configuration during validation/publication.
             for (PolicyRule rule : rules.stream()
@@ -178,19 +192,23 @@ public final class JdbcConfiguration {
                 }
                 return null;
             });
+            MutationIntents.record(events, audits, clock, correlation, actor, tenant,
+                    "file-storage.policy.published", "file-storage.policy", MutationIntents.policyId(scope),
+                    Map.of("previousRevision", expected, "revision", revision,
+                            "consumer", scope.consumer(), "purpose", scope.purpose()));
             return revision;
         });
     }
 
     private interface Work {
-        long run(Connection connection) throws SQLException;
+        long run(Connection connection, EventIntentPort events, AuditIntentPort audits) throws SQLException;
     }
 
     private long execute(Work work) {
         try {
             return transactions.execute((connection, events, audits) -> {
                 try {
-                    return work.run(connection);
+                    return work.run(connection, events, audits);
                 } catch (SQLException ex) {
                     throw JdbcTransactions.translate(ex);
                 }
