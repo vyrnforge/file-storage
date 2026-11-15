@@ -12,6 +12,11 @@
     <dependencies>
         <dependency>
             <groupId>io.vyrnforge.filestorage</groupId>
+            <artifactId>file-storage-provider-spi</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.vyrnforge.filestorage</groupId>
             <artifactId>file-storage-persistence</artifactId>
             <version>${project.version}</version>
         </dependency>
