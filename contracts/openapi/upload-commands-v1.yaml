@@ -1,11 +1,43 @@
 openapi: 3.1.0
 info:
-  title: File Storage upload commands
+  title: File Storage transfer commands
   version: 0.1.0-draft
   description: Explicit isolated opt-in API. No live exposure or provider URLs.
 security:
   - bearer: []
 paths:
+  /v1/files/{fileId}/versions/{versionId}/download-handle:
+    post:
+      operationId: issueDownloadHandle
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - name: fileId
+          in: path
+          required: true
+          schema: {type: string, maxLength: 512}
+        - name: versionId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, properties: {}}
+      responses:
+        '200':
+          description: One-time opaque download handle, no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [handle, expiresAt]
+                properties:
+                  handle: {type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]+$'}
+                  expiresAt: {type: string, format: date-time}
+        default:
+          $ref: '#/components/responses/Error'
   /v1/uploads/{sessionId}/transfer-handle:
     post:
       operationId: issueUploadHandle

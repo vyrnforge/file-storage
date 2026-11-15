@@ -115,3 +115,5 @@ PR #75 accepted/merged 15015ec (157 verified tests). #31 next V7 durable scan qu
 PR #76 accepted/merged 05b6b8d (165 verified tests). #31 next isolated upload commands, durable verification and scan handoff, opt-in worker scheduling; terminal reconciliation/reissue/cleanup remains, #32/#33 production policy and #35 download separate.
 
 PR #77 accepted/merged 4f65a0d (168 tests). #31 next terminal replay and logical expiry/dead recovery; physical cleanup/reissue require remote-write quiescence evidence and quota policy, then independent #35 authorized download. Live gates deferred.
+
+PR #78 accepted/merged edb185c (173 tests); #31 logical recovery accepted, physical cleanup/reissue gated. #35 next exact clean-version download through private gateway; pagination/usage and deleted-state lifecycle separate.

@@ -43,3 +43,5 @@ FS-210A: internal trusted commands only; #16 actual secret manager/identity sele
 2026-11-15: PR #76 owner approved/merged 05b6b8d (165 tests, CI 43704441936). Owner authorized #31 completion HTTP and bounded worker execution; no live exposure, production scanner/limits or deployment.
 
 2026-11-15: PR #77 approved/merged 4f65a0d (168 tests, CI 43706027945). Owner authorized #31 terminal replay and bounded logical recovery; V8 cleanup HOLD only, no provider deletion/reissue or production migration/deployment.
+
+2026-11-15: PR #78 approved/merged edb185c (173 tests, CI 43707217512). Owner authorized #35 isolated authorized download. Explicit DOWNLOAD_TRANSFER grant, exact clean pin and single-use hash-only handle, no production migration/deployment.

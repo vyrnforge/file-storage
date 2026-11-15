@@ -13,3 +13,5 @@ Logical expiry/lease loss does not fence a remote provider write. Retain origina
 
 ## Verification
 Five additional PostgreSQL tests: expired claimed/unclaimed, immutable hold, dead verify rollback and terminal replay current grant, concurrent expiry and stale worker denial, expired scan evidence preserved, abandoned last scan lease dead recovery. Expanded combined native OSS HTTP terminal replay and conflicting checksum. V8 repeat migration. Expected 173 tests. Next: safe physical cleanup/reissue design and evidence gates; independently progress #35 authorized download with available/clean exact pin, while production dependencies deferred.
+
+Owner approved PR #78; squash merged edb185caa07332de52e84daabba2e201e41b998a. Final CI 43707217512 at 474de15 passed 173 tests. [Authorized download](28_AUTHORIZED_DOWNLOAD.md) next.

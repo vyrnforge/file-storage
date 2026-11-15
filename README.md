@@ -86,3 +86,5 @@ PR #75 accepted/merged 15015ec (157 tests). [Durable scan lifecycle](docs/archit
 PR #76 accepted/merged 05b6b8d (165 tests). [Upload completion commands and worker](docs/architecture/26_COMPLETION_API_WORKER.md) — isolated HTTP/durable verification orchestration in review.
 
 PR #77 accepted/merged 4f65a0d (168 tests). [Terminal upload recovery](docs/architecture/27_TERMINAL_UPLOAD_RECOVERY.md) — terminal replay and logical recovery in review; physical cleanup HOLD.
+
+PR #78 accepted/merged edb185c (173 tests). [Authorized private download](docs/architecture/28_AUTHORIZED_DOWNLOAD.md) — #35 exact clean-version download path in review.

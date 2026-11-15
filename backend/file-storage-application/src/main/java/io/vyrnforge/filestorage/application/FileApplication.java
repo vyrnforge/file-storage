@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * No object-store operations run inside the transaction.
  */
 public final class FileApplication {
-    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER }
+    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER }
     public enum Code { DENIED, NOT_FOUND, NO_PLACEMENT, CONFLICT, IN_PROGRESS, INVALID }
     public static final class Failure extends RuntimeException {
         private final Code code;
@@ -220,6 +220,20 @@ public final class FileApplication {
                     || e.file().state() != FileState.ACTIVE || !(terminal || ((pending || verifying)
                     && clock.instant().isBefore(e.session().expires())))) throw new Failure(Code.DENIED);
             requireAccess(caller, e, Action.UPLOAD_TRANSFER);
+            return null;
+        });
+    }
+
+    /** Explicit download authority for the available version, independent of upload ownership. */
+    public void authorizeDownload(Caller caller,FileId file,VersionId version) {
+        if(caller==null)throw new Failure(Code.DENIED);
+        Objects.requireNonNull(file);Objects.requireNonNull(version);
+        transactions.execute(unit->{
+            Entry e=unit.byFile(caller.tenant(),file).orElseThrow(()->new Failure(Code.NOT_FOUND));
+            if(!file.equals(e.file().id())||!version.equals(e.version().id())
+                    ||e.file().state()!=FileState.ACTIVE||e.version().state()!=VersionState.AVAILABLE
+                    ||e.session().state()!=UploadState.COMPLETED)throw new Failure(Code.NOT_FOUND);
+            requireAccess(caller,e,Action.DOWNLOAD_TRANSFER);
             return null;
         });
     }
