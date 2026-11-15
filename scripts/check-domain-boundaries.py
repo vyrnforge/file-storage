@@ -6,9 +6,9 @@ import sys
 root = Path(__file__).resolve().parents[1] / "backend"
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 allowed = {
-    "file-storage-domain": {("io.vyrnforge.platform", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
-    "file-storage-application": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.platform", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
-    "file-storage-security": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("io.vyrnforge.platform", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
+    "file-storage-domain": {("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
+    "file-storage-application": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
+    "file-storage-security": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-provider-spi": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
 }
 for module, expected in allowed.items():

@@ -16,7 +16,13 @@ public final class StorageModel {
         if (r < 1) throw new IllegalArgumentException("revision must be positive");
         return r;
     }
-    public record FileId(String value) { public FileId { text(value); } }
+    public record FileId(String value) {
+        public FileId {
+            text(value);
+            if (value.codePointCount(0, value.length()) > 512)
+                throw new IllegalArgumentException("file ID exceeds FileReference contract length");
+        }
+    }
     public record TenantId(UUID value) {
         public TenantId {
             Objects.requireNonNull(value);

@@ -15,7 +15,7 @@ flowchart TD
   ROUTER --> OSS[Alibaba OSS adapter]
   S3 --> B1[(S3 locations)]
   OSS --> B2[(OSS locations)]
-  DOMAIN --> K[Kernel 0.3.0 library]
+  DOMAIN --> K[Kernel 0.3.2 library]
   WORKER[Durable worker] --> DOMAIN
 ```
 
