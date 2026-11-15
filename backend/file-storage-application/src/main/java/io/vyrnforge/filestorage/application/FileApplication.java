@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * No object-store operations run inside the transaction.
  */
 public final class FileApplication {
-    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER }
+    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER, LIST_METADATA }
     public enum Code { DENIED, NOT_FOUND, NO_PLACEMENT, CONFLICT, IN_PROGRESS, INVALID }
     public static final class Failure extends RuntimeException {
         private final Code code;
@@ -97,6 +97,12 @@ public final class FileApplication {
         Optional<Entry> byFile(TenantId tenant,FileId file);
         Optional<Entry> bySession(TenantId tenant,SessionId session);
         void insert(Entry entry);
+        default CatalogPage catalog(Caller caller,List<CatalogGrant> grants,FileId after,int limit,Instant now) {
+            throw new Failure(Code.DENIED);
+        }
+        default CatalogUsage usage(Caller caller,List<CatalogGrant> grants,Instant now) {
+            throw new Failure(Code.DENIED);
+        }
     }
     /** Safe consumer projection: no physical key, bucket, provider or credential. */
     public record View(FileReference file,VersionId version,FileState fileState,
@@ -105,6 +111,35 @@ public final class FileApplication {
 
     /** Metadata permission alone does not disclose the upload session. */
     public record MetadataView(FileReference file,VersionId version,FileState fileState,VersionState versionState,String name,long declaredSize,String declaredMimeType) {}
+
+    /** Trusted, current LIST_METADATA grant projection; null file means owned files for purpose. */
+    public record CatalogGrant(String purpose,FileId file,Instant expiresAt) {
+        public CatalogGrant {text(purpose);Objects.requireNonNull(expiresAt);}
+    }
+    public record CatalogPage(List<MetadataView> items,FileId nextAfter) {
+        public CatalogPage {items=List.copyOf(items);}
+    }
+    /** Logical visible records, not physical bytes, quota reservations or provider billing. */
+    public record UsageBucket(VersionState state,long fileCount,String declaredBytes,String availableBytes) {}
+    public record CatalogUsage(List<UsageBucket> states) {
+        public CatalogUsage {states=List.copyOf(states);}
+    }
+
+    public CatalogPage catalog(Caller caller,List<CatalogGrant> grants,FileId after,int limit) {
+        if(caller==null)throw new Failure(Code.DENIED);
+        if(limit<1||limit>100)throw new Failure(Code.INVALID);
+        var scope=catalogScope(grants);
+        return transactions.execute(unit->unit.catalog(caller,scope,after,limit,clock.instant()));
+    }
+    public CatalogUsage usage(Caller caller,List<CatalogGrant> grants) {
+        if(caller==null)throw new Failure(Code.DENIED);
+        var scope=catalogScope(grants);
+        return transactions.execute(unit->unit.usage(caller,scope,clock.instant()));
+    }
+    private static List<CatalogGrant> catalogScope(List<CatalogGrant> grants) {
+        if(grants==null||grants.isEmpty()||grants.size()>256)throw new Failure(Code.DENIED);
+        return List.copyOf(grants);
+    }
 
     private final Transactions transactions;
     private final Authorization authorization;

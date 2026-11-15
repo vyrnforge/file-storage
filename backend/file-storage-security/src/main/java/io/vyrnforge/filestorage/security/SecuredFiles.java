@@ -119,6 +119,31 @@ public final class SecuredFiles {
             app.authorizeDownload(caller,file,version);return caller;
         });
     }
+    public Result<CatalogPage> catalog(String bearer,TenantId tenant,UUID correlationId,FileId after,int limit){
+        return execute(bearer,tenant,correlationId,Action.LIST_METADATA,null,
+            (app,caller,correlation)->app.catalog(caller,catalogGrants(caller),after,limit));
+    }
+    public Result<CatalogUsage> usage(String bearer,TenantId tenant,UUID correlationId){
+        return execute(bearer,tenant,correlationId,Action.LIST_METADATA,null,
+            (app,caller,correlation)->app.usage(caller,catalogGrants(caller)));
+    }
+    private List<CatalogGrant> catalogGrants(Caller caller){
+        try{
+            var now=clock.instant();
+            var current=List.copyOf(grants.current(caller));
+            if(current.size()>4096)throw new IllegalArgumentException("grant scope exceeds bound");
+            var result=new ArrayList<CatalogGrant>();
+            for(var g:current){
+                if(g.action()!=Action.LIST_METADATA||!g.active(now)||!g.tenant().equals(caller.tenant())
+                    ||!g.actor().equals(caller.actor())||!g.consumer().equals(caller.consumer()))continue;
+                if(g.scope()==GrantScope.OWNED_FILE||g.scope()==GrantScope.EXACT_FILE)
+                    result.add(new CatalogGrant(g.purpose(),g.file(),g.expiresAt()));
+                if(result.size()>256)throw new IllegalArgumentException("catalog scope exceeds bound");
+            }
+            if(result.isEmpty())throw new IllegalArgumentException("no catalog grant");
+            return List.copyOf(result);
+        }catch(RuntimeException ex){throw new SecurityFailure(SecurityCode.ACCESS_DENIED);}
+    }
     private VerifiedAccess authenticate(String bearer) {
         return AccessAuthentication.verify(trust, verifier, clock, bearer);
     }
