@@ -114,6 +114,11 @@ public final class SecuredFiles {
             return caller;
         });
     }
+    public Result<Caller> authorizeDownload(String bearer,TenantId tenant,UUID correlationId,FileId file,VersionId version){
+        return execute(bearer,tenant,correlationId,Action.DOWNLOAD_TRANSFER,null,(app,caller,correlation)->{
+            app.authorizeDownload(caller,file,version);return caller;
+        });
+    }
     private VerifiedAccess authenticate(String bearer) {
         return AccessAuthentication.verify(trust, verifier, clock, bearer);
     }
