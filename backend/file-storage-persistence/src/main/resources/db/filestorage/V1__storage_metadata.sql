@@ -138,3 +138,22 @@ CREATE TABLE fs.file_grant (
 
 CREATE INDEX file_grant_actor_lookup ON fs.file_grant (tenant_id, actor, consumer);
 CREATE INDEX upload_session_expiry ON fs.upload_session (expires_at, expires_nano_remainder);
+
+-- Physical identities are immutable; create a new backend/location for migration.
+CREATE FUNCTION fs.reject_physical_change() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW IS DISTINCT FROM OLD THEN
+        RAISE EXCEPTION 'physical storage identity is immutable' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER immutable_backend
+    BEFORE UPDATE ON fs.backend
+    FOR EACH ROW EXECUTE FUNCTION fs.reject_physical_change();
+
+CREATE TRIGGER immutable_location
+    BEFORE UPDATE ON fs.storage_location
+    FOR EACH ROW EXECUTE FUNCTION fs.reject_physical_change();

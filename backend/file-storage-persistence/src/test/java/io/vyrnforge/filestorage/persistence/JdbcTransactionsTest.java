@@ -111,7 +111,12 @@ class JdbcTransactionsTest {
     @Test
     void p01_migrationIsRepeatable() throws SQLException {
         StorageMigrations.migrate(dataSource);
-        assertEquals(1, count("flyway_schema_history"));
+        try (var connection = dataSource.getConnection();
+             var statement = connection.createStatement();
+             var rs = statement.executeQuery("SELECT count(*) FROM fs.flyway_schema_history WHERE version = '1' AND success")) {
+            rs.next();
+            assertEquals(1, rs.getLong(1));
+        }
         assertEquals(2, count("backend"));
     }
 
@@ -231,7 +236,18 @@ class JdbcTransactionsTest {
             return unit;
         });
         assertThrows(JdbcTransactions.PersistenceFailure.class, () -> escaped.configuration(SCOPE));
-        assertEquals(2, jdbc.execute(u -> u.configuration(SCOPE).orElseThrow().policy().revision()));
+        long revision = jdbc.execute(u -> u.configuration(SCOPE).orElseThrow().policy().revision());
+        assertEquals(2, revision);
+    }
+
+    @Test
+    void physicalIdentityCannotBeRepointed() throws SQLException {
+        application().initiate(ALICE, command("one"));
+        assertEquals("23514", assertThrows(SQLException.class, () -> sql(
+                "UPDATE fs.storage_location SET bucket='different' WHERE location_id=?", OL)).getSQLState());
+        assertEquals("23514", assertThrows(SQLException.class, () -> sql(
+                "UPDATE fs.backend SET endpoint='https://other.example.test' WHERE backend_id=?", OSS)).getSQLState());
+        assertEquals(1, count("file"));
     }
 
     @Test

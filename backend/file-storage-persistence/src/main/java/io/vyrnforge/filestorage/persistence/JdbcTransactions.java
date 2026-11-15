@@ -242,9 +242,9 @@ public final class JdbcTransactions implements Transactions {
             Instant expiry = rs.getObject("expires_at", OffsetDateTime.class).toInstant()
                     .plusNanos(rs.getInt("expires_nano_remainder"));
             // Rehydrate original initiated state, not an implicit expiry transition.
-            UploadSession session = UploadSession.initiate(
+            UploadSession session = UploadSession.restoreInitiated(
                     new SessionId(rs.getObject("session_id", UUID.class)), file, versionId,
-                    scope, placement, locator, expiry, expiry.minusNanos(1));
+                    scope, placement, locator, expiry);
             Caller caller = new Caller(tenant, rs.getString("actor"), scope.consumer());
             String key = rs.getString("request_key");
             Initiate command = new Initiate(scope.purpose(), file.name(), rs.getLong("expected_size"),
