@@ -1569,6 +1569,8 @@ class JdbcTransactionsTest {
         registry.registerLocation(ADMIN, ctx, backend, "validation-bucket", "one");
         assertEquals(1, registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(target), JdbcTransactionsTest::validReport));
         assertEquals(2, registry.reviseCredential(ADMIN, ctx, backend, 1, new CredentialRef("ref:synthetic/superseded:v2")));
+        long activationEvents = intents("platform_event_outbox", "event_type", "file-storage.backend.activated");
+        long activationAudits = intents("platform_audit_event", "action", "file-storage.backend.activated");
         assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
                 configuration().activateBackend(ADMIN, ctx, backend, 0, 1)).code());
         assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
@@ -1576,10 +1578,13 @@ class JdbcTransactionsTest {
                     throw new AssertionError("superseded candidate must not reach validator");
                 })).code());
         assertTrue(registry.active(backend).isEmpty());
-        assertEquals(0, intents("platform_event_outbox", "event_type", "file-storage.backend.activated"));
+        assertEquals(activationEvents, intents("platform_event_outbox", "event_type", "file-storage.backend.activated"));
+        assertEquals(activationAudits, intents("platform_audit_event", "action", "file-storage.backend.activated"));
         assertEquals(2, registry.validateDraft(ADMIN, ctx, backend, 2, Set.of(target), JdbcTransactionsTest::validReport));
         assertEquals(2, configuration().activateBackend(ADMIN, ctx, backend, 0, 2));
         assertEquals(2, registry.active(backend).orElseThrow().revision());
+        assertEquals(activationEvents + 1, intents("platform_event_outbox", "event_type", "file-storage.backend.activated"));
+        assertEquals(activationAudits + 1, intents("platform_audit_event", "action", "file-storage.backend.activated"));
     }
 
     @Test
