@@ -123,6 +123,10 @@ public final class SecuredFiles {
         return execute(bearer,tenant,correlationId,Action.LIST_METADATA,null,
             (app,caller,correlation)->app.catalog(caller,catalogGrants(caller),after,limit));
     }
+    public Result<DeletedPage> deleted(String bearer,TenantId tenant,UUID correlationId,FileId after,int limit){
+        return execute(bearer,tenant,correlationId,Action.LIST_DELETED_METADATA,null,
+            (app,caller,correlation)->app.deleted(caller,resourceGrants(caller,Action.LIST_DELETED_METADATA),after,limit));
+    }
     public Result<CatalogUsage> usage(String bearer,TenantId tenant,UUID correlationId){
         return execute(bearer,tenant,correlationId,Action.LIST_METADATA,null,
             (app,caller,correlation)->app.usage(caller,catalogGrants(caller)));
