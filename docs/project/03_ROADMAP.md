@@ -99,3 +99,5 @@ FS-300A policy administration accepted/merged PR #67 (c08dd44), 133 verified tes
 PR #68 accepted and merged 4c61e16; 137 verified tests. Owner directed dependency-first delivery. #28 independent superseded draft safety before #30 isolated runtime composition/readiness; #14/#16/#17 external inputs and #18/#19/#26/#27 live integration deferred without dropping gates. #57 remains next after isolated #30.
 
 PR #69 accepted/merged 28f66a0; 139 verified tests. #28 latest-only validation/activation guard complete, concrete evidence still gated. #30 isolated runtime composition/readiness in review; #57 next candidate after acceptance, live integration separately gated.
+
+PR #70 accepted/merged a062618; 143 tests. Isolated #30 complete; owner authorized #57 isolated gateway foundation. First slice explicit authority/resolver/limits and transfer-only HTTP roles, then durable claim and real adapter integration; actual IAM, provider evidence and production limits remain gated. #31/#35 separately scoped.

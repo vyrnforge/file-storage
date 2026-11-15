@@ -70,3 +70,5 @@ FS-300A foundation merged (PR #64, 125 verified tests). HTTP boundary refinement
 PR #68 accepted/merged (137 tests). Dependency-first delivery: independent lifecycle safety in review, isolated runtime composition next; actual IAM/provider and deployment gates remain open.
 
 - [FS-300A runtime composition](docs/architecture/19_RUNTIME_COMPOSITION.md) — explicit isolated API wiring, schema/authority readiness; no live exposure.
+
+PR #70 accepted/merged a062618 (143 tests); isolated #30 complete, live exposure gates deferred. [FS-300G private transfer gateway](docs/architecture/20_PRIVATE_TRANSFER_GATEWAY.md) — first bounded streaming/authority/provider-neutral foundation in review.

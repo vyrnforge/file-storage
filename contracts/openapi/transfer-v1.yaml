@@ -1,0 +1,61 @@
+openapi: 3.1.0
+info:
+  title: VyrnForge File Storage Private Transfer
+  version: 0.1.0-draft
+  description: Isolated FS-300G gateway foundation. No live API, provider addresses, upload completion or file availability guarantee. Single-use handles require authenticated current authorization.
+security:
+  - bearer: []
+paths:
+  /transfer/v1/upload:
+    put:
+      operationId: transferUpload
+      parameters:
+        - $ref: '#/components/parameters/Handle'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '204':
+          description: Provider accepted staged bytes. Not verified completion.
+        default:
+          $ref: '#/components/responses/Error'
+  /transfer/v1/download:
+    get:
+      operationId: transferDownload
+      parameters:
+        - $ref: '#/components/parameters/Handle'
+      responses:
+        '200':
+          description: Exact byte stream from authorized pin; interruptions may yield partial response.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        default:
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  parameters:
+    Handle:
+      name: X-Transfer-Handle
+      in: header
+      required: true
+      description: Sensitive opaque single-use handle; never log.
+      schema: {type: string, minLength: 32, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$'}
+  responses:
+    Error:
+      description: Neutral pre-commit failure (400, 403, 404, 409, 413, 429, 503, 504).
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [code]
+            properties:
+              code:
+                type: string
+                enum: [INVALID, DENIED, BUSY, TOO_LARGE, NOT_FOUND, CONFLICT, TIMEOUT, UNAVAILABLE]
