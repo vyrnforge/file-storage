@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FS-120A dependency policy: domain + SPI + application + security, no runtime framework/provider SDK."""
+"""FS-120A dependency policy: domain + SPI + application + security + persistence, no runtime framework/provider SDK."""
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import sys
@@ -12,6 +12,10 @@ allowed = {
     "file-storage-persistence": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("org.flywaydb", "flyway-core", "compile"), ("org.flywaydb", "flyway-database-postgresql", "runtime"), ("org.postgresql", "postgresql", "runtime"), ("org.testcontainers", "postgresql", "test"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-provider-spi": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
 }
+reactor = ET.parse(root / "pom.xml")
+modules = {node.text for node in reactor.findall("m:modules/m:module", ns)}
+if modules != set(allowed):
+    sys.exit(f"Unexpected Maven reactor modules: {modules}")
 for module, expected in allowed.items():
     pom = ET.parse(root / module / "pom.xml")
     actual = {(d.findtext("m:groupId", namespaces=ns), d.findtext("m:artifactId", namespaces=ns), d.findtext("m:scope", default="compile", namespaces=ns)) for d in pom.findall("m:dependencies/m:dependency", ns)}
@@ -27,4 +31,4 @@ for module, expected in allowed.items():
                     prefixes += ("javax.sql.", "org.flywaydb.", "io.vyrnforge.filestorage.application.")
                 if not any(line.strip().startswith("import " + prefix) for prefix in prefixes):
                     sys.exit(f"Unexpected import in {path}: {line}")
-print("FS-110B domain, provider SPI, application and security dependency boundaries OK")
+print("FS-120A domain, provider SPI, application, security and persistence dependency boundaries OK")

@@ -15,3 +15,6 @@ P01 Flyway migrates empty PostgreSQL and validates repeat migration. P02 actual 
 
 ## Handoff
 FS-120B Kernel JDBC executeIdempotent and config CAS/authoritative grants; FS-120C audit/outbox and durable recovery. Overall FS-110 live issuer/JWKS/authority/runtime integration still release-blocking. No public API, cloud connection, data import, production migrations or release. Owner review required.
+
+## Hosted verification (2026-11-15)
+[CI 43667089332](https://github.com/vyrnforge/file-storage/actions/runs/43667089332) at code commit 7d64bf3868ea80bbccd4fb76c955968e7513b071 completed SUCCESS. Job logs show PostgreSQL 17.12 from the disposable postgres:17-alpine test image; Flyway applied V1 to fs and repeat migration validated. 9 real PostgreSQL tests, 31 existing tests = 40 total, zero failures/errors/skips; five modules BUILD SUCCESS, six POM readability checks and dependency guard passed. P01–P07 verified for initial metadata/read scope. Prior code head mergeable/clean. Final evidence/guard refinement requires fresh CI. Local verification rechecked: Java 21 available, Maven/Docker absent, GitHub DNS unresolved. Production DB version, digest pinning, pool/role/backup/restore/RLS, live authority integration, concurrency and Kernel JDBC intents remain open; no deployment. PR #11 unmerged at capture.

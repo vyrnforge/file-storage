@@ -40,3 +40,5 @@ FS-110B verifier slice implemented on PR #9; hosted CI 43665624103 passed 31 tes
 PR #8 Kernel 0.3.2 maintenance merged; PR #9 synchronized with main. Combined CI required; historical 0.3.0 evidence not a substitute.
 
 2026-11-15: FS-120A authorized after PR #10 merge. Schema and JDBC adapter for existing initiation/read use cases, disposable PostgreSQL acceptance. FS-120B: Kernel executeIdempotent, activation CAS/concurrency and durable grant integration. FS-120C: Kernel audit/outbox, durable work/recovery. No production migrations or live IAM closure. [FS-120A contract](../architecture/05_POSTGRESQL_PERSISTENCE.md).
+
+FS-120A code CI 43667089332: 40 tests passed, 9 real PostgreSQL tests, five modules and six readable POMs. PR #11 review pending; local verification outstanding. FS-120B/C not started.
