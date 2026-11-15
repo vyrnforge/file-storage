@@ -262,6 +262,14 @@ public final class JdbcTransactions implements Transactions {
             Locator locator = new Locator(location, rs.getString("object_key"), null);
             VersionState versionState = VersionState.valueOf(rs.getString("version_state"));
             UploadState uploadState = UploadState.valueOf(rs.getString("session_state"));
+            boolean valid = switch (versionState) {
+                case PENDING -> uploadState == UploadState.INITIATED;
+                case VERIFYING -> uploadState == UploadState.VERIFYING;
+                case AVAILABLE -> uploadState == UploadState.COMPLETED;
+                case QUARANTINED -> uploadState == UploadState.FAILED;
+                case FAILED -> uploadState == UploadState.FAILED || uploadState == UploadState.EXPIRED;
+            };
+            if (!valid) throw new PersistenceFailure();
             String digest = rs.getString("observed_sha256");
             Content content = digest == null ? null : new Content(rs.getLong("observed_size"), digest, rs.getString("detected_mime_type"));
             Version version = Version.restore(file, versionId, locator, versionState, content);
@@ -270,7 +278,7 @@ public final class JdbcTransactions implements Transactions {
                     rs.getLong("config_revision"));
             Instant expiry = rs.getObject("expires_at", OffsetDateTime.class).toInstant()
                     .plusNanos(rs.getInt("expires_nano_remainder"));
-            // Rehydrate original initiated state, not an implicit expiry transition.
+            // Rehydrate the persisted state; expiry projection is separate.
             UploadSession session = UploadSession.restore(
                     new SessionId(rs.getObject("session_id", UUID.class)), file, versionId,
                     scope, placement, locator, expiry, uploadState);

@@ -120,6 +120,7 @@ public final class UploadScanWorker {
         private final Deadline deadline;
         private long remaining;
         private boolean eof;
+        private boolean invalid;
         MeasuredStream(InputStream raw,long size,int bufferBound,Deadline deadline){
             this.raw=Objects.requireNonNull(raw);remaining=size;this.bufferBound=bufferBound;this.deadline=deadline;
             try{hash=MessageDigest.getInstance("SHA-256");}
@@ -134,16 +135,16 @@ public final class UploadScanWorker {
             deadline.remaining();
             if(eof)return -1;
             if(remaining==0){
-                if(raw.read()!=-1)throw new Mismatch();
+                if(raw.read()!=-1){invalid=true;throw new Mismatch();}
                 eof=true;return -1;
             }
             int n=raw.read(bytes,offset,(int)Math.min(Math.min(length,bufferBound),remaining));
-            if(n<=0)throw new Mismatch();
+            if(n<=0){invalid=true;throw new Mismatch();}
             hash.update(bytes,offset,n);remaining-=n;
             deadline.remaining();return n;
         }
         String complete()throws IOException{
-            if(remaining!=0||read()!=-1)throw new Mismatch();
+            if(invalid||remaining!=0||read()!=-1)throw new Mismatch();
             return HexFormat.of().formatHex(hash.digest());
         }
     }
