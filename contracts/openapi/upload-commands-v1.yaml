@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: File Storage upload commands
+  title: File Storage transfer commands
   version: 0.1.0-draft
   description: Explicit isolated opt-in API. No live exposure or provider URLs.
 security:
@@ -34,102 +34,7 @@ paths:
                 additionalProperties: false
                 required: [handle, expiresAt]
                 properties:
-                  handle: {type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]+  /v1/uploads/{sessionId}/transfer-handle:
-    post:
-      operationId: issueUploadHandle
-      parameters:
-        - $ref: '#/components/parameters/Session'
-        - $ref: '#/components/parameters/Tenant'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, additionalProperties: false, properties: {}}
-      responses:
-        '200':
-          description: One-time sensitive handle. No-store. Duplicate issuance conflicts.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: false
-                required: [handle, expiresAt]
-                properties:
                   handle: {type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]+$'}
-                  expiresAt: {type: string, format: date-time}
-        default:
-          $ref: '#/components/responses/Error'
-  /v1/uploads/{sessionId}/complete:
-    post:
-      operationId: requestUploadCompletion
-      parameters:
-        - $ref: '#/components/parameters/Session'
-        - $ref: '#/components/parameters/Tenant'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [sha256]
-              properties:
-                sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
-      responses:
-        '200':
-          description: Authorized terminal replay of the original completion operation.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CompletionStatus'
-        '202':
-          description: Durable verification operation status and logical lifecycle. Same session/digest replays.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CompletionStatus'
-        default:
-          $ref: '#/components/responses/Error'
-components:
-  schemas:
-    CompletionStatus:
-      type: object
-      additionalProperties: false
-      required: [sessionId, operationId, status, uploadState, versionState]
-      properties:
-        sessionId: {type: string, format: uuid}
-        operationId: {type: string, format: uuid}
-        status: {type: string, enum: [PENDING, SUCCEEDED, DEAD]}
-        uploadState: {type: string, enum: [INITIATED, VERIFYING, COMPLETED, FAILED, EXPIRED]}
-        versionState: {type: string, enum: [PENDING, VERIFYING, AVAILABLE, QUARANTINED, FAILED]}
-  securitySchemes:
-    bearer:
-      type: http
-      scheme: bearer
-  parameters:
-    Session:
-      name: sessionId
-      in: path
-      required: true
-      schema: {type: string, format: uuid}
-    Tenant:
-      name: X-Tenant-Id
-      in: header
-      required: true
-      schema: {type: string, format: uuid}
-  responses:
-    Error:
-      description: Neutral metadata error; no token or placement.
-      content:
-        application/json:
-          schema:
-            type: object
-            required: [code, correlationId, requestId]
-            properties:
-              code: {type: string}
-              correlationId: {type: string, format: uuid}
-              requestId: {type: string, format: uuid}
-}
                   expiresAt: {type: string, format: date-time}
         default:
           $ref: '#/components/responses/Error'
