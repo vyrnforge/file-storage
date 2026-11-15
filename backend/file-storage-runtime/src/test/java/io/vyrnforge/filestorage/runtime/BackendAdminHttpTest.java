@@ -118,7 +118,9 @@ class BackendAdminHttpTest {
         if (body != null) request.header("Content-Type", "application/json");
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
         try (var client = HttpClient.newHttpClient()) {
-            return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            if (body != null && response.statusCode() == 200) OpenApiContract.assertRequest(response, body);
+            return response;
         }
     }
 
@@ -130,8 +132,9 @@ class BackendAdminHttpTest {
         return call(ctx, "POST", path, "platform", body, false);
     }
 
-    private static void status(int expected, HttpResponse<String> response) {
+    private static void status(int expected, HttpResponse<String> response) throws Exception {
         assertEquals(expected, response.statusCode(), response.body());
+        OpenApiContract.assertResponse(response);
         assertEquals(CORRELATION.toString(), response.headers().firstValue("X-Correlation-Id").orElseThrow());
         assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
         for (String value : List.of("s3.example.test", "private-bucket", "private-prefix", "ref:synthetic", "private authority detail"))

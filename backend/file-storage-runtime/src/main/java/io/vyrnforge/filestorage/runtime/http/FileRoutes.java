@@ -32,7 +32,7 @@ public final class FileRoutes {
             @PathVariable("fileId") String fileId) {
         var context = ApiRequest.from(request);
         var result = secured.metadata(context.bearer(), context.tenant(), context.correlationId(),
-                new FileId(ApiRequest.bounded(fileId, 512)));
+                new FileId(ApiRequest.fileId(fileId)));
         return ApiResponses.success(result.correlation(), FileDtos.metadata(result.value()));
     }
 

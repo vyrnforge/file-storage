@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Import;
 
 /** One shared metadata transport boundary for consumer and administrative routes. */
 @Configuration(proxyBeanMethods = false)
-@Import(ApiErrors.class)
+@Import({ApiErrors.class, MetadataJsonConfiguration.class})
 public class HttpBoundaryConfiguration {
     @Bean
     ApiAdmissionFilter apiAdmissionFilter(@Value("${fs.role}") String role) {

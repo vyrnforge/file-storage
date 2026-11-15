@@ -37,7 +37,7 @@ for module, expected in allowed.items():
                 if module == "file-storage-persistence":
                     prefixes += ("javax.sql.", "org.flywaydb.", "io.vyrnforge.filestorage.application.", "io.vyrnforge.filestorage.security.")
                 if module == "file-storage-runtime":
-                    prefixes += ("javax.sql.", "jakarta.servlet.", "org.springframework.", "io.vyrnforge.filestorage.runtime.", "io.vyrnforge.filestorage.application.", "io.vyrnforge.filestorage.security.", "io.vyrnforge.filestorage.persistence.")
+                    prefixes += ("javax.sql.", "jakarta.servlet.", "org.springframework.", "tools.jackson.core.", "tools.jackson.databind.", "io.vyrnforge.filestorage.runtime.", "io.vyrnforge.filestorage.application.", "io.vyrnforge.filestorage.security.", "io.vyrnforge.filestorage.persistence.")
                 if not any(line.strip().startswith("import " + prefix) for prefix in prefixes):
                     sys.exit(f"Unexpected import in {path}: {line}")
 print("FS-300A domain, provider SPI, S3/OSS adapters, application, security, persistence and runtime dependency boundaries OK")

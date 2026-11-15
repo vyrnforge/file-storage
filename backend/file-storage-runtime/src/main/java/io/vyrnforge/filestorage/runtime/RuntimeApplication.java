@@ -24,7 +24,6 @@ public class RuntimeApplication {
         for (Class<?> source : extraTestSources) app.addPrimarySources(Set.of(source));
         app.setDefaultProperties(Map.of("server.address", "127.0.0.1", "fs.role", "API",
                 "server.error.include-message", "never", "server.error.include-stacktrace", "never",
-                "spring.jackson.deserialization.fail-on-unknown-properties", "true",
                 "spring.flyway.enabled", "false"));
         app.addInitializers(context -> {
             var env = context.getEnvironment();
