@@ -1,6 +1,6 @@
 # Delivery roadmap and initial backlog
 
-Approved direction 2026-11-14. Phase 1 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 in scope; FS-120B2/C and later increments not authorized. IDs are stable planning identifiers, not created GitHub issues. Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
+Approved direction 2026-11-14. Phase 1 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2/C and later increments not authorized. Stable FS planning identifiers now map to GitHub issues via [master delivery tracker #13](https://github.com/vyrnforge/file-storage/issues/13). Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
 
 | ID | Phase | Priority | Deliverable / acceptance |
 |---|---|---|---|
@@ -24,7 +24,7 @@ Approved direction 2026-11-14. Phase 1 FS-100A merged; FS-100B merged; FS-110A/B
 
 Security/reliability built into each phase, not deferred to Phase 5. Sequence may change after audit. No dates/estimates until requirements and team capacity established. For each task record Specified / Implemented / Applied / Verified separately, evidence links and remaining blockers. Phase 0 exit: owner approves explicit ADRs and roadmap; then create implementation issues.
 
-## First increment refinement
+## First increment refinement (historical record)
 FS-100A ([scope and acceptance](07_FIRST_IMPLEMENTATION_INCREMENT.md)) splits FS-100 into pure domain/placement and provider SPI foundations; FS-100B follows with service composition and persistence contract design. FS-100A sequencing refinement explicitly approved; FS-100B merged. FS-002 repository rules and CI are partly verified; administrative security readback, licensing and remaining enforcement evidence stay open.
 
 FS-100A: PR #5 merged, hosted final CI passed, local verification outstanding. FS-100B: [outcome and rules](09_PRODUCT_OUTCOMES_AND_RULES.md), [acceptance](10_FS100B_ACCEPTANCE.md); application foundation merged (PR #6). FS-110A merged; FS-110B cryptographic verifier in review, live deployment contract blocked. FS-120 not authorized.
@@ -46,3 +46,20 @@ FS-120A code CI 43667089332: 40 tests passed, 9 real PostgreSQL tests, five modu
 FS-120B split into B1 (Kernel lease, atomic initiation and replay, concurrency/failure tests) and B2 (activation CAS, durable grant retrieval). B1 is the next bounded increment after PR #11 merge. FS-120C audit/outbox integration remains separate; no external I/O or public API.
 
 FS-120B1: PR #12 implementation verified by hosted CI 43667699481 (46 tests, zero failures); local verification and owner review/merge pending. B2/C not started.
+
+## Executable backlog — 2026-11-15
+Master tracker [#13](https://github.com/vyrnforge/file-storage/issues/13) is the live work-package checklist for the approved roadmap. Its 37 linked issues (#14–#50) contain the detailed scope, dependencies, acceptance criteria and suggested responsible disciplines. This planning decomposition does not expand approved scope or authorize implementation, production application, release or cross-repository changes. PR #12 merged at `f28e9093105e5620e2b9a0eb8e36b2de6595c9f2`; final CI [43667799363](https://github.com/vyrnforge/file-storage/actions/runs/43667799363) passed (46 tests at the verified code head). Historical in-review statements above are superseded.
+
+| Workstream | Issues | Gate |
+|---|---|---|
+| Product decisions, legacy, governance, IAM | #14–#19 | Owner/security evidence and live IAM contract; parallel to isolated persistence work |
+| Persistence/reliability | #20–#23 | CAS then durable grants, atomic audit/events, durable recovery |
+| Providers/control plane | #24–#29 | Privacy/provider contract, tested adapters, registry and validated policy switching |
+| Runtime/data plane | #30–#35 | HTTP contract and live IAM gate; integrity and quota before upload completion |
+| Lifecycle | #36–#38 | Retention, bounded cleanup, verified migration |
+| Console | #39–#41 | Shared UI and actual authorized service contracts |
+| Enterprise operations | #42–#44 | Deployment configuration, threat tests, recovery/capacity evidence |
+| Legacy and consumers | #45–#48 | Conditional legacy migration; SDK then Asset/ITSM staging acceptance |
+| Release and optional follow-up | #49–#50 | Owner release approval; optional Kernel adapter only after proven demand |
+
+Recommended next authorization: FS-120B2A [#20](https://github.com/vyrnforge/file-storage/issues/20). Record each implementation PR against its stable FS ID and issue number, test the issue acceptance criteria against compatible revisions, record gaps separately, and close only after evidence and owner acceptance. Track Specified / Implemented / Applied / Verified distinctly. No fixed dates, named-person assignments or production SLO commitments from this decomposition. Issue #13 remains open until the enterprise release acceptance is complete; conditional #50 may be deferred explicitly.
