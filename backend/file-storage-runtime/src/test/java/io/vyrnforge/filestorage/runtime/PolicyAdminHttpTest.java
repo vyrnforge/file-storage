@@ -133,7 +133,9 @@ class PolicyAdminHttpTest {
         if (body != null) request.header("Content-Type", "application/json");
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
         try (var client = HttpClient.newHttpClient()) {
-            return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            if (body != null && response.statusCode() == 200) OpenApiContract.assertRequest(response, body);
+            return response;
         }
     }
 

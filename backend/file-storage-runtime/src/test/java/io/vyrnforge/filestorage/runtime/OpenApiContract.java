@@ -87,6 +87,13 @@ final class OpenApiContract {
         validate(operation.document(), map(content.get("schema")), body, "$");
     }
 
+    static void assertRequest(HttpResponse<String> response, String body) throws Exception {
+        var operation = operation(response);
+        var request = resolve(operation.document(), map(operation.operation().get("requestBody")));
+        var content = map(map(request.get("content")).get("application/json"));
+        validate(operation.document(), map(content.get("schema")), JSON.readValue(body, Object.class), "$");
+    }
+
     private static Map<?, ?> resolve(Map<?, ?> root, Map<?, ?> schema) {
         if (!schema.containsKey("$ref")) return schema;
         String ref = (String) schema.get("$ref");
@@ -125,6 +132,7 @@ final class OpenApiContract {
                 assertInstanceOf(List.class, value, path);
                 var items = (List<?>) value;
                 if (schema.get("maxItems") instanceof Number n) assertTrue(items.size() <= n.intValue(), path);
+                if (schema.get("minItems") instanceof Number n) assertTrue(items.size() >= n.intValue(), path);
                 for (Object item : items) validate(root, map(schema.get("items")), item, path+"[]");
             }
             case "string" -> {
@@ -132,12 +140,15 @@ final class OpenApiContract {
                 String text = (String) value;
                 if ("uuid".equals(schema.get("format"))) UUID.fromString(text);
                 if ("date-time".equals(schema.get("format"))) OffsetDateTime.parse(text);
+                if (schema.get("pattern") instanceof String regex) assertTrue(Pattern.compile(regex).matcher(text).find(), path);
+                if (schema.get("minLength") instanceof Number n) assertTrue(text.codePointCount(0, text.length()) >= n.intValue(), path);
                 if (schema.get("maxLength") instanceof Number n)
                     assertTrue(text.codePointCount(0, text.length()) <= n.intValue(), path);
             }
             case "integer" -> {
                 assertTrue(value instanceof Integer || value instanceof Long || value instanceof java.math.BigInteger, path);
                 if (schema.get("minimum") instanceof Number n) assertTrue(((Number) value).longValue() >= n.longValue(), path);
+                if (schema.get("maximum") instanceof Number n) assertTrue(((Number) value).longValue() <= n.longValue(), path);
             }
             case "boolean" -> assertInstanceOf(Boolean.class, value, path);
             default -> fail("unsupported contract type "+type+" at "+path);

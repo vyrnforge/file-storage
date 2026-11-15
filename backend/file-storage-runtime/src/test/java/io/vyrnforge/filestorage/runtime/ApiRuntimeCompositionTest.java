@@ -139,7 +139,9 @@ class ApiRuntimeCompositionTest {
         if (body != null) request.header("Content-Type", "application/json").header("Idempotency-Key", "composition-key");
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
         try (var client = HttpClient.newHttpClient()) {
-            return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            if (body != null && response.statusCode() == 200) OpenApiContract.assertRequest(response, body);
+            return response;
         }
     }
 
@@ -192,6 +194,13 @@ class ApiRuntimeCompositionTest {
             status(503, call(ctx, "GET", "/health/ready", null, false, null));
             assertEquals(0, scalar("SELECT count(*) FROM information_schema.schemata WHERE schema_name IN ('fs','fs_kernel')"));
             RuntimeComposition.migrate(source);
+            status(200, call(ctx, "GET", "/health/ready", null, false, null));
+            int[] ports = source.getPortNumbers();
+            try {
+                source.setPortNumbers(new int[]{1});
+                status(503, call(ctx, "GET", "/health/ready", null, false, null));
+                status(200, call(ctx, "GET", "/health/live", null, false, null));
+            } finally { source.setPortNumbers(ports); }
             status(200, call(ctx, "GET", "/health/ready", null, false, null));
             sql("UPDATE fs.flyway_schema_history SET checksum=checksum+1 WHERE version='1'");
             status(503, call(ctx, "GET", "/health/ready", null, false, null));

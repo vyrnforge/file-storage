@@ -251,6 +251,8 @@ class RuntimeContractTest {
                     BODY.replace("\"expectedSize\":5", "\"expectedSize\":5,\"expectedSize\":6"),
                     BODY.replace("\"expectedSize\":5", "\"expectedSize\":\"5\""),
                     BODY.replace("\"expectedSize\":5", "\"expectedSize\":5.5"),
+                    BODY.replace("\"sample.txt\"", "123"),
+                    BODY.replace("\"sample.txt\"", "true"),
                     BODY + "{}")) {
                 var response = call(ctx, "POST", "/v1/uploads", "fixture-access", A, "key", invalid, null);
                 assertEquals(400, response.statusCode(), response.body());
@@ -260,6 +262,7 @@ class RuntimeContractTest {
             var valid = call(ctx, "POST", "/v1/uploads", "fixture-access", A, "key", BODY, null);
             assertEquals(200, valid.statusCode(), valid.body());
             OpenApiContract.assertResponse(valid);
+            OpenApiContract.assertRequest(valid, BODY);
         }
     }
 }
