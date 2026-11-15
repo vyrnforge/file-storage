@@ -301,8 +301,15 @@ public final class JdbcRegistry {
      */
     public <C extends AutoCloseable> Resolved<C> resolveExisting(BackendId backend, long revision,
                                                                 LocationId location, CredentialResolver<C> resolver) {
+        return resolveExisting(backend, revision, location, target -> true, resolver);
+    }
+
+    /** Gateway composition adds exact target admission before any credential lookup. */
+    public <C extends AutoCloseable> Resolved<C> resolveExisting(BackendId backend, long revision,
+            LocationId location, java.util.function.Predicate<Target> approved, CredentialResolver<C> resolver) {
         Objects.requireNonNull(backend);
         Objects.requireNonNull(location);
+        Objects.requireNonNull(approved);
         Objects.requireNonNull(resolver);
         if (revision < 1) throw new Failure(Code.INVALID);
         Pinned pin = execute((c, events, audits) -> {
@@ -319,6 +326,7 @@ public final class JdbcRegistry {
             }
         });
         try {
+            if (!approved.test(pin.target())) throw new Failure(Code.DENIED);
             C credential = Objects.requireNonNull(resolver.resolve(pin.credential()));
             return new Resolved<>(pin.target(), pin.location(), revision, credential);
         } catch (RuntimeException ex) {
