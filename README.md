@@ -62,3 +62,5 @@ Public repository: never commit secrets, private legacy source, real file conten
 - [FS-300A runtime foundation](docs/architecture/16_RUNTIME_FOUNDATION.md) — isolated executable and proposed v1 API; public exposure blocked.
 
 FS-300A foundation merged (PR #64, 125 verified tests). HTTP boundary refinement in review; public exposure blocked. Engineering quality [#65](https://github.com/vyrnforge/file-storage/issues/65) tracks focused cleanup.
+
+- [FS-300A isolated policy administration](docs/architecture/17_POLICY_ADMIN_HTTP.md) — separate admin authorization, versioned policy routes and real DB contract tests; no public exposure.

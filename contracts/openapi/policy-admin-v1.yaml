@@ -1,0 +1,214 @@
+openapi: 3.1.0
+info:
+  title: VyrnForge File Storage — Policy Administration
+  version: 0.1.0-draft
+  description: Isolated FS-300A administrative contract. Not a published or live API.
+security:
+  - bearer: []
+paths:
+  /v1/admin/policies/active:
+    get:
+      operationId: readActivePolicy
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Application'
+        - $ref: '#/components/parameters/Purpose'
+        - $ref: '#/components/parameters/Correlation'
+      responses:
+        '200':
+          $ref: '#/components/responses/Policy'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/admin/policies/revisions:
+    get:
+      operationId: listPolicyRevisions
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Application'
+        - $ref: '#/components/parameters/Purpose'
+        - $ref: '#/components/parameters/Correlation'
+        - name: before
+          in: query
+          schema: {type: integer, minimum: 0, format: int64, default: 0}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: Descending sealed revision numbers; exclusive before cursor.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/Correlation'}
+            X-Request-Id: {$ref: '#/components/headers/Request'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revisions]
+                properties:
+                  revisions:
+                    type: array
+                    maxItems: 100
+                    items: {type: integer, minimum: 1, format: int64}
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: publishPolicyRevision
+      description: CAS publication; expectedRevision 0 for initial publication. No provider side effect.
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Application'
+        - $ref: '#/components/parameters/Purpose'
+        - $ref: '#/components/parameters/Correlation'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision, rules]
+              properties:
+                expectedRevision: {type: integer, minimum: 0, format: int64}
+                rules:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: {$ref: '#/components/schemas/Rule'}
+      responses:
+        '200':
+          $ref: '#/components/responses/Revision'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/admin/policies/revisions/{revision}:
+    get:
+      operationId: readPolicyRevision
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Application'
+        - $ref: '#/components/parameters/Purpose'
+        - $ref: '#/components/parameters/Correlation'
+        - name: revision
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1, format: int64}
+      responses:
+        '200':
+          $ref: '#/components/responses/Policy'
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/admin/policies/rollback:
+    post:
+      operationId: rollbackPolicy
+      description: Copy earlier sealed rules into a new CAS revision; reauthorize every location. No pointer rewind.
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Application'
+        - $ref: '#/components/parameters/Purpose'
+        - $ref: '#/components/parameters/Correlation'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision, historicalRevision]
+              properties:
+                expectedRevision: {type: integer, minimum: 2, format: int64}
+                historicalRevision: {type: integer, minimum: 1, format: int64}
+      responses:
+        '200':
+          $ref: '#/components/responses/Revision'
+        default:
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  parameters:
+    Tenant:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      description: Requested tenant UUIDv7, never an identity assertion.
+      schema: {type: string, format: uuid}
+    Application:
+      name: application
+      in: query
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
+    Purpose:
+      name: purpose
+      in: query
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
+    Correlation:
+      name: X-Correlation-Id
+      in: header
+      schema: {type: string, format: uuid}
+  headers:
+    Correlation:
+      schema: {type: string, format: uuid}
+    Request:
+      schema: {type: string, format: uuid}
+  schemas:
+    Rule:
+      type: object
+      additionalProperties: false
+      required: [locationId, priority, eligible]
+      properties:
+        locationId: {type: string, format: uuid}
+        priority: {type: integer, minimum: 0}
+        eligible: {type: boolean}
+    Policy:
+      type: object
+      required: [tenantId, application, purpose, revision, rules]
+      properties:
+        tenantId: {type: string, format: uuid}
+        application: {type: string}
+        purpose: {type: string}
+        revision: {type: integer, format: int64, minimum: 1}
+        rules:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/Rule'}
+    Revision:
+      type: object
+      required: [revision]
+      properties:
+        revision: {type: integer, minimum: 1, format: int64}
+    Error:
+      type: object
+      required: [code, correlationId, requestId]
+      properties:
+        code:
+          type: string
+          enum: [INVALID, AUTHENTICATION_FAILED, ACCESS_DENIED, DENIED, NOT_FOUND, CONFLICT, IN_PROGRESS, NO_PLACEMENT, UNAVAILABLE, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA, NOT_ACCEPTABLE, METHOD_NOT_ALLOWED]
+        correlationId: {type: string, format: uuid}
+        requestId: {type: string, format: uuid}
+  responses:
+    Policy:
+      description: Logical policy details. No physical locators, targets or credentials.
+      headers:
+        X-Correlation-Id: {$ref: '#/components/headers/Correlation'}
+        X-Request-Id: {$ref: '#/components/headers/Request'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Policy'}
+    Revision:
+      description: Committed new revision.
+      headers:
+        X-Correlation-Id: {$ref: '#/components/headers/Correlation'}
+        X-Request-Id: {$ref: '#/components/headers/Request'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Revision'}
+    Error:
+      description: Neutral 400/401/403/404/405/406/409/413/415/503 response. 401 includes Bearer challenge; 405 includes Allow.
+      headers:
+        X-Correlation-Id: {$ref: '#/components/headers/Correlation'}
+        X-Request-Id: {$ref: '#/components/headers/Request'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}

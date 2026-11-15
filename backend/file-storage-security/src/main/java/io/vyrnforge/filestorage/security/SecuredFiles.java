@@ -100,16 +100,8 @@ public final class SecuredFiles {
         Objects.requireNonNull(session);
         return execute(bearer,requestedTenant,correlationId,Action.READ_SESSION,null,(app,caller,correlation)->app.session(caller,session));
     }
-    private VerifiedAccess authenticate(String bearer){
-        if(bearer==null||bearer.isBlank())throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);
-        try {
-            VerifiedAccess v=Objects.requireNonNull(verifier.verify(bearer));
-            Instant now=clock.instant();
-            if(!trust.issuer().equals(v.issuer())||!v.audiences().contains(trust.audience())||v.kind()!=TokenKind.ACCESS
-                    ||!now.isBefore(v.expiresAt())||(v.notBefore()!=null&&now.isBefore(v.notBefore())))
-                throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);
-            return v;
-        }catch(RuntimeException e){throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);}
+    private VerifiedAccess authenticate(String bearer) {
+        return AccessAuthentication.verify(trust, verifier, clock, bearer);
     }
     @FunctionalInterface
     private interface Operation<T> {

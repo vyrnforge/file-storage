@@ -70,3 +70,5 @@ Alternatives reviewed: in-process streaming (combined profile only), direct prov
 2026-11-15: Owner accepted continuation after PR #63 verification and merge (1d05534), #30 isolated runtime only. Select Spring Boot 4.1.2 for Java 21 shell and MVC, subject to CI/security review; no deployment or new production limits. Default health-only loopback and readiness false; explicit isolated test route registration. Proposed HTTP v1 contract not published.
 
 2026-11-15: Owner accepted current foundation, requested cleaner structure later (#65), then authorized continuation. PR #64 merged 6ed88c1. Isolated runtime uses 16 KiB metadata admission ceiling and role-specific explicit HTTP wiring; not production transfer limits or ADR approval. Preserve v1 response shape and security boundaries.
+
+2026-11-15: Owner accepted PR #66 and authorized next #30 slice. Merged 1518986. Separate administrative binding and action permission from consumer grants; require existing location authority as well. Draft policy admin HTTP contract only, no production role/policy approval or exposure.

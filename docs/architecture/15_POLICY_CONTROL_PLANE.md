@@ -14,3 +14,5 @@ JdbcPolicyControl composes existing JdbcConfiguration with an injected trusted P
 ## Verification
 Four additional real PostgreSQL tests: OSS→S3→OSS switch/rollback with persisted old session/file identity and history; actor/tenant/application/purpose and nonwinning location denial; rollback reauthorization, stale expected revision and drained destination; ambiguous/ineligible/duplicate/oversized policy denial. Existing atomic intent, concurrency and snapshot tests retained. Prior 117-test baseline verified in CI 43689433560; new exact-head CI required. No cloud provider transfer, public admin/consumer deployment or production readiness evidence. #16, #27, #28 and #26 gates remain open.
 
+
+FS-300A adds an isolated [policy administration HTTP boundary](17_POLICY_ADMIN_HTTP.md) with separate verified administrative action authority; JdbcPolicyControl remains the exact-scope/all-location CAS authority and preserves existing history. No live administrative entitlement policy or deployment.
