@@ -100,6 +100,14 @@ public final class SecuredFiles {
         Objects.requireNonNull(session);
         return execute(bearer,requestedTenant,correlationId,Action.READ_SESSION,null,(app,caller,correlation)->app.session(caller,session));
     }
+    /** Internal transfer boundary: fresh trusted identity, tenant, entitlement and explicit upload grant. */
+    public Result<Caller> authorizeUpload(String bearer, TenantId requestedTenant, UUID correlationId, SessionId session) {
+        Objects.requireNonNull(session);
+        return execute(bearer, requestedTenant, correlationId, Action.UPLOAD_TRANSFER, null, (app, caller, correlation) -> {
+            app.authorizeUpload(caller, session);
+            return caller;
+        });
+    }
     private VerifiedAccess authenticate(String bearer) {
         return AccessAuthentication.verify(trust, verifier, clock, bearer);
     }

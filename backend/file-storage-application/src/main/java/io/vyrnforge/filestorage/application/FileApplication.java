@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * No object-store operations run inside the transaction.
  */
 public final class FileApplication {
-    public enum Action { INITIATE, READ_METADATA, READ_SESSION }
+    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER }
     public enum Code { DENIED, NOT_FOUND, NO_PLACEMENT, CONFLICT, IN_PROGRESS, INVALID }
     public static final class Failure extends RuntimeException {
         private final Code code;
@@ -187,6 +187,21 @@ public final class FileApplication {
             return view(e,clock.instant());
         });
     }
+    /** Internal authorization only. No transfer grant is inferred from metadata/session reads. */
+    public void authorizeUpload(Caller caller, SessionId session) {
+        if (caller == null) throw new Failure(Code.DENIED);
+        Objects.requireNonNull(session);
+        transactions.execute(unit -> {
+            Entry e = unit.bySession(caller.tenant(), session).orElseThrow(() -> new Failure(Code.DENIED));
+            if (!session.equals(e.session().id()) || !caller.equals(e.request().caller())
+                    || e.file().state() != FileState.ACTIVE || e.version().state() != VersionState.PENDING
+                    || e.session().state() != UploadState.INITIATED || !clock.instant().isBefore(e.session().expires()))
+                throw new Failure(Code.DENIED);
+            requireAccess(caller, e, Action.UPLOAD_TRANSFER);
+            return null;
+        });
+    }
+
     private void requireAccess(Caller caller,Entry e,Action action) {
         if(!e.file().tenant().equals(caller.tenant()) || !authorization.mayAccess(caller,action,e.resource()))
             throw new Failure(Code.NOT_FOUND);
