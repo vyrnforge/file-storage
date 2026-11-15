@@ -1,22 +1,43 @@
 package io.vyrnforge.filestorage.runtime;
 
 import java.util.Map;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** No dependency details or provider configuration; readiness stays closed in this slice. */
+/** Liveness independent of dependencies; only explicitly composed API can be ready. */
 @RestController
 public final class HealthRoutes {
-    private final String role;
-    public HealthRoutes(@Value("${fs.role}") String role) { this.role = role; }
+    private final RuntimeRole role;
+    private final ObjectProvider<RuntimeReadiness> readiness;
+
+    public HealthRoutes(@Value("${fs.role}") String role, ObjectProvider<RuntimeReadiness> readiness) {
+        this.role = RuntimeRole.parse(role);
+        this.readiness = readiness;
+    }
 
     @GetMapping("/health/live")
-    public Map<String, String> live() { return Map.of("status", "UP", "role", role); }
+    public ResponseEntity<Map<String, String>> live() {
+        return health(true);
+    }
 
     @GetMapping("/health/ready")
     public ResponseEntity<Map<String, String>> ready() {
-        return ResponseEntity.status(503).body(Map.of("status", "DOWN", "role", role));
+        // COMBINED is not ready until transfer and worker responsibilities exist.
+        boolean ready = false;
+        if (role == RuntimeRole.API) {
+            try {
+                var probe = readiness.getIfAvailable();
+                ready = probe != null && probe.ready();
+            } catch (RuntimeException ignored) { /* fail closed */ }
+        }
+        return health(ready);
+    }
+
+    private ResponseEntity<Map<String, String>> health(boolean up) {
+        return ResponseEntity.status(up ? 200 : 503).header("Cache-Control", "no-store")
+                .body(Map.of("status", up ? "UP" : "DOWN", "role", role.name()));
     }
 }
