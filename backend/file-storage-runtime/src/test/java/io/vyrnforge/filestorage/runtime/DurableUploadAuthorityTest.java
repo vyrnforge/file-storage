@@ -9,6 +9,25 @@ import io.vyrnforge.filestorage.security.SecuredFiles;
 import io.vyrnforge.filestorage.security.SecuredFiles.*;
 import io.vyrnforge.platform.kernel.context.*;
 import java.net.URI;
+import java.net.http.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
+import io.vyrnforge.filestorage.s3.S3StorageProvider;
+import io.vyrnforge.filestorage.spi.StorageProvider;
+import org.junit.jupiter.api.io.TempDir;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.utility.DockerImageName;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.checksums.RequestChecksumCalculation;
+import software.amazon.awssdk.core.checksums.ResponseChecksumValidation;
+import software.amazon.awssdk.core.retry.RetryPolicy;
+import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 import java.sql.*;
 import java.time.*;
 import java.util.*;
@@ -31,6 +50,7 @@ class DurableUploadAuthorityTest {
     private static final Scope SCOPE = new Scope(TENANT, "asset", "attachment");
     private static final Target TARGET = new Target(Provider.S3, URI.create("https://s3.example.test"), "test", Addressing.PATH);
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
+    @TempDir Path spool;
     private BackendId backend;
     private LocationId location;
     private SecuredFiles secured;
@@ -168,5 +188,146 @@ class DurableUploadAuthorityTest {
             assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.transfer.upload.claimed'"));
         }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_test_claim");}
         assertEquals(view.session(),authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD).session());
+    }
+
+    private static final class FixtureCredential implements AutoCloseable {
+        final CredentialRef reference;
+        final AtomicInteger closes;
+        FixtureCredential(CredentialRef reference, AtomicInteger closes) {
+            this.reference = reference; this.closes = closes;
+        }
+        @Override public void close() { closes.incrementAndGet(); }
+    }
+
+    private void rotate() {
+        var registry = new JdbcRegistry(source, CLOCK);
+        var ctx = CorrelationContext.create();
+        assertEquals(2, registry.reviseCredential(ADMIN, ctx, backend, 1, new CredentialRef("ref:fixture/v2")));
+        registry.validateDraft(ADMIN, ctx, backend, 2, Set.of(TARGET), candidate -> {
+            Map<LocationId, Set<BackendValidator.Check>> checks = new HashMap<>();
+            for (var item : candidate.locations()) checks.put(item.id(), EnumSet.allOf(BackendValidator.Check.class));
+            return new BackendValidator.Report(candidate.backend(), candidate.revision(), checks);
+        });
+        new JdbcConfiguration(source, CLOCK).activateBackend(ADMIN, ctx, backend, 1, 2);
+    }
+
+    private static S3Client client(GenericContainer<?> server, String user, String password) {
+        return S3Client.builder()
+                .endpointOverride(URI.create("http://" + server.getHost() + ":" + server.getMappedPort(9000)))
+                .region(Region.US_EAST_1)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(user,password)))
+                .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
+                .requestChecksumCalculation(RequestChecksumCalculation.WHEN_REQUIRED)
+                .responseChecksumValidation(ResponseChecksumValidation.WHEN_REQUIRED)
+                .httpClientBuilder(ApacheHttpClient.builder().connectionTimeout(Duration.ofSeconds(2))
+                        .socketTimeout(Duration.ofSeconds(3)).connectionAcquisitionTimeout(Duration.ofSeconds(2)).maxConnections(8))
+                .overrideConfiguration(config -> config.retryPolicy(RetryPolicy.none()).apiCallTimeout(Duration.ofSeconds(15)))
+                .build();
+    }
+
+    private static String objectKey() throws SQLException {
+        try (var c=source.getConnection();var ps=c.prepareStatement("SELECT object_key FROM fs.file_version");
+             var rows=ps.executeQuery()) { assertTrue(rows.next()); return rows.getString(1); }
+    }
+
+    @Test void durableHttpUploadUsesRealMinioAndOldCredentialPinAfterRotation() throws Exception {
+        allow();
+        var issued = issue();
+        rotate();
+        String user = "test-" + UUID.randomUUID(), password = UUID.randomUUID().toString();
+        try (var server = new GenericContainer<>(DockerImageName.parse("file-storage-test/minio:2025-04-22-verified"))
+                .withImagePullPolicy(image -> false).withEnv("MINIO_ROOT_USER",user).withEnv("MINIO_ROOT_PASSWORD",password)
+                .withCommand("server","/data").withExposedPorts(9000).withStartupAttempts(1)
+                .waitingFor(Wait.forHttp("/minio/health/ready").forPort(9000).withStartupTimeout(Duration.ofMinutes(2)))) {
+            server.start();
+            try (var inspection = client(server,user,password)) {
+                inspection.createBucket(request -> request.bucket("fixture-bucket"));
+                var credentials = new AtomicInteger();
+                var credentialCloses = new AtomicInteger();
+                var adapterCloses = new AtomicInteger();
+                var resolver = new RegistryTransferProviderResolver<FixtureCredential>(
+                        new JdbcRegistry(source,CLOCK), ref -> {
+                            assertEquals(new CredentialRef("ref:fixture/v1"),ref);
+                            credentials.incrementAndGet();
+                            return new FixtureCredential(ref,credentialCloses);
+                        }, Set.of(TARGET), Map.of(Provider.S3, (target, resolvedLocation, revision, credential) -> {
+                            assertEquals(TARGET,target); assertEquals(location,resolvedLocation.id());
+                            assertEquals(backend,resolvedLocation.backend()); assertEquals(1,revision);
+                            assertEquals(new CredentialRef("ref:fixture/v1"),credential.reference);
+                            // Fixture-only explicit mapping of approved logical HTTPS target to local HTTP container.
+                            // No runtime endpoint override or production credentials.
+                            var sdk = client(server,user,password);
+                            S3StorageProvider adapter;
+                            try {
+                                adapter = new S3StorageProvider(sdk,Map.of(resolvedLocation.id(),resolvedLocation),spool,
+                                        1024*1024,1,Duration.ofSeconds(15),128,Duration.ofMinutes(1));
+                            } catch (RuntimeException ex) { sdk.close(); throw ex; }
+                            try { adapter.validateUnversioned(new StorageProvider.Call(Duration.ofSeconds(10))); }
+                            catch (RuntimeException ex) { adapter.close(); throw ex; }
+                            return new TransferProviderResolver.Lease() {
+                                @Override public StorageProvider provider(){return adapter;}
+                                @Override public void close(){try{adapter.close();}finally{adapterCloses.incrementAndGet();}}
+                            };
+                        }));
+                var gateway = new PrivateTransferGateway(authority(),resolver,
+                        new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(15)),CLOCK);
+                var app = RuntimeApplication.application(TransferHttpConfiguration.class);
+                app.addInitializers(ctx -> ctx.getBeanFactory().registerSingleton("privateTransferGateway",gateway));
+                try (var ctx = app.run("--server.port=0","--fs.role=TRANSFER");
+                     var http = HttpClient.newHttpClient()) {
+                    URI uri = URI.create("http://127.0.0.1:"+ctx.getEnvironment().getProperty("local.server.port")+"/transfer/v1/upload");
+                    byte[] content = "hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    var request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(20))
+                            .header("Authorization","Bearer user").header("X-Transfer-Handle",issued.handle())
+                            .header("Content-Type","application/octet-stream")
+                            .PUT(HttpRequest.BodyPublishers.ofByteArray(content)).build();
+                    var response = http.send(request,HttpResponse.BodyHandlers.ofString());
+                    assertEquals(204,response.statusCode(),response.body());
+                    assertEquals("no-store",response.headers().firstValue("Cache-Control").orElseThrow());
+                    assertTrue(response.headers().firstValue("Location").isEmpty());
+                    assertArrayEquals(content,inspection.getObjectAsBytes(req -> req.bucket("fixture-bucket").key(objectKeyUnchecked())).asByteArray());
+                    assertEquals(403,http.send(request,HttpResponse.BodyHandlers.ofString()).statusCode());
+                    assertEquals(1,credentials.get()); assertEquals(1,credentialCloses.get()); assertEquals(1,adapterCloses.get());
+                    assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
+                    assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
+                    assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session WHERE state='INITIATED'"));
+                    try(var files=Files.list(spool)){assertEquals(0,files.count());}
+                }
+            }
+        }
+    }
+
+    private static String objectKeyUnchecked() {
+        try { return objectKey(); } catch(SQLException ex) { throw new IllegalStateException("fixture lookup failed"); }
+    }
+
+    @Test void resolverRejectsMissingPinUnapprovedTargetAndCleansUpFactoryFailure() throws Exception {
+        allow(); var issued=issue();
+        var instruction=authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        var registry=new JdbcRegistry(source,CLOCK);
+        var opened=new AtomicInteger();var closed=new AtomicInteger();
+        io.vyrnforge.filestorage.application.CredentialResolver<FixtureCredential> credentials=ref->{
+            opened.incrementAndGet(); return new FixtureCredential(ref,closed);
+        };
+        Map<Provider,RegistryTransferProviderResolver.AdapterFactory<FixtureCredential>> factories=Map.of(
+                Provider.S3,(target,loc,revision,credential)->{throw new IllegalStateException("private factory detail");});
+        var denied=new RegistryTransferProviderResolver<>(registry,credentials,Set.of(),factories);
+        assertEquals(TransferFailure.Code.UNAVAILABLE,assertThrows(TransferFailure.class,()->denied.resolve(instruction)).code());
+        var unsupported=new RegistryTransferProviderResolver<>(registry,credentials,Set.of(TARGET),Map.of());
+        assertThrows(TransferFailure.class,()->unsupported.resolve(instruction));
+        var resolver=new RegistryTransferProviderResolver<>(registry,credentials,Set.of(TARGET),factories);
+        var wrong=new TransferInstruction(instruction.tenant(),instruction.actorId(),instruction.application(),
+                instruction.action(),instruction.file(),instruction.version(),instruction.session(),backend,99,
+                instruction.locator(),instruction.size(),instruction.expiresAt());
+        assertThrows(TransferFailure.class,()->resolver.resolve(wrong));
+        assertEquals(0,opened.get());
+        var failure=assertThrows(TransferFailure.class,()->resolver.resolve(instruction));
+        assertEquals("UNAVAILABLE",failure.getMessage());assertNull(failure.getCause());
+        assertEquals(1,opened.get());assertEquals(1,closed.get());
+        var outside=new TransferInstruction(instruction.tenant(),instruction.actorId(),instruction.application(),
+                instruction.action(),instruction.file(),instruction.version(),instruction.session(),backend,1,
+                new Locator(location,"outside-prefix/object",null),instruction.size(),instruction.expiresAt());
+        assertThrows(TransferFailure.class,()->resolver.resolve(outside));
+        assertEquals(2,opened.get());assertEquals(2,closed.get());
     }
 }
