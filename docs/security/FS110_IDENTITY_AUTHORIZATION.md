@@ -32,3 +32,6 @@ FS-110A tests use synthetic verifier, binding, membership/entitlement/grant and 
 
 ## Hosted evidence
 [CI 43611269131](https://github.com/vyrnforge/file-storage/actions/runs/43611269131), code commit 5aa7ecb32f0e708accef9c9177060e728f1ab43c: verified logs, 25 tests (8 domain + 2 SPI + 8 application + 7 security), zero failures/errors/skips, all four Maven modules BUILD SUCCESS, dependency boundaries, Kernel checksum and hygiene passed. I01–I08 hosted synthetic acceptance verified; no actual JWT signature/JWKS or live identity authority proof. Local full build remains pending. PR #7 open; owner review/merge required. FS-110B blocked on above integration contract.
+
+## Subsequent merge and verifier slice
+PR #7 merged at 69d0ef978a5f04c283331851c00368632639de5c; final CI [43611373559](https://github.com/vyrnforge/file-storage/actions/runs/43611373559) succeeded. FS-110B implements concrete cryptographic verification using trusted JWKS snapshots; live IAM integration remains open. See [verifier contract](FS110B_JWT_VERIFIER.md).

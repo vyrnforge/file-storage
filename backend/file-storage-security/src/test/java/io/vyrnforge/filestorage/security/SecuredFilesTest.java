@@ -57,9 +57,12 @@ class SecuredFilesTest {
         return new Grant(b.tenant(),b.actor().actorId(),b.consumer(),a,"attachment",s,f,before,end,revoked);
     }
     SecuredFiles facade(){
-        return new SecuredFiles(new Trust(ISS,AUD),bearer->{
+        return facade(bearer->{
             VerifiedAccess v=tokens.get(bearer);if(v==null)throw new IllegalArgumentException("synthetic invalid token");return v;
-        },(issuer,subject,aud)->Optional.ofNullable(bindings.get(subject)),(actor,t)->member,
+        });
+    }
+    SecuredFiles facade(Verifier verifier){
+        return new SecuredFiles(new Trust(ISS,AUD),verifier,(issuer,subject,aud)->Optional.ofNullable(bindings.get(subject)),(actor,t)->member,
         (t,m)->new ModuleEntitlement(entitlementTenant,module,enabled,effective),
         caller->{if(storeDown)throw new IllegalStateException("synthetic secret detail");return grants;},
         db,Clock.fixed(NOW,ZoneOffset.UTC),Duration.ofMinutes(5));

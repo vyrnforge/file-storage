@@ -8,3 +8,6 @@ Application module composes domain values through transaction, authorization and
 
 ## FS-110A
 Security module composes trusted credential verification and server-side binding ports with Kernel context pipeline and exact grants. No live verifier or HTTP endpoint. See security contract. Four Maven modules; all use existing Java 21 and Kernel 0.3.0 pins.
+
+## FS-110B
+Security module uses pinned Nimbus JOSE+JWT 10.10 for RSA signature verification and JWT/JWK parsing. Explicit key snapshot source must be supplied by composition root. No live discovery or network retrieval, credentials, runtime HTTP or IAM registration. No dependency changes to domain/application/provider SPI.

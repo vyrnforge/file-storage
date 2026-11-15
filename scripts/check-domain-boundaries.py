@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FS-110A dependency policy: domain + SPI + application + security, no runtime framework/provider SDK."""
+"""FS-110B dependency policy: domain + SPI + application + security, no runtime framework/provider SDK."""
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import sys
@@ -8,7 +8,7 @@ ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 allowed = {
     "file-storage-domain": {("io.vyrnforge.platform", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-application": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.platform", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
-    "file-storage-security": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("io.vyrnforge.platform", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
+    "file-storage-security": {("com.nimbusds", "nimbus-jose-jwt", "compile"), ("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("io.vyrnforge.platform", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-provider-spi": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
 }
 for module, expected in allowed.items():
@@ -21,7 +21,7 @@ for module, expected in allowed.items():
             if line.strip().startswith("import "):
                 prefixes = ("java.", "io.vyrnforge.platform.kernel.", "io.vyrnforge.filestorage.domain.")
                 if module == "file-storage-security":
-                    prefixes += ("io.vyrnforge.filestorage.application.",)
+                    prefixes += ("io.vyrnforge.filestorage.application.", "com.nimbusds.")
                 if not any(line.strip().startswith("import " + prefix) for prefix in prefixes):
                     sys.exit(f"Unexpected import in {path}: {line}")
-print("FS-110A domain, provider SPI, application and security dependency boundaries OK")
+print("FS-110B domain, provider SPI, application and security dependency boundaries OK")
