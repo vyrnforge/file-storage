@@ -2,6 +2,7 @@ package io.vyrnforge.filestorage.persistence;
 
 import io.vyrnforge.filestorage.application.FileApplication.*;
 import io.vyrnforge.platform.kernel.idempotency.IdempotencyRequest;
+import io.vyrnforge.platform.kernel.context.CorrelationContext;
 import io.vyrnforge.platform.kernel.idempotency.IdempotencyDecision;
 import io.vyrnforge.platform.kernel.persistence.jdbc.IdempotencyResultCodec;
 import io.vyrnforge.platform.kernel.persistence.jdbc.JacksonRecordCodec;
@@ -42,7 +43,7 @@ final class InitiationReliability {
                 new JacksonRecordCodec(), clock);
     }
 
-    View initiate(RequestIdentity identity, Initiate command, Function<Unit, View> work,
+    View initiate(RequestIdentity identity, Initiate command, CorrelationContext correlation, Function<Unit, View> work,
                   Function<Unit, View> replay, Transactions reads) {
         Caller caller = identity.caller();
         if (!identity.key().equals(command.requestKey())) {
@@ -73,7 +74,8 @@ final class InitiationReliability {
                 try {
                     transaction.executeIdempotent(lease, IdempotencyResultCodec.strings(),
                             (connection, events, audits) -> {
-                                View view = JdbcTransactions.onConnection(connection, work);
+                                View view = JdbcTransactions.onConnection(connection, work,
+                                        entry -> MutationIntents.initiated(events, audits, clock, correlation, entry));
                                 result.set(view);
                                 return view.session().value().toString();
                             });

@@ -24,3 +24,5 @@ C06 actual application policy switch and repeatable-read snapshot, durable repla
 
 ## Accepted implementation evidence
 Owner reviewed and authorized squash merge of PR #52 at 32b387cd1b3ee2113832e4eff0ab224da53926d0. [CI 43668967693](https://github.com/vyrnforge/file-storage/actions/runs/43668967693) passed 51 tests, 20 real PostgreSQL 17.12; V1-to-V2 upgrade, concurrency, rollback, immutability and pinned sessions. Initial synthetic trigger delimiter error corrected. Issue #20 accepted/closed; no production migration.
+
+FS-120C1 adds mandatory trusted actor and correlation arguments to internal configuration commands, with required audit/event writes in the same transaction. No admin authorization boundary or public API. See [atomic intents](08_ATOMIC_MUTATION_INTENTS.md).

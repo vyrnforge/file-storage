@@ -4,3 +4,5 @@ Start with AGENTS.md and the documentation index in README.md. The repository is
 Current state: FS-120B1 merged; FS-120B2A (#20) authorized and in review; no later increments. Keep issue evidence and master checklist synchronized; no deployment or later implementation authorized by planning.
 
 Current increment: FS-120B2A merged (#52, issue #20 accepted); FS-120B2B #21 authorized for durable grant reads only. No grant issuance, live IAM, production deployment or later increment authorized.
+
+Current increment: FS-120C1 #22 authorized after #53 merged; no #23 or later work, production deployment or public API authorized.

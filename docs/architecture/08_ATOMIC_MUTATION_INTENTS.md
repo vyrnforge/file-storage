@@ -1,0 +1,20 @@
+# FS-120C1 — Atomic mutation audit and event intents
+
+Owner authorized [#22](https://github.com/vyrnforge/file-storage/issues/22) after PR #53 merged at 137ebeab9a8e83b33219f9d3ae3ccc83f775abd1. Scope: existing initiation, backend activation and policy publication. Kernel v0.3.2 published JDBC artifact, no changes to Kernel or migrations.
+
+## Contract
+- Kernel JdbcReliabilityTransaction supplies EventIntentPort and AuditIntentPort on the same connection as the service mutation. MutationIntents emits one SUCCESS AuditEvent and one version-1 EventEnvelope after a successful insert or CAS. Initiation executes before lease completion; any required intent failure rolls back all metadata and completion, aborts own active lease if possible. Raw internal transaction insertion also emits required intents. Read-only helper cannot insert; no external I/O.
+- Only actual insertion emits initiation intents, not a returned View: completed replay and expired-lease reacquisition over retained aggregate do not duplicate events. Existing pre-increment records are not backfilled, and replay does not invent historical evidence. Config stale CAS or failed validation emits nothing; admin idempotency beyond CAS remains later work.
+- SecuredFiles forwards actual resolved Kernel correlation (request/correlation/causation) to application and JDBC. Direct internal application callers generate fresh correlation when omitted; admin commands require explicit trusted ActorReference and CorrelationContext. Only canonical actor type/id stored, no identity issuer/subject/display name. Admin authentication/authorization is not provided by this internal persistence method; future control plane must establish it. Backend activation is service-wide (tenant null); policy and file mutations tenant-scoped. Audit changes include requestId; event envelope retains correlation and optional causation.
+- Internal event v1: file-storage.upload.initiated (subject file ID, payload versionId/sessionId/state INITIATED); file-storage.backend.activated (subject logical backend ID, previousRevision/revision); file-storage.policy.published (tenant + length-prefixed consumer/purpose subject ID, payload consumer/purpose/previousRevision/revision). Audit action equals event type; source/producer file-storage; outcome SUCCESS. No filenames, MIME, request key, tokens, URLs, bucket/key, location IDs or credential refs in intent payload. Canonical actor and logical IDs are sensitive operational records; production access/retention remains gated.
+- Kernel migrations already enforce audit UPDATE/DELETE rejection; DB owner/TRUNCATE and production role hardening are not covered by append-only trigger. Outbox status PENDING means durable intent only, not delivery. No broker, retry worker, dead-letter, durable jobs or published wire contract yet. #23 delivers/reconciles, #46 validates public consumer contracts. Read/denial/failure audit policy needs owner decision; this slice records successful mutations only. Existing internal SQL fixture writes are not an application command or evidence of real provider validation.
+
+## Acceptance
+A01 secured initiation writes exactly one audit and event, correct tenant/actor/correlation/request ID, minimal payload; completed and expired-lease replay no duplicates.
+A02 backend and policy CAS commit corresponding records, correct global/tenant scope, stale update no event; Kernel append-only audit UPDATE/DELETE rejection.
+A03 force audit and outbox write failures after aggregate insertion: all metadata/intents/lease completion roll back; retry succeeds.
+A04 force policy outbox failure after pointer update/audit write: pointer/history/audit rollback; retry succeeds.
+A05 all prior real PostgreSQL tests, POM/dependency checks pass. No production deployment, live IAM proof or public contract publication.
+
+## Handoff
+#23 outbox dispatch/recovery and durable jobs; #16/#43 owner decision and threat verification for audit retention/read/denial policy and least privilege. Local full verification outstanding. No later increment or merge authorization.

@@ -23,3 +23,6 @@ Internal JdbcConfiguration reuses Kernel JDBC transactions for backend revision 
 
 ## FS-120B2B
 JdbcGrants implements the existing SecuredFiles.Grants port using fs.file_grant. One-way persistence-to-security module dependency; no new external dependency or migration. Fresh committed reads, exact caller scope, bounded results and fail-closed errors. See [grant contract](../docs/security/FS120B2B_DURABLE_GRANTS.md).
+
+## FS-120C1
+MutationIntents composes Kernel JDBC audit/event writers with aggregate insertion and configuration CAS. No new dependencies or migrations. Outbox rows are pending, not published; #23 handles delivery/recovery.

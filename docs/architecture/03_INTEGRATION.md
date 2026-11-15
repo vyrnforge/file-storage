@@ -21,3 +21,6 @@ Preserve business correlation; fresh request ID for each invocation; trace metad
 
 ## FS-110A security boundary
 See [identity authorization contract](../security/FS110_IDENTITY_AUTHORIZATION.md). Actual Kernel RequestContextPipeline and ValidatedIdentityAdapter are used after a trusted verifier returns a validated access-token projection, mapped through exact server-side issuer/subject/audience binding. Wyrmgate opaque public sub is not a platform tenant or actor ID. No raw claim roles/scopes authorize resources. FS-110B cryptographic verifier is implemented on PR #9; live deployment binding remains pending. See [verifier contract](../security/FS110B_JWT_VERIFIER.md).
+
+## FS-120C1
+[Atomic mutation intents](08_ATOMIC_MUTATION_INTENTS.md): existing initiation/configuration mutations commit required Kernel audit and outbox intents on the supplied connection, versioned minimal internal event payloads, no duplicate initiation events on replay. No broker delivery yet; read/denial policy and public event schema approval remain separate.

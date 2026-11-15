@@ -10,7 +10,6 @@ import io.vyrnforge.platform.kernel.ports.*;
 import io.vyrnforge.platform.kernel.errors.KernelAccessException;
 import java.time.*;
 import java.util.*;
-import java.util.function.BiFunction;
 
 /**
  * Only the composition root may wire this boundary. Verifier, binding, membership,
@@ -91,15 +90,15 @@ public final class SecuredFiles {
     }
     public Result<View> initiate(String bearer,TenantId requestedTenant,UUID correlationId,Initiate command){
         Objects.requireNonNull(command);
-        return execute(bearer,requestedTenant,correlationId,Action.INITIATE,command.purpose(),(app,caller)->app.initiate(caller,command));
+        return execute(bearer,requestedTenant,correlationId,Action.INITIATE,command.purpose(),(app,caller,correlation)->app.initiate(caller,command,correlation));
     }
     public Result<MetadataView> metadata(String bearer,TenantId requestedTenant,UUID correlationId,FileId file){
         Objects.requireNonNull(file);
-        return execute(bearer,requestedTenant,correlationId,Action.READ_METADATA,null,(app,caller)->app.metadata(caller,file));
+        return execute(bearer,requestedTenant,correlationId,Action.READ_METADATA,null,(app,caller,correlation)->app.metadata(caller,file));
     }
     public Result<View> session(String bearer,TenantId requestedTenant,UUID correlationId,SessionId session){
         Objects.requireNonNull(session);
-        return execute(bearer,requestedTenant,correlationId,Action.READ_SESSION,null,(app,caller)->app.session(caller,session));
+        return execute(bearer,requestedTenant,correlationId,Action.READ_SESSION,null,(app,caller,correlation)->app.session(caller,session));
     }
     private VerifiedAccess authenticate(String bearer){
         if(bearer==null||bearer.isBlank())throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);
@@ -112,8 +111,12 @@ public final class SecuredFiles {
             return v;
         }catch(RuntimeException e){throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);}
     }
+    @FunctionalInterface
+    private interface Operation<T> {
+        T apply(FileApplication app, Caller caller, CorrelationContext correlation);
+    }
     private <T> Result<T> execute(String bearer,TenantId requested,UUID correlationId,Action action,String purpose,
-                                  BiFunction<FileApplication,Caller,T> operation){
+                                  Operation<T> operation){
         VerifiedAccess v=authenticate(bearer);
         Binding b;
         try {
@@ -143,7 +146,7 @@ public final class SecuredFiles {
         // Application checks the authoritative file resource after tenant-scoped lookup.
         // The request-local authorization object cannot be reused for another caller.
         var app=new FileApplication(transactions,auth,clock,ttl);
-        return new Result<>(operation.apply(app,caller),resolved.correlation());
+        return new Result<>(operation.apply(app,caller,resolved.correlation()),resolved.correlation());
     }
     private Authorization authorization(Binding binding,Caller expected){
         return new Authorization(){
