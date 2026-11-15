@@ -29,7 +29,7 @@ import javax.sql.DataSource;
  * External effects must be idempotent/reconciled; a lease fences DB state, not a provider.
  */
 public final class JdbcOperations {
-    public enum Kind { VERIFY_UPLOAD, CLEANUP_UPLOAD, PURGE_VERSION, MIGRATE_VERSION }
+    public enum Kind { VERIFY_UPLOAD, SCAN_UPLOAD, CLEANUP_UPLOAD, PURGE_VERSION, MIGRATE_VERSION }
     public enum ErrorCode { TRANSIENT, PERMANENT }
     public record Request(TenantId tenant, FileId file, VersionId version, LocationId location,
                           Kind kind, String key, UUID correlation, int maxAttempts) {

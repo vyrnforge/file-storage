@@ -164,6 +164,13 @@ public final class StorageModel {
             if(file.state!=FileState.ACTIVE) throw new IllegalStateException("file not active");
             return new Version(file.id,file.tenant,id,locator,VersionState.PENDING,null);
         }
+        /** Restore the persisted lifecycle, never infer a scan verdict from a state. */
+        public static Version restore(File file, VersionId id, Locator locator, VersionState state, Content content) {
+            Objects.requireNonNull(state);
+            if ((state == VersionState.AVAILABLE || state == VersionState.QUARANTINED) != (content != null))
+                throw new IllegalArgumentException("invalid persisted content");
+            return new Version(file.id,file.tenant,id,locator,state,content);
+        }
         public Version verify() { require(VersionState.PENDING); return copy(locator,VersionState.VERIFYING,null); }
         public Version finish(Content verified, Scan scan) {
             require(VersionState.VERIFYING); Objects.requireNonNull(verified); Objects.requireNonNull(scan);
@@ -207,6 +214,10 @@ public final class StorageModel {
                 throw new IllegalArgumentException("invalid persisted session");
             }
             return new UploadSession(id, file.id, version, scope, placement, expectedObject, expires, UploadState.INITIATED);
+        }
+        public static UploadSession restore(SessionId id, File file, VersionId version, Scope scope,
+                                            Placement placement, Locator locator, Instant expires, UploadState state) {
+            return restoreInitiated(id,file,version,scope,placement,locator,expires).copy(Objects.requireNonNull(state));
         }
         public UploadSession start(Instant now){return advance(UploadState.INITIATED,UploadState.UPLOADING,now);}
         public UploadSession verify(Instant now){return advance(UploadState.UPLOADING,UploadState.VERIFYING,now);}

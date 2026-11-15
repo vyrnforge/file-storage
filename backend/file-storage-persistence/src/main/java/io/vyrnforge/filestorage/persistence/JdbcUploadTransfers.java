@@ -123,6 +123,10 @@ public final class JdbcUploadTransfers {
     }
 
     Resource resource(Connection connection, Caller caller, SessionId session) throws SQLException {
+        return resource(connection, caller, session, false);
+    }
+
+    Resource resource(Connection connection, Caller caller, SessionId session, boolean verifying) throws SQLException {
         try (var ps = statement(connection, """
                 SELECT s.file_id,s.version_id,s.location_id,s.backend_id,s.config_revision,v.object_key,
                        r.expected_size,s.expires_at,s.expires_nano_remainder,s.purpose
@@ -133,10 +137,11 @@ public final class JdbcUploadTransfers {
                 JOIN fs.initiation_request r ON r.tenant_id=s.tenant_id AND r.session_id=s.session_id AND r.consumer=s.consumer
                 JOIN fs.backend_revision b ON b.backend_id=s.backend_id AND b.config_revision=s.config_revision
                 WHERE s.tenant_id=? AND s.session_id=? AND s.consumer=? AND r.actor=?
-                    AND s.state='INITIATED' AND f.state='ACTIVE' AND v.state='PENDING'
+                    AND s.state=? AND f.state='ACTIVE' AND v.state=?
                     AND b.status IN ('ACTIVE','DRAINING') AND b.validated_revision=b.config_revision
                 FOR UPDATE OF s FOR SHARE OF f,v,r,b
-                """, caller.tenant().value(), session.value(), caller.consumer(), caller.actor());
+                """, caller.tenant().value(), session.value(), caller.consumer(), caller.actor(),
+                    verifying ? "VERIFYING" : "INITIATED", verifying ? "VERIFYING" : "PENDING");
              var rows = ps.executeQuery()) {
             if (!rows.next()) throw denied();
             Instant expiry = rows.getObject(8, OffsetDateTime.class).toInstant().plusNanos(rows.getInt(9));
