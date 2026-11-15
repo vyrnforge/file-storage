@@ -466,6 +466,13 @@ class DurableUploadAuthorityTest {
                 var available=http.send(metadata,HttpResponse.BodyHandlers.ofString());
                 assertEquals(200,available.statusCode());OpenApiContract.assertResponse(available);
                 assertEquals("AVAILABLE",tools.jackson.databind.json.JsonMapper.builder().build().readTree(available.body()).get("versionState").asText());
+                var terminal=http.send(command(commandBase+"/complete","user",completionBody),HttpResponse.BodyHandlers.ofString());
+                assertEquals(200,terminal.statusCode(),terminal.body());OpenApiContract.assertResponse(terminal);
+                var terminalJson=tools.jackson.databind.json.JsonMapper.builder().build().readTree(terminal.body());
+                assertEquals("COMPLETED",terminalJson.get("uploadState").asText());
+                assertEquals("AVAILABLE",terminalJson.get("versionState").asText());
+                assertEquals("SUCCEEDED",terminalJson.get("status").asText());
+                assertEquals(409,http.send(command(commandBase+"/complete","user","{\"sha256\":\""+"0".repeat(64)+"\"}"),HttpResponse.BodyHandlers.ofString()).statusCode());
                 assertEquals(3,closed.get());assertEquals(3,adapterCloses.get());
                 assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
             }
@@ -787,6 +794,7 @@ class DurableUploadAuthorityTest {
         app.addInitializers(ctx->{
             ctx.getBeanFactory().registerSingleton("uploadVerificationWorker",verify);
             ctx.getBeanFactory().registerSingleton("uploadScanWorker",scan);
+            ctx.getBeanFactory().registerSingleton("uploadRecovery",recovery(CLOCK));
         });
         try(var ctx=app.run("--server.port=0","--fs.role=WORKER","--fs.upload-worker.delay-ms=25")){
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(8);
@@ -800,9 +808,98 @@ class DurableUploadAuthorityTest {
         wrong.addInitializers(ctx->{
             ctx.getBeanFactory().registerSingleton("uploadVerificationWorker",verify);
             ctx.getBeanFactory().registerSingleton("uploadScanWorker",scan);
+            ctx.getBeanFactory().registerSingleton("uploadRecovery",recovery(CLOCK));
         });
         assertThrows(RuntimeException.class,()->{try(var ctx=wrong.run("--server.port=0","--fs.role=API","--fs.upload-worker.delay-ms=25")){
             fail("API must not run upload workers");
         }});
+    }
+
+    private JdbcUploadRecovery recovery(Clock clock){
+        return new JdbcUploadRecovery(new JdbcUploadTransfers(source,clock,Duration.ofMinutes(1),5),ADMIN);
+    }
+
+    @Test void expiredUnclaimedAndClaimedSessionsTerminalizeWithoutDeletingOrReissuing() throws Exception {
+        allow();var issued=issue();
+        var other=secured.initiate("user",TENANT,null,new Initiate("attachment","other.txt",5,"text/plain","other-key")).value();
+        var otherHandle=authority().issue("user",TENANT,other.session(),null);
+        authority().claim("user",otherHandle.handle(),TransferInstruction.Action.UPLOAD);
+        var future=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);
+        var recovery=recovery(future);
+        assertTrue(recovery.runOne());assertTrue(recovery.runOne());assertFalse(recovery.runOne());
+        assertEquals(2,scalar("SELECT count(*) FROM fs.upload_session WHERE state='EXPIRED'"));
+        assertEquals(2,scalar("SELECT count(*) FROM fs.file_version WHERE state='FAILED'"));
+        assertEquals(2,scalar("SELECT count(*) FROM fs.upload_terminal_recovery WHERE reason='SESSION_EXPIRED' AND cleanup_disposition='HOLD'"));
+        assertEquals(2,scalar("SELECT count(*) FROM fs.upload_transfer_handle"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='CLEANUP_UPLOAD'"));
+        assertEquals(2,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.recovered'"));
+        deny(authority(future),"user",issued.handle());
+        assertThrows(RuntimeException.class,()->authority(future).issue("user",TENANT,other.session(),null));
+        assertEquals(UploadState.EXPIRED,secured(future).session("user",TENANT,null,view.session()).value().uploadState());
+        assertThrows(SQLException.class,()->sql("UPDATE fs.upload_terminal_recovery SET cleanup_disposition='DELETE'"));
+    }
+
+    @Test void deadVerificationRecoveryIsAtomicAndTerminalReplayIsReadOnly() throws Exception {
+        allow();var issued=issue();authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        var scans=scans(CLOCK,3);var work=completionWork(CLOCK,scans);
+        var commands=new CompletionCommands(secured,new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5),work);
+        String digest=sha256("hello".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var accepted=commands.complete("user",TENANT,view.session(),digest,null).value();
+        var claim=work.claim().claims().getFirst();
+        assertTrue(work.retry(claim,true));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.file_version SET state='FAILED'"));
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_recovery CHECK (event_type <> 'file-storage.upload.recovered') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->recovery(CLOCK).runOne());
+            assertEquals(0,scalar("SELECT count(*) FROM fs.upload_terminal_recovery"));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_recovery");}
+        assertTrue(recovery(CLOCK).runOne());assertFalse(recovery(CLOCK).runOne());
+        var terminal=commands.complete("user",TENANT,view.session(),digest,null).value();
+        assertEquals(accepted.operation(),terminal.operation());assertEquals("DEAD",terminal.status());
+        assertEquals(UploadState.FAILED,terminal.uploadState());assertEquals(VersionState.FAILED,terminal.versionState());
+        assertEquals(terminal,commands.complete("user",TENANT,view.session(),digest,null).value());
+        assertThrows(RuntimeException.class,()->commands.complete("other",TENANT,view.session(),digest,null));
+        assertThrows(RuntimeException.class,()->commands.complete("user",TENANT,view.session(),"0".repeat(64),null));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.storage_operation"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.recovered'"));
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='UPLOAD_TRANSFER'");
+        assertThrows(RuntimeException.class,()->commands.complete("user",TENANT,view.session(),digest,null));
+    }
+
+    @Test void expiredVerificationFencesClaimAndConcurrentRecoveryHasOneWinner() throws Exception {
+        allow();var issued=issue();authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        var work=completionWork(CLOCK,scans(CLOCK,3));var commands=new CompletionCommands(secured,new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5),work);
+        String digest=sha256("hello".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        commands.complete("user",TENANT,view.session(),digest,null);
+        var claim=work.claim().claims().getFirst();var snapshot=work.load(claim);
+        Clock future=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);
+        var start=new CountDownLatch(1);
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+            Callable<Boolean> attempt=()->{start.await();return recovery(future).runOne();};
+            var a=executor.submit(attempt);var b=executor.submit(attempt);start.countDown();
+            assertNotEquals(a.get(10,TimeUnit.SECONDS),b.get(10,TimeUnit.SECONDS));
+        }
+        assertThrows(RuntimeException.class,()->work.finish(snapshot,digest));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.storage_operation WHERE status='DEAD' AND claim_token IS NULL"));
+        var later=new CompletionCommands(secured(future),new JdbcUploadTransfers(source,future,Duration.ofMinutes(1),5),completionWork(future,scans(future,3)));
+        var terminal=later.complete("user",TENANT,view.session(),digest,null).value();
+        assertEquals(UploadState.EXPIRED,terminal.uploadState());assertEquals(VersionState.FAILED,terminal.versionState());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_terminal_recovery"));
+    }
+
+    @Test void expiredScanCannotPromoteAndRecoveryKeepsIntegrityEvidence() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        var claim=scans.claim(1).claims().getFirst();var snapshot=scans.load(claim);
+        Clock future=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);
+        assertTrue(recovery(future).runOne());
+        assertThrows(RuntimeException.class,()->scans.finish(snapshot,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session WHERE state='EXPIRED'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='SCAN_UPLOAD' AND status='DEAD'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_terminal_recovery WHERE cleanup_disposition='HOLD'"));
     }
 }
