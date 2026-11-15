@@ -39,7 +39,7 @@ class S3StorageProviderTest extends ProviderContract {
     private static final String USER = "test-" + UUID.randomUUID();
     private static final String PASSWORD = UUID.randomUUID().toString();
     private static final GenericContainer<?> SERVER = new GenericContainer<>(
-            DockerImageName.parse("quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"))
+            DockerImageName.parse("docker.io/minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e"))
             .withEnv("MINIO_ROOT_USER", USER)
             .withEnv("MINIO_ROOT_PASSWORD", PASSWORD)
             .withCommand("server", "/data")
