@@ -2,7 +2,7 @@
 
 Independent, multi-tenant, multi-provider enterprise file storage service for Asset Management, ITSM and other applications.
 
-**Status: Phase 2 — FS-100A and FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 idempotency merged; FS-120B2A configuration CAS merged; FS-120B2B durable grants merged; FS-120C1 atomic intents merged; FS-120C2 recovery merged; FS-200A provider contract merged; DEC-FS012 approved; FS-200B S3 adapter merged (PR #59); FS-200C native OSS adapter in review.** No deployed service or released version.
+**Status: Phase 2 — FS-100A and FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 idempotency merged; FS-120B2A configuration CAS merged; FS-120B2B durable grants merged; FS-120C1 atomic intents merged; FS-120C2 recovery merged; FS-200A provider contract merged; DEC-FS012 approved; FS-200B S3 adapter merged (PR #59); FS-200C native OSS adapter merged (PR #60; staging pending); FS-210A registry in review.** No deployed service or released version.
 
 ## Start here
 - [Project constitution](docs/project/00_CONSTITUTION.md)
@@ -44,6 +44,8 @@ Independent, multi-tenant, multi-provider enterprise file storage service for As
 - [FS-200B S3 adapter profile](docs/architecture/11_S3_ADAPTER_PROFILE.md)
 
 - [FS-200C native OSS adapter profile](docs/architecture/12_OSS_ADAPTER_PROFILE.md)
+
+- [FS-210A backend registry](docs/architecture/13_BACKEND_REGISTRY.md)
 
 ## Ecosystem
 [Wyrmgate IAM](https://github.com/wyrmgate/iam) authenticates identities; [Platform Kernel v0.3.2](https://github.com/vyrnforge/platform-kernel/releases/tag/v0.3.2) provides shared context and reliability contracts; [VyrnForge UI](https://github.com/vyrnforge/vyrnforge-ui) provides console foundations; [VyrnRail](https://github.com/vyrnforge/vyrnrail) informs engineering governance. File Storage owns its own domain, database, storage and release.

@@ -1039,6 +1039,201 @@ class JdbcTransactionsTest {
         assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PUBLISHED' AND attempts=2"));
     }
 
+    private static JdbcRegistry registry() {
+        return new JdbcRegistry(dataSource, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static Target registryTarget(Provider provider, String endpoint) {
+        return new Target(provider, java.net.URI.create(endpoint), "test-region", Addressing.PATH);
+    }
+
+    @Test
+    void registryCreatesTwoBackendsAndPrivateLocationsWithAtomicIntents() throws SQLException {
+        var registry = registry();
+        var correlation = CorrelationContext.create();
+        var one = registry.registerBackend(ADMIN, correlation, registryTarget(Provider.S3, "https://NEW.example.test:443/"),
+                new CredentialRef("ref:synthetic/one:v1"));
+        var two = registry.registerBackend(ADMIN, correlation, registryTarget(Provider.OSS, "https://other.example.test"),
+                new CredentialRef("ref:synthetic/two:v1"));
+        var first = registry.registerLocation(ADMIN, correlation, one, "private-test", "namespace");
+        var second = registry.registerLocation(ADMIN, correlation, two, "private-test", "namespace");
+        assertNotEquals(one, two);
+        assertNotEquals(first, second);
+        assertTrue(registry.active(one).isEmpty());
+        assertEquals(BackendStatus.DRAFT, registry.history(one, 0, 1).getFirst().status());
+        assertEquals(List.of(new JdbcRegistry.LocationView(first, one)), registry.locations(one, null, 1));
+        assertTrue(registry.locations(one, first.value(), 1).isEmpty());
+        var all = new ArrayList<JdbcRegistry.BackendView>();
+        UUID cursor = null;
+        do {
+            var page = registry.backends(cursor, 1);
+            if (page.isEmpty()) break;
+            all.addAll(page);
+            cursor = page.getLast().backend().value();
+            assertTrue(all.size() <= 4);
+        } while (true);
+        assertEquals(4, all.size());
+        assertTrue(all.stream().anyMatch(b -> b.backend().equals(one) && b.activeRevision() == null));
+        assertEquals(1, scalar("SELECT count(*) FROM fs.backend WHERE endpoint='https://new.example.test'"));
+        assertEquals(2, scalar("SELECT count(*) FROM fs.storage_location WHERE prefix='namespace/'"));
+        assertEquals(2, intents("platform_event_outbox", "event_type", "file-storage.backend.registered"));
+        assertEquals(2, intents("platform_audit_event", "action", "file-storage.location.registered"));
+        assertEquals(4, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE correlation_id='" + correlation.correlationId() + "'"));
+        assertEquals(0, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE correlation_id='" + correlation.correlationId()
+                + "' AND (payload_json::text LIKE '%ref:%' OR payload_json::text LIKE '%https://%' OR payload_json::text LIKE '%private-test%')"));
+        assertEquals(0, scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE correlation_id='" + correlation.correlationId()
+                + "' AND (changes_json::text LIKE '%ref:%' OR changes_json::text LIKE '%https://%' OR changes_json::text LIKE '%private-test%')"));
+        assertFalse(all.toString().contains("private-test"));
+        assertThrows(Failure.class, () -> registry.backends(null, 101));
+    }
+
+    @Test
+    void registryRejectsOverlapAndUnvalidatedLocationChanges() throws SQLException {
+        var registry = registry();
+        var correlation = CorrelationContext.create();
+        var one = registry.registerBackend(ADMIN, correlation, registryTarget(Provider.S3, "https://same.example.test"),
+                new CredentialRef("ref:synthetic/one:v1"));
+        var two = registry.registerBackend(ADMIN, correlation, registryTarget(Provider.S3, "https://SAME.example.test:443/"),
+                new CredentialRef("ref:synthetic/two:v1"));
+        registry.registerLocation(ADMIN, correlation, one, "same-bucket", "area");
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.registerLocation(ADMIN, correlation, two, "same-bucket", "area/nested")).code());
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.registerLocation(ADMIN, correlation, two, "same-bucket", "")).code());
+        assertNotNull(registry.registerLocation(ADMIN, correlation, two, "same-bucket", "area-other"));
+        assertEquals(Code.INVALID, assertThrows(Failure.class, () ->
+                registry.registerLocation(ADMIN, correlation, one, "same-bucket", "area/../escape")).code());
+        sql("UPDATE fs.backend_revision SET validated_revision=config_revision WHERE backend_id=?", one.value());
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.registerLocation(ADMIN, correlation, one, "other-bucket", "")).code());
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.registerLocation(ADMIN, correlation, new BackendId(OSS), "other-bucket", "")).code());
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class, () ->
+                registry.registerLocation(ADMIN, correlation, new BackendId(id(998)), "other-bucket", "")).code());
+        assertEquals(4, count("storage_location"));
+    }
+
+    private static final class SyntheticCredential implements AutoCloseable {
+        boolean closed;
+        final String reference;
+        SyntheticCredential(String reference) { this.reference = reference; }
+        public void close() { closed = true; }
+    }
+
+    @Test
+    void registryRotationReadsExactPinnedRevisionAndFailsClosedOnRevocation() throws SQLException {
+        var registry = registry();
+        var backend = new BackendId(OSS);
+        var location = new LocationId(OL);
+        var correlation = CorrelationContext.create();
+        var initial = application().initiate(ALICE, command("before-rotation"));
+        var refs = new HashSet<>(Set.of("ref:synthetic/oss", "ref:synthetic/oss:v2"));
+        var calls = new ArrayList<String>();
+        io.vyrnforge.filestorage.application.CredentialResolver<SyntheticCredential> resolver = reference -> {
+            calls.add(reference.value());
+            if (!refs.contains(reference.value())) throw new IllegalStateException("synthetic revoked private detail");
+            return new SyntheticCredential(reference.value());
+        };
+        assertEquals(2, registry.reviseCredential(ADMIN, correlation, backend, 1,
+                new CredentialRef("ref:synthetic/oss:v2")));
+        assertEquals(1, registry().active(backend).orElseThrow().revision());
+        assertEquals(2, registry().history(backend, 0, 1).getFirst().revision());
+        assertEquals(1, registry.history(backend, 2, 1).getFirst().revision());
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                () -> registry.resolveExisting(backend, 2, location, resolver)).code());
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                () -> registry.resolveExisting(backend, 1, new LocationId(SL), resolver)).code());
+        assertTrue(calls.isEmpty());
+        sql("UPDATE fs.backend_revision SET validated_revision=config_revision WHERE backend_id=? AND config_revision=2", OSS);
+        configuration().activateBackend(ADMIN, correlation, backend, 1, 2);
+        assertEquals(2, registry().active(backend).orElseThrow().revision());
+        assertEquals(BackendStatus.DRAINING, registry().history(backend, 2, 1).getFirst().status());
+        SyntheticCredential old;
+        try (var resolved = registry.resolveExisting(backend, 1, location, resolver)) {
+            old = resolved.credential();
+            assertEquals("ref:synthetic/oss", old.reference);
+            assertEquals(1, resolved.revision());
+            assertEquals("Resolved[redacted]", resolved.toString());
+        }
+        assertTrue(old.closed);
+        try (var resolved = registry.resolveExisting(backend, 2, location, resolver)) {
+            assertEquals("ref:synthetic/oss:v2", resolved.credential().reference);
+        }
+        refs.remove("ref:synthetic/oss");
+        var denied = assertThrows(Failure.class, () -> registry.resolveExisting(backend, 1, location, resolver));
+        assertEquals(Code.DENIED, denied.code());
+        assertNull(denied.getCause());
+        assertEquals(List.of("ref:synthetic/oss", "ref:synthetic/oss:v2", "ref:synthetic/oss"), calls);
+        assertEquals(3, registry.reviseCredential(ADMIN, correlation, backend, 2,
+                new CredentialRef("ref:synthetic/oss"))); // rollback is a new draft, not a rewind
+        assertEquals(2, registry.active(backend).orElseThrow().revision());
+        assertEquals(BackendStatus.DRAFT, registry.history(backend, 0, 1).getFirst().status());
+        var persisted = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10))
+                .execute(u -> u.bySession(A, initial.session()).orElseThrow());
+        assertEquals(1, persisted.session().placement().configRevision());
+        assertEquals(OL, persisted.session().placement().location().value());
+        // Simulate authority restoring the exact prior version before rollback validation.
+        // A revoked version may never be used merely because it was valid historically.
+        refs.add("ref:synthetic/oss");
+        sql("UPDATE fs.backend_revision SET validated_revision=config_revision WHERE backend_id=? AND config_revision=3", OSS);
+        configuration().activateBackend(ADMIN, correlation, backend, 2, 3);
+        assertEquals(3, registry().active(backend).orElseThrow().revision());
+        try (var resolved = registry.resolveExisting(backend, 3, location, resolver)) {
+            assertEquals("ref:synthetic/oss", resolved.credential().reference);
+            assertEquals(3, resolved.revision());
+        }
+        assertEquals(BackendStatus.DRAINING, registry.history(backend, 3, 1).getFirst().status());
+        assertEquals(Code.DENIED, assertThrows(Failure.class,
+                () -> registry.resolveExisting(backend, 3, location,
+                        (io.vyrnforge.filestorage.application.CredentialResolver<SyntheticCredential>) ref -> null)).code());
+    }
+
+    @Test
+    void registryConcurrentOverlappingLocationsHaveOneWinner() throws Exception {
+        var registry = registry();
+        var ctx = CorrelationContext.create();
+        var one = registry.registerBackend(ADMIN, ctx, registryTarget(Provider.S3, "https://concurrent.example.test"),
+                new CredentialRef("ref:synthetic/concurrent:v1"));
+        var two = registry.registerBackend(ADMIN, ctx, registryTarget(Provider.S3, "https://CONCURRENT.example.test:443/"),
+                new CredentialRef("ref:synthetic/concurrent:v2"));
+        var results = competing(() -> {
+            registry.registerLocation(ADMIN, ctx, one, "concurrent-bucket", "area");
+            return 1L;
+        }, () -> {
+            registry.registerLocation(ADMIN, ctx, two, "concurrent-bucket", "area/nested");
+            return 1L;
+        });
+        assertEquals(1, results.stream().filter(v -> v.equals(1L)).count());
+        assertEquals(1, results.stream().filter(v -> v == Code.CONFLICT).count());
+        assertEquals(1, scalar("SELECT count(*) FROM fs.storage_location WHERE bucket='concurrent-bucket'"));
+        assertEquals(1, intents("platform_audit_event", "action", "file-storage.location.registered"));
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.location.registered"));
+    }
+
+    @Test
+    void registryConcurrentRevisionCasAndAtomicIntentFailure() throws Exception {
+        var registry = registry();
+        var backend = new BackendId(OSS);
+        var results = competing(() -> registry.reviseCredential(ADMIN, CorrelationContext.create(), backend, 1,
+                new CredentialRef("ref:synthetic/first:v2")),
+                () -> registry.reviseCredential(ADMIN, CorrelationContext.create(), backend, 1,
+                new CredentialRef("ref:synthetic/second:v2")));
+        assertEquals(1, results.stream().filter(v -> v.equals(2L)).count());
+        assertEquals(1, results.stream().filter(v -> v == Code.CONFLICT).count());
+        assertEquals(2, registry.history(backend, 0, 10).size());
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.backend.credential-revised"));
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_registry_event CHECK (event_type <> 'file-storage.backend.registered') NOT VALID");
+        try {
+            assertThrows(RuntimeException.class, () -> registry.registerBackend(ADMIN, CorrelationContext.create(),
+                    registryTarget(Provider.S3, "https://rollback.example.test"), new CredentialRef("ref:synthetic/rollback")));
+            assertEquals(2, count("backend"));
+            assertEquals(3, count("backend_revision"));
+            assertEquals(0, intents("platform_audit_event", "action", "file-storage.backend.registered"));
+        } finally {
+            sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_registry_event");
+        }
+    }
+
     @Test
     void physicalIdentityCannotBeRepointed() throws SQLException {
         application().initiate(ALICE, command("one"));

@@ -38,3 +38,6 @@ S3 adapter implements the bounded unversioned profile using AWS SDK 2.57.2; see 
 
 ## FS-200C
 Native OSS adapter uses Alibaba SDK 3.18.4, explicit V4 client configuration and loopback native HTTP tests. [Profile](../docs/architecture/12_OSS_ADAPTER_PROFILE.md). No actual OSS target or legacy full-build claim; real staging remains required.
+
+## FS-210A
+JdbcRegistry and application CredentialResolver port; existing schema and Kernel transactions. Draft registration/location, credential CAS history, bounded status listings, fresh authoritative reads and exact pinned existing-access lookup. [Contract](../docs/architecture/13_BACKEND_REGISTRY.md). No secret-store implementation or network validation.

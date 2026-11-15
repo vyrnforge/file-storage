@@ -22,3 +22,6 @@ See [configuration revision contract](07_CONFIGURATION_REVISIONS.md). Internal C
 
 ## FS-200A provider contract
 [Provider and private transfer contract](10_PROVIDER_TRANSFER_CONTRACT.md) defines create-only writes, exact byte count and version targeting, stream ownership, neutral failure semantics and a shared acceptance suite. DEC-FS012 approves an independently scalable private transfer gateway, separate API/worker roles and optional private CDN; raw provider signatures are internal only, not public DTOs. Actual provider validation and capability evidence required in #25/#26/#28.
+
+## FS-210A registry
+[Registry contract](13_BACKEND_REGISTRY.md): trusted draft registration, immutable initial locations, append-only credential revision CAS, fresh DB snapshots, exact active/draining reference resolution. Actual secret manager/workload identity (#16), provider validation, network allowlist and later location admission (#28), administrator authorization and HTTP/console remain gates. No provider I/O during metadata transaction.

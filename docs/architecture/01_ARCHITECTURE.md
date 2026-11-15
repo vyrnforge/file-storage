@@ -1,6 +1,6 @@
 # Architecture and domain boundaries
 
-Approved architecture direction; FS-120C2 merged; FS-200A provider contract/test work authorized. DEC-FS012 approved: one modular product with independently deployable API, transfer gateway and worker roles; combined development profile permitted. Java 21 / Maven / Spring Boot / PostgreSQL / Flyway approved; exact framework/database versions selected in relevant later increments.
+Approved architecture direction; FS-200C implementation merged; FS-210A registry authorized. DEC-FS012 approved: one modular product with independently deployable API, transfer gateway and worker roles; combined development profile permitted. Java 21 / Maven / Spring Boot / PostgreSQL / Flyway approved; exact framework/database versions selected in relevant later increments.
 
  ```mermaid
 flowchart TD
@@ -47,3 +47,5 @@ One product release with separately scalable API, transfer and worker runtime ro
 FS-120C2 internal work ledger and Kernel outbox dispatcher: [recovery contract](09_DURABLE_RECOVERY.md). No external side effects in DB transactions; actual worker deployment and provider handlers later.
 
 FS-200A: [provider and private transfer contract](10_PROVIDER_TRANSFER_CONTRACT.md). Preserve service ownership of authorization, bytes and physical location. Approved runtime topology is specified only; no deployed gateway or provider adapter yet.
+
+FS-210A: [registry contract](13_BACKEND_REGISTRY.md); internal commands and exact pinned credential resolution, no deployed control plane or secret manager.
