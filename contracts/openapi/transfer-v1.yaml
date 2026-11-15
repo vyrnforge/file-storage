@@ -28,7 +28,10 @@ paths:
         - $ref: '#/components/parameters/Handle'
       responses:
         '200':
-          description: Exact byte stream from authorized pin; interruptions may yield partial response.
+          description: Exact byte stream from authorized pin; interruptions may yield partial response and fail the authoritative Content-Length.
+          headers:
+            Content-Length:
+              schema: {type: integer, minimum: 0, format: int64}
           content:
             application/octet-stream:
               schema: {type: string, format: binary}

@@ -35,7 +35,7 @@ public final class TransferRoutes {
             response.setContentType("application/octet-stream");
             response.setHeader("X-Content-Type-Options", "nosniff");
             response.setHeader("Content-Disposition", "attachment");
-            gateway.download(proof.bearer(), proof.handle(), response.getOutputStream());
+            gateway.download(proof.bearer(), proof.handle(), response::setContentLengthLong, response.getOutputStream());
         } catch (TransferFailure ex) { reject(response, ex); }
     }
 
@@ -64,9 +64,9 @@ public final class TransferRoutes {
     private static void reject(HttpServletResponse response, TransferFailure failure) throws IOException {
         // Once bytes are committed, never append JSON or claim a successful retry.
         if (response.isCommitted()) throw new IOException("transfer interrupted");
-        response.resetBuffer();
+        response.reset();
+        response.setHeader("Cache-Control", "no-store");
         response.setContentType("application/json");
-        response.setHeader("Content-Disposition", null);
         response.setStatus(switch (failure.code()) {
             case INVALID -> 400;
             case DENIED -> 403;

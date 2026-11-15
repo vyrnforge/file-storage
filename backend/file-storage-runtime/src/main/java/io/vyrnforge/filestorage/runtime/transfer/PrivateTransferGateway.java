@@ -12,6 +12,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.Semaphore;
+import java.util.function.LongConsumer;
 
 /** Provider-neutral bounded data plane. No metadata writes or transaction across byte I/O. */
 public final class PrivateTransferGateway {
@@ -39,15 +40,24 @@ public final class PrivateTransferGateway {
             if (declaredSize >= 0 && declaredSize != instruction.size()) throw new TransferFailure(Code.INVALID);
             var metadata = provider.put(instruction.locator(), new DeadlineInput(input, deadline),
                     instruction.size(), deadline.call());
+            deadline.check();
             if (metadata == null || metadata.size() != instruction.size()) throw new TransferFailure(Code.UNAVAILABLE);
         });
     }
 
     /** Caller owns output. Close provider stream/lease on success, interruption and client failure. */
     public void download(String bearer, String handle, OutputStream output) {
+        download(bearer, handle, ignored -> {}, output);
+    }
+
+    /** Announce authoritative length only after authorization and provider stream acquisition. */
+    public void download(String bearer, String handle, LongConsumer length, OutputStream output) {
         Objects.requireNonNull(output);
+        Objects.requireNonNull(length);
         execute(bearer, handle, Action.DOWNLOAD, (instruction, provider, deadline) -> {
             try (var input = new DeadlineInput(provider.get(instruction.locator(), deadline.call()), deadline)) {
+                // Do not advertise a zero-byte success before checking the stream.
+                if (instruction.size() > 0) length.accept(instruction.size());
                 byte[] buffer = new byte[limits.bufferBytes()];
                 long remaining = instruction.size();
                 while (remaining > 0) {
@@ -59,7 +69,10 @@ public final class PrivateTransferGateway {
                     output.write(buffer, 0, count);
                     remaining -= count;
                 }
-                if (instruction.size() == 0 && input.read() != -1) throw new TransferFailure(Code.UNAVAILABLE);
+                if (instruction.size() == 0) {
+                    if (input.read() != -1) throw new TransferFailure(Code.UNAVAILABLE);
+                    length.accept(0);
+                }
                 deadline.check();
             }
         });
@@ -84,6 +97,7 @@ public final class PrivateTransferGateway {
             if (instruction.size() > limits.maxBytes()) throw new TransferFailure(Code.TOO_LARGE);
             deadline.check();
             try (var lease = Objects.requireNonNull(resolver.resolve(instruction))) {
+                deadline.check();
                 work.run(instruction, Objects.requireNonNull(lease.provider()), deadline);
             }
         } catch (TransferFailure ex) {

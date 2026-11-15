@@ -156,6 +156,7 @@ class TransferGatewayTest {
             status(200, response);
             assertArrayEquals(BYTES, response.body());
             assertEquals("application/octet-stream", response.headers().firstValue("Content-Type").orElseThrow());
+            assertEquals(Long.toString(BYTES.length), response.headers().firstValue("Content-Length").orElseThrow());
             status(403, call(ctx, "GET", DOWNLOAD, ACTOR, download, null, false));
             assertEquals(2, fixture.leases.get());
             assertEquals(2, fixture.closes.get());
@@ -232,6 +233,18 @@ class TransferGatewayTest {
         });
         try (var ctx = RuntimeApplication.start("--server.port=0", "--fs.role=TRANSFER")) {
             assertEquals(404, call(ctx, "GET", DOWNLOAD, ACTOR, null, null, false).statusCode());
+        }
+    }
+
+    @Test void truncatedCommittedDownloadCannotAppearComplete() throws Exception {
+        try (var ctx = application("TRANSFER")) {
+            var fixture = ctx.getBean(Fixture.class);
+            fixture.object = new byte[20000];
+            String handle = fixture.issue(instruction(Action.DOWNLOAD, 21000, NOW.plusSeconds(60)));
+            assertThrows(IOException.class, () -> call(ctx, "GET", DOWNLOAD, ACTOR, handle, null, false));
+            assertEquals(1, fixture.closes.get());
+            assertEquals(1, fixture.streamCloses.get());
+            status(403, call(ctx, "GET", DOWNLOAD, ACTOR, handle, null, false));
         }
     }
 }
