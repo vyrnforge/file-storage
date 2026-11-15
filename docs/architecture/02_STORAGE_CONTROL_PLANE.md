@@ -16,3 +16,6 @@ Overview/health, Files, Backends, Locations, Policies, Tenants/Quotas, Applicati
 
 ## Golden path
 Register S3 and OSS; validate/activate both; upload via OSS; switch policy to S3; new upload lands on S3; old file and in-flight session still work; drain OSS; migration verifies source/destination checksum and cutover without changing file ID. Test failure, duplicate retry and rollback.
+
+## FS-120B2A persistence implementation
+See [configuration revision contract](07_CONFIGURATION_REVISIONS.md). Internal CAS activation and immutable publication implemented for review; provider validation evidence must be written by a trusted validator in FS-210B. Public administration, cache convergence, audit and retirement reference guards remain future work.

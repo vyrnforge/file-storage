@@ -63,3 +63,5 @@ Master tracker [#13](https://github.com/vyrnforge/file-storage/issues/13) is the
 | Release and optional follow-up | #49–#50 | Owner release approval; optional Kernel adapter only after proven demand |
 
 Recommended next authorization: FS-120B2A [#20](https://github.com/vyrnforge/file-storage/issues/20). Record each implementation PR against its stable FS ID and issue number, test the issue acceptance criteria against compatible revisions, record gaps separately, and close only after evidence and owner acceptance. Track Specified / Implemented / Applied / Verified distinctly. No fixed dates, named-person assignments or production SLO commitments from this decomposition. Issue #13 remains open until the enterprise release acceptance is complete; conditional #50 may be deferred explicitly.
+
+2026-11-15: FS-120B2A [#20](https://github.com/vyrnforge/file-storage/issues/20) authorized and in review after PR #51 merge. Scope and acceptance in [configuration revisions](../architecture/07_CONFIGURATION_REVISIONS.md). B2B #21 and later increments remain pending. Prior next-candidate language is historical.
