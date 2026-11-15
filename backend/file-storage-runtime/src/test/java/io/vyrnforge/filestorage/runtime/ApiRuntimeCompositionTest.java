@@ -143,8 +143,10 @@ class ApiRuntimeCompositionTest {
         }
     }
 
-    private static void status(int expected, HttpResponse<String> response) {
+    private static void status(int expected, HttpResponse<String> response) throws Exception {
         assertEquals(expected, response.statusCode(), response.body());
+        if (response.request().uri().getPath().startsWith("/v1/") && expected != 404)
+            OpenApiContract.assertResponse(response);
     }
 
     private static String field(String json, String name) {
@@ -157,6 +159,12 @@ class ApiRuntimeCompositionTest {
         seed();
         try (var ctx = application("API")) {
             status(200, call(ctx, "GET", "/health/ready", null, false, null));
+            var mapping = ctx.getBean(org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping.class);
+            Set<String> actual = new HashSet<>();
+            mapping.getHandlerMethods().keySet().forEach(info -> info.getPatternValues().stream()
+                    .filter(path -> path.startsWith("/v1/")).forEach(path ->
+                    info.getMethodsCondition().getMethods().forEach(method -> actual.add(method.name().toLowerCase(Locale.ROOT)+" "+path))));
+            assertEquals(OpenApiContract.operations(), actual);
             status(200, call(ctx, "GET", "/v1/admin/backends", "admin", false, null));
             status(200, call(ctx, "GET", POLICY, "admin", true, null));
             status(403, call(ctx, "GET", "/v1/admin/backends", "user", false, null));

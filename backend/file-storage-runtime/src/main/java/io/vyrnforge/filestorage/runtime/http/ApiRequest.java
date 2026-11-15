@@ -54,6 +54,13 @@ record ApiRequest(String bearer, TenantId tenant, UUID correlationId) {
         }
     }
 
+    /** Kernel FileReference IDs are opaque and measured in Unicode code points. */
+    static String fileId(String value) {
+        if (value == null || value.isBlank() || value.codePointCount(0, value.length()) > 512
+                || value.codePoints().anyMatch(Character::isISOControl)) throw new Failure(Code.INVALID);
+        return value;
+    }
+
     static String bounded(String value, int limit) {
         if (value == null || value.isBlank() || value.length() > limit
                 || value.codePoints().anyMatch(Character::isISOControl)) {

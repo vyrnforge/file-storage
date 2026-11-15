@@ -143,8 +143,9 @@ class PolicyAdminHttpTest {
                 """.formatted(expected, location);
     }
 
-    private static void status(int expected, HttpResponse<String> response) {
+    private static void status(int expected, HttpResponse<String> response) throws Exception {
         assertEquals(expected, response.statusCode(), response.body());
+        OpenApiContract.assertResponse(response);
         assertEquals(id(99).toString(), response.headers().firstValue("X-Correlation-Id").orElseThrow());
         assertEquals("no-store", response.headers().firstValue("Cache-Control").orElseThrow());
         assertTrue(response.headers().firstValue("X-Request-Id").isPresent());

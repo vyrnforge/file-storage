@@ -22,10 +22,16 @@ public class RuntimeApplication {
     static SpringApplication application(Class<?>... extraTestSources) {
         var app = new SpringApplication(RuntimeApplication.class);
         for (Class<?> source : extraTestSources) app.addPrimarySources(Set.of(source));
-        app.setDefaultProperties(Map.of("server.address", "127.0.0.1", "fs.role", "API",
-                "server.error.include-message", "never", "server.error.include-stacktrace", "never",
-                "spring.jackson.deserialization.fail-on-unknown-properties", "true",
-                "spring.flyway.enabled", "false"));
+        app.setDefaultProperties(Map.ofEntries(
+                Map.entry("server.address", "127.0.0.1"), Map.entry("fs.role", "API"),
+                Map.entry("server.error.include-message", "never"), Map.entry("server.error.include-stacktrace", "never"),
+                Map.entry("spring.jackson.deserialization.fail-on-unknown-properties", "true"),
+                Map.entry("spring.jackson.deserialization.fail-on-trailing-tokens", "true"),
+                Map.entry("spring.jackson.deserialization.accept-float-as-int", "false"),
+                Map.entry("spring.jackson.mapper.allow-coercion-of-scalars", "false"),
+                Map.entry("spring.jackson.read.strict-duplicate-detection", "true"),
+                Map.entry("spring.jackson.factory.constraints.read.max-nesting-depth", "32"),
+                Map.entry("spring.flyway.enabled", "false")));
         app.addInitializers(context -> {
             var env = context.getEnvironment();
             if (!"127.0.0.1".equals(env.getProperty("server.address")))

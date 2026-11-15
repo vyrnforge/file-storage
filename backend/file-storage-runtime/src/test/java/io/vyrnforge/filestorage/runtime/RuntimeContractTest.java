@@ -243,4 +243,23 @@ class RuntimeContractTest {
             return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
         }
     }
+
+    @Test
+    void metadataJsonRejectsAmbiguousAndCoercedScalars() throws Exception {
+        try (var ctx = RuntimeApplication.application(TestRoutes.class).run("--server.port=0")) {
+            for (String invalid : List.of(
+                    BODY.replace("\"expectedSize\":5", "\"expectedSize\":5,\"expectedSize\":6"),
+                    BODY.replace("\"expectedSize\":5", "\"expectedSize\":\"5\""),
+                    BODY.replace("\"expectedSize\":5", "\"expectedSize\":5.5"),
+                    BODY + "{}")) {
+                var response = call(ctx, "POST", "/v1/uploads", "fixture-access", A, "key", invalid, null);
+                assertEquals(400, response.statusCode(), response.body());
+                OpenApiContract.assertResponse(response);
+            }
+            assertTrue(ctx.getBean(Memory.class).rows.isEmpty());
+            var valid = call(ctx, "POST", "/v1/uploads", "fixture-access", A, "key", BODY, null);
+            assertEquals(200, valid.statusCode(), valid.body());
+            OpenApiContract.assertResponse(valid);
+        }
+    }
 }
