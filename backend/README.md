@@ -17,3 +17,6 @@ Persistence module adds service schema migrations, JDBC transaction adapter and 
 
 ## FS-120B1
 Kernel JDBC 0.3.2 is used for initiation leases and atomic completion on the same database connection as metadata. Separate fs_kernel migration history; explicit trusted DataSource, Clock and lease TTL. No production pooling/role or retention defaults; see transactional initiation contract.
+
+## FS-120B2A
+Internal JdbcConfiguration reuses Kernel JDBC transactions for backend revision activation and policy publication. Service V2 migration seals historical policies and guards immutable revision payload; no production migration. Integration tests use real disposable PostgreSQL, including V1 upgrade and competing writers.

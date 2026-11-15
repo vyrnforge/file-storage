@@ -27,13 +27,28 @@ class JdbcTransactionsTest {
     private static final UUID OSS = id(3), S3 = id(4), OL = id(5), SL = id(6);
 
     @BeforeAll
-    static void start() {
+    static void start() throws SQLException {
         DB.start();
         dataSource = new PGSimpleDataSource();
         dataSource.setURL(DB.getJdbcUrl());
         dataSource.setUser(DB.getUsername());
         dataSource.setPassword(DB.getPassword());
+        // Exercise upgrade from V1 with real historical configuration.
+        org.flywaydb.core.Flyway.configure().dataSource(dataSource)
+                .schemas("fs").defaultSchema("fs").locations("classpath:db/filestorage")
+                .target("1").load().migrate();
+        sql("INSERT INTO fs.backend VALUES (?, 'OSS', 'https://oss.example.test', 'test', 'AUTO')", OSS);
+        sql("INSERT INTO fs.backend_revision VALUES (?, 1, 'ref:synthetic/oss', 'ACTIVE', 1)", OSS);
+        sql("INSERT INTO fs.storage_location VALUES (?, ?, 'oss-test', 'objects/')", OL, OSS);
+        sql("INSERT INTO fs.policy_revision VALUES (?, 'asset', 'attachment', 1)", A.value());
+        sql("INSERT INTO fs.policy_rule VALUES (?, 'asset', 'attachment', 1, ?, 0, true)", A.value(), OL);
+        sql("INSERT INTO fs.active_policy VALUES (?, 'asset', 'attachment', 1)", A.value());
         StorageMigrations.migrate(dataSource);
+        assertEquals(1, scalar("SELECT count(*) FROM fs.policy_revision WHERE sealed"));
+        assertEquals(1, scalar("SELECT policy_revision FROM fs.active_policy"));
+        assertEquals(1, scalar("SELECT config_revision FROM fs.backend_revision WHERE status='ACTIVE'"));
+        assertEquals("23514", assertThrows(SQLException.class, () ->
+                sql("UPDATE fs.policy_rule SET eligible=false")).getSQLState());
     }
 
     @AfterAll
@@ -49,14 +64,43 @@ class JdbcTransactionsTest {
                     (?, 'S3', 'https://s3.example.test', 'test', 'PATH')
                 """, OSS, S3);
         sql("""
-                INSERT INTO fs.backend_revision VALUES (?, 1, 'ref:synthetic/oss', 'ACTIVE', 1),
-                    (?, 1, 'ref:synthetic/s3', 'ACTIVE', 1)
+                INSERT INTO fs.backend_revision VALUES (?, 1, 'ref:synthetic/oss', 'DRAFT', NULL),
+                    (?, 1, 'ref:synthetic/s3', 'DRAFT', NULL)
                 """, OSS, S3);
+        sql("UPDATE fs.backend_revision SET validated_revision=config_revision");
+        configuration().activateBackend(new BackendId(OSS), 0, 1);
+        configuration().activateBackend(new BackendId(S3), 0, 1);
         sql("INSERT INTO fs.storage_location VALUES (?, ?, 'oss-test', 'objects/'), (?, ?, 's3-test', 'objects/')",
                 OL, OSS, SL, S3);
-        sql("INSERT INTO fs.policy_revision VALUES (?, 'asset', 'attachment', 1)", A.value());
-        sql("INSERT INTO fs.policy_rule VALUES (?, 'asset', 'attachment', 1, ?, 0, true)", A.value(), OL);
-        sql("INSERT INTO fs.active_policy VALUES (?, 'asset', 'attachment', 1)", A.value());
+        configuration().publishPolicy(SCOPE, 0, List.of(rule(OL, 0, true)));
+    }
+
+    private static JdbcConfiguration configuration() {
+        return new JdbcConfiguration(dataSource, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static JdbcConfiguration.PolicyRule rule(UUID location, int priority, boolean eligible) {
+        return new JdbcConfiguration.PolicyRule(new LocationId(location), priority, eligible);
+    }
+
+    // Deliberately invalid legacy/configuration fixtures; bypass the domain command,
+    // but never mutate a sealed revision. Used to retain fail-closed reader coverage.
+    private static void fixturePolicy(long revision, boolean eligible, boolean ambiguous) throws SQLException {
+        sql("INSERT INTO fs.policy_revision (tenant_id, consumer, purpose, policy_revision) VALUES (?, 'asset', 'attachment', ?)", A.value(), revision);
+        sql("INSERT INTO fs.policy_rule VALUES (?, 'asset', 'attachment', ?, ?, 0, ?)", A.value(), revision, OL, eligible);
+        if (ambiguous) {
+            sql("INSERT INTO fs.policy_rule VALUES (?, 'asset', 'attachment', ?, ?, 0, true)", A.value(), revision, SL);
+        }
+        sql("UPDATE fs.policy_revision SET sealed=true WHERE tenant_id=? AND policy_revision=?", A.value(), revision);
+        sql("UPDATE fs.active_policy SET policy_revision=? WHERE tenant_id=?", revision, A.value());
+    }
+
+    private static long scalar(String query) throws SQLException {
+        try (var connection = dataSource.getConnection();
+             var st = connection.createStatement(); var rs = st.executeQuery(query)) {
+            rs.next();
+            return rs.getLong(1);
+        }
     }
 
     private static void sql(String statement, Object... values) throws SQLException {
@@ -124,7 +168,7 @@ class JdbcTransactionsTest {
 
     @Test
     void kernelFailureAbortsLeaseAndRollsBack() throws SQLException {
-        sql("UPDATE fs.policy_rule SET eligible=false");
+        fixturePolicy(2, false, false);
         assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
                 () -> application().initiate(ALICE, command("retry"))).code());
         assertEquals(0, count("file"));
@@ -133,7 +177,7 @@ class JdbcTransactionsTest {
             rs.next();
             assertEquals(0, rs.getLong(1));
         }
-        sql("UPDATE fs.policy_rule SET eligible=true");
+        configuration().publishPolicy(SCOPE, 2, List.of(rule(OL, 0, true)));
         assertNotNull(application().initiate(ALICE, command("retry")));
         assertEquals(1, count("file"));
     }
@@ -256,9 +300,7 @@ class JdbcTransactionsTest {
     }
 
     private static void switchPolicy() throws SQLException {
-        sql("INSERT INTO fs.policy_revision VALUES (?, 'asset', 'attachment', 2)", A.value());
-        sql("INSERT INTO fs.policy_rule VALUES (?, 'asset', 'attachment', 2, ?, 0, true)", A.value(), SL);
-        sql("UPDATE fs.active_policy SET policy_revision=2 WHERE tenant_id=?", A.value());
+        configuration().publishPolicy(SCOPE, 1, List.of(rule(SL, 0, true)));
         sql("UPDATE fs.backend_revision SET status='DRAINING' WHERE backend_id=?", OSS);
     }
 
@@ -329,8 +371,7 @@ class JdbcTransactionsTest {
         sql("UPDATE fs.policy_rule SET eligible=false");
         assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
                 () -> application().initiate(ALICE, command("one"))).code());
-        sql("UPDATE fs.policy_rule SET eligible=true");
-        sql("INSERT INTO fs.policy_rule VALUES (?, 'asset', 'attachment', 1, ?, 0, true)", A.value(), SL);
+        fixturePolicy(3, true, true);
         assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
                 () -> application().initiate(ALICE, command("one"))).code());
         assertEquals(0, count("file"));
@@ -352,6 +393,112 @@ class JdbcTransactionsTest {
         assertThrows(JdbcTransactions.PersistenceFailure.class, () -> escaped.configuration(SCOPE));
         long revision = jdbc.execute(u -> u.configuration(SCOPE).orElseThrow().policy().revision());
         assertEquals(2, revision);
+    }
+
+    private static void draft(long revision, boolean validated) throws SQLException {
+        sql("INSERT INTO fs.backend_revision VALUES (?, ?, 'ref:synthetic/rotated', 'DRAFT', NULL)", OSS, revision);
+        if (validated) {
+            sql("UPDATE fs.backend_revision SET validated_revision=config_revision WHERE backend_id=? AND config_revision=?", OSS, revision);
+        }
+    }
+
+    @Test
+    void backendActivationRequiresExactValidationAndPreservesPins() throws SQLException {
+        var first = application().initiate(ALICE, command("before"));
+        draft(2, false);
+        assertEquals(Code.INVALID, assertThrows(Failure.class,
+                () -> configuration().activateBackend(new BackendId(OSS), 1, 2)).code());
+        assertEquals(1, scalar("SELECT config_revision FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='ACTIVE'"));
+        assertEquals("23514", assertThrows(SQLException.class, () -> sql(
+                "UPDATE fs.backend_revision SET validated_revision=1 WHERE backend_id=? AND config_revision=2", OSS)).getSQLState());
+        sql("UPDATE fs.backend_revision SET validated_revision=2 WHERE backend_id=? AND config_revision=2", OSS);
+        assertEquals(2, configuration().activateBackend(new BackendId(OSS), 1, 2));
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class,
+                () -> configuration().activateBackend(new BackendId(OSS), 1, 2)).code());
+        var second = application().initiate(ALICE, command("after"));
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
+        assertEquals(1, jdbc.execute(u -> u.bySession(A, first.session()).orElseThrow()).session().placement().configRevision());
+        assertEquals(2, jdbc.execute(u -> u.bySession(A, second.session()).orElseThrow()).session().placement().configRevision());
+        assertEquals(1, scalar("SELECT count(*) FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='DRAINING'"));
+        assertEquals(first, application().initiate(ALICE, command("before")));
+        assertEquals("23514", assertThrows(SQLException.class, () -> sql(
+                "UPDATE fs.backend_revision SET credential_ref='ref:synthetic/changed' WHERE backend_id=? AND config_revision=1", OSS)).getSQLState());
+    }
+
+    private static List<Object> competing(java.util.concurrent.Callable<Long> left,
+                                          java.util.concurrent.Callable<Long> right) throws Exception {
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var barrier = new java.util.concurrent.CyclicBarrier(2);
+            java.util.function.Function<java.util.concurrent.Callable<Long>, java.util.concurrent.Callable<Object>> wrap =
+                    call -> () -> {
+                        barrier.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                        try {
+                            return call.call();
+                        } catch (Failure ex) {
+                            return ex.code();
+                        }
+                    };
+            var a = executor.submit(wrap.apply(left));
+            var b = executor.submit(wrap.apply(right));
+            return List.of(a.get(30, java.util.concurrent.TimeUnit.SECONDS),
+                    b.get(30, java.util.concurrent.TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void concurrentBackendActivationHasOneWinner() throws Exception {
+        draft(2, true);
+        draft(3, true);
+        var results = competing(() -> configuration().activateBackend(new BackendId(OSS), 1, 2),
+                () -> configuration().activateBackend(new BackendId(OSS), 1, 3));
+        assertEquals(1, results.stream().filter(r -> r instanceof Long).count());
+        assertEquals(1, results.stream().filter(r -> r == Code.CONFLICT).count());
+        long winner = (Long) results.stream().filter(r -> r instanceof Long).findFirst().orElseThrow();
+        assertEquals(winner, scalar("SELECT config_revision FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='ACTIVE'"));
+        assertEquals(1, scalar("SELECT count(*) FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='DRAFT'"));
+    }
+
+    @Test
+    void concurrentPolicyPublicationHasOneWinner() throws Exception {
+        var results = competing(() -> configuration().publishPolicy(SCOPE, 1, List.of(rule(OL, 0, true))),
+                () -> configuration().publishPolicy(SCOPE, 1, List.of(rule(SL, 0, true))));
+        assertEquals(1, results.stream().filter(r -> r.equals(2L)).count());
+        assertEquals(1, results.stream().filter(r -> r == Code.CONFLICT).count());
+        assertEquals(2, count("policy_revision"));
+        assertEquals(2, scalar("SELECT policy_revision FROM fs.active_policy"));
+        assertEquals(2, count("policy_rule"));
+        var initial = new Scope(B, "asset", "attachment");
+        var first = competing(() -> configuration().publishPolicy(initial, 0, List.of(rule(OL, 0, true))),
+                () -> configuration().publishPolicy(initial, 0, List.of(rule(SL, 0, true))));
+        assertEquals(1, first.stream().filter(r -> r.equals(1L)).count());
+        assertEquals(1, first.stream().filter(r -> r == Code.CONFLICT).count());
+        assertEquals(3, count("policy_revision"));
+    }
+
+    @Test
+    void invalidPolicyRollsBackAndPublishedHistoryIsImmutable() throws SQLException {
+        var config = configuration();
+        assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
+                () -> config.publishPolicy(SCOPE, 1, List.of(rule(OL, 0, false), rule(SL, 1, true)))).code());
+        assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
+                () -> config.publishPolicy(SCOPE, 1, List.of(rule(OL, 0, true), rule(SL, 0, true)))).code());
+        assertEquals(Code.INVALID, assertThrows(Failure.class,
+                () -> config.publishPolicy(SCOPE, 1, List.of(rule(id(99), 0, true)))).code());
+        assertEquals(1, count("policy_revision"));
+        assertEquals(1, count("policy_rule"));
+        assertEquals(1, scalar("SELECT policy_revision FROM fs.active_policy"));
+        assertEquals(2, config.publishPolicy(SCOPE, 1, List.of(rule(SL, 0, true))));
+        assertEquals("23514", assertThrows(SQLException.class, () -> sql(
+                "UPDATE fs.policy_rule SET priority=5 WHERE policy_revision=1")).getSQLState());
+        assertEquals("23514", assertThrows(SQLException.class, () -> sql(
+                "INSERT INTO fs.policy_rule VALUES (?, 'asset', 'attachment', 1, ?, 1, true)", A.value(), SL)).getSQLState());
+        assertEquals("23514", assertThrows(SQLException.class, () -> sql(
+                "DELETE FROM fs.policy_rule WHERE policy_revision=1")).getSQLState());
+        assertEquals("23514", assertThrows(SQLException.class, () -> sql(
+                "UPDATE fs.policy_revision SET sealed=false WHERE policy_revision=1")).getSQLState());
+        assertEquals("23514", assertThrows(SQLException.class, () -> sql(
+                "UPDATE fs.active_policy SET policy_revision=1")).getSQLState());
+        assertEquals(3, config.publishPolicy(SCOPE, 2, List.of(rule(OL, 0, true))));
     }
 
     @Test
