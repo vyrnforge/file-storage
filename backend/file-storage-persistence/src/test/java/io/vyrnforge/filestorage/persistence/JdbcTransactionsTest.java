@@ -189,6 +189,32 @@ class JdbcTransactionsTest {
     }
 
     @Test
+    void leaseCompletionFailureRollsBackAggregate() throws SQLException {
+        var now = new java.util.concurrent.atomic.AtomicReference<>(NOW);
+        Clock clock = new Clock() {
+            public ZoneId getZone() { return ZoneOffset.UTC; }
+            public Clock withZone(ZoneId zone) { return Clock.fixed(instant(), zone); }
+            public Instant instant() { return now.get(); }
+        };
+        var jdbc = new JdbcTransactions(dataSource, clock, Duration.ofSeconds(10));
+        var identity = new RequestIdentity(ALICE, "late");
+        assertThrows(JdbcTransactions.PersistenceFailure.class, () -> jdbc.initiate(
+                identity, command("late"), unit -> {
+                    Entry e = entry(unit, "late", 180);
+                    unit.insert(e);
+                    now.set(NOW.plusSeconds(11));
+                    return new View(e.file().reference(), e.version().id(), e.file().state(),
+                            e.version().state(), e.session().id(), e.session().state(), e.session().expires());
+                }, unit -> { throw new AssertionError("unexpected replay"); }));
+        assertEquals(0, count("file"));
+        assertEquals(0, count("file_version"));
+        assertEquals(0, count("upload_session"));
+        assertEquals(0, count("initiation_request"));
+        assertNotNull(application().initiate(ALICE, command("late")));
+        assertEquals(1, count("file"));
+    }
+
+    @Test
     void expiredKernelLeaseDoesNotCreateDuplicate() throws SQLException {
         var first = application().initiate(ALICE, command("retained"));
         sql("UPDATE fs_kernel.platform_idempotency SET expires_at = now() - interval '100 years'");

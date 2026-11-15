@@ -125,6 +125,7 @@ public final class FileApplication {
         var identity=new RequestIdentity(caller,command.requestKey());
         var scope=new Scope(caller.tenant(),caller.consumer(),command.purpose());
         return transactions.initiate(identity, command, unit->{
+            if (!authorization.mayInitiate(caller, command.purpose())) throw new Failure(Code.DENIED);
             var existing=unit.byRequest(identity);
             if(existing.isPresent()){
                 return replay(caller, identity, command, existing.get());
