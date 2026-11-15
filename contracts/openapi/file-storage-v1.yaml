@@ -20,6 +20,7 @@ paths:
             minLength: 1
             maxLength: 128
       requestBody:
+        description: Metadata JSON only; isolated admission ceiling 16384 encoded bytes, no compression.
         required: true
         content:
           application/json:
@@ -35,6 +36,12 @@ paths:
         '403':
           $ref: '#/components/responses/Error'
         '409':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+        '415':
+          $ref: '#/components/responses/Error'
+        '406':
           $ref: '#/components/responses/Error'
         '503':
           $ref: '#/components/responses/Error'
@@ -201,6 +208,6 @@ components:
       properties:
         code:
           type: string
-          enum: [INVALID, AUTHENTICATION_FAILED, ACCESS_DENIED, DENIED, NOT_FOUND, CONFLICT, IN_PROGRESS, NO_PLACEMENT, UNAVAILABLE]
+          enum: [INVALID, AUTHENTICATION_FAILED, ACCESS_DENIED, DENIED, NOT_FOUND, CONFLICT, IN_PROGRESS, NO_PLACEMENT, UNAVAILABLE, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA, NOT_ACCEPTABLE, METHOD_NOT_ALLOWED]
         correlationId: {type: string, format: uuid}
         requestId: {type: string, format: uuid}

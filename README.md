@@ -60,3 +60,5 @@ Public repository: never commit secrets, private legacy source, real file conten
 - [FS-220 policy control plane](docs/architecture/15_POLICY_CONTROL_PLANE.md) — bounded internal policy management in review.
 
 - [FS-300A runtime foundation](docs/architecture/16_RUNTIME_FOUNDATION.md) — isolated executable and proposed v1 API; public exposure blocked.
+
+FS-300A foundation merged (PR #64, 125 verified tests). HTTP boundary refinement in review; public exposure blocked. Engineering quality [#65](https://github.com/vyrnforge/file-storage/issues/65) tracks focused cleanup.

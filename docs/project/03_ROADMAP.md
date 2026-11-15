@@ -89,3 +89,5 @@ FS-210A #27 internal implementation accepted and merged PR #61 (`224eada`); live
 FS-210B internal lifecycle accepted and merged PR #62 (a4d9e19), 117 tests verified; actual provider evidence and later location admission remain open. Owner authorized #29 FS-220 bounded internal policy management (also called FS-210C); live authority and #30 remain gated. See [policy control](../architecture/15_POLICY_CONTROL_PLANE.md).
 
 FS-220 #29 internal policy accepted and merged PR #63 (1d05534), 121 tests. #30 FS-300A isolated runtime foundation authorized; actual IAM #17–#19, transfer #57, later #31 and deployment separately gated. See [runtime foundation](../architecture/16_RUNTIME_FOUNDATION.md).
+
+FS-300A foundation accepted/merged PR #64 (6ed88c1), 125 verified tests. Owner authorized isolated HTTP boundary refinement under #30; #65 engineering quality tracks incremental cleanup and proposed dedicated review before console expansion. #57 and production gates remain separate.
