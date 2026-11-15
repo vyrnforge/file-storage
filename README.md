@@ -78,3 +78,5 @@ PR #71 accepted/merged 270fd09 (148 tests). [Durable upload transfer authorizati
 PR #72 accepted/merged 4880a42 (152 tests). [Registry-pinned provider transfer](docs/architecture/22_REGISTRY_PROVIDER_TRANSFER.md) — real PostgreSQL/MinIO gateway upload in review; no verified completion or live exposure.
 
 PR #73 accepted/merged 771ed70 (154 tests). [Native OSS and combined gateway](docs/architecture/23_OSS_COMBINED_GATEWAY.md) — isolated integration in review.
+
+PR #74 accepted/merged cbc61ef (155 tests). [Upload integrity verification](docs/architecture/24_UPLOAD_INTEGRITY.md) — #31 V6 durable matching evidence in review; no available state or scan verdict.

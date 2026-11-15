@@ -48,7 +48,7 @@ public final class JdbcUploadTransfers {
                       long revision, Locator locator, long size, Instant expiresAt) {
         @Override public String toString() { return "Pin[redacted]"; }
     }
-    private record Resource(Pin pin, Instant sessionExpiry, String purpose) {}
+    record Resource(Pin pin, Instant sessionExpiry, String purpose) {}
 
     public Issued issue(Caller caller, SessionId session, CorrelationContext correlation) {
         Objects.requireNonNull(caller); Objects.requireNonNull(session); Objects.requireNonNull(correlation);
@@ -122,7 +122,7 @@ public final class JdbcUploadTransfers {
         });
     }
 
-    private Resource resource(Connection connection, Caller caller, SessionId session) throws SQLException {
+    Resource resource(Connection connection, Caller caller, SessionId session) throws SQLException {
         try (var ps = statement(connection, """
                 SELECT s.file_id,s.version_id,s.location_id,s.backend_id,s.config_revision,v.object_key,
                        r.expected_size,s.expires_at,s.expires_nano_remainder,s.purpose
@@ -150,7 +150,7 @@ public final class JdbcUploadTransfers {
     }
 
     /** Same-database grant revocation is fenced until commit. External IAM is still check-time. */
-    private void lockCurrentGrant(Connection connection, Resource resource) throws SQLException {
+    void lockCurrentGrant(Connection connection, Resource resource) throws SQLException {
         Pin pin = resource.pin();
         Caller caller = pin.caller();
         Instant now = now();
@@ -168,7 +168,7 @@ public final class JdbcUploadTransfers {
         }
     }
 
-    private void record(io.vyrnforge.platform.kernel.event.EventIntentPort events,
+    void record(io.vyrnforge.platform.kernel.event.EventIntentPort events,
             io.vyrnforge.platform.kernel.audit.AuditIntentPort audits, CorrelationContext correlation, Pin pin, String action) {
         MutationIntents.record(events, audits, clock, correlation,
                 new ActorReference(ActorType.USER, pin.caller().actor(), null, null), pin.caller().tenant().value(),
@@ -176,7 +176,7 @@ public final class JdbcUploadTransfers {
                 Map.of("sessionId", pin.session().value().toString(), "versionId", pin.version().value().toString()));
     }
 
-    private PreparedStatement statement(Connection connection, String sql, Object... parameters) throws SQLException {
+    PreparedStatement statement(Connection connection, String sql, Object... parameters) throws SQLException {
         var ps = connection.prepareStatement(sql);
         try {
             ps.setQueryTimeout(queryTimeout);
@@ -185,7 +185,7 @@ public final class JdbcUploadTransfers {
         } catch (SQLException ex) { ps.close(); throw ex; }
     }
 
-    private Instant now() { return clock.instant().truncatedTo(ChronoUnit.MICROS); }
+    Instant now() { return clock.instant().truncatedTo(ChronoUnit.MICROS); }
     private static Failure denied() { return new Failure(Code.DENIED); }
     private static byte[] hash(String handle) {
         if (handle == null || !handle.matches("[A-Za-z0-9_-]{43}")) throw denied();
@@ -198,11 +198,11 @@ public final class JdbcUploadTransfers {
         catch (NoSuchAlgorithmException ex) { throw new IllegalStateException("digest unavailable"); }
     }
 
-    @FunctionalInterface private interface Work<T> {
+    @FunctionalInterface interface Work<T> {
         T run(Connection connection, io.vyrnforge.platform.kernel.event.EventIntentPort events,
                 io.vyrnforge.platform.kernel.audit.AuditIntentPort audits) throws SQLException;
     }
-    private <T> T execute(Work<T> work) {
+    <T> T execute(Work<T> work) {
         var failure = new java.util.concurrent.atomic.AtomicReference<RuntimeException>();
         try {
             return transaction.execute((connection, events, audits) -> {

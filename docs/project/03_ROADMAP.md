@@ -107,3 +107,5 @@ PR #71 accepted/merged 270fd09; 148 verified tests. #57 continuation: V5 durable
 PR #72 accepted/merged 4880a42 (152 verified tests). #57 continuation exact registry pin/adapter leases and actual MinIO gateway upload; then native OSS gateway fixture and #31 verified completion/reconciliation, #35 download. Live authority/provider/production gates deferred.
 
 PR #73 accepted/merged 771ed70 (154 tests). #57 isolated native OSS gateway and combined runtime integration next, then #31 verification/completion; actual OSS, IAM, limits and deployment gates deferred.
+
+PR #74 accepted/merged cbc61ef (155 verified tests); isolated #57 accepted. Owner authorized #31: first V6 integrity evidence and read-only reconciliation; next durable verification/scan lifecycle; #32 scanner decisions, #33 quota, #35 download and live/deployment gates remain separate.

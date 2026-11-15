@@ -35,3 +35,5 @@ FS-210A: internal trusted commands only; #16 actual secret manager/identity sele
 2026-11-15: PR #72 owner approved/merged 4880a42 (152 tests, CI 43699722472). Owner authorized #57 registry-pinned adapter integration; exact target admission before credential resolution, provider SPI only in runtime main, S3 test-scope fixture. No production migration/deployment or #31/#35 completion.
 
 2026-11-15: PR #73 owner approved/merged 771ed70 (154 tests, CI 43700750262). Owner authorized #57 native OSS loopback and combined runtime integration; no live OSS/IAM or production deployment, no #31/#35 completion.
+
+2026-11-15: PR #74 owner approved/merged cbc61ef (155 tests, CI 43702277359). Isolated #57 accepted; owner authorized #31 integrity/completion foundation. V6 matching evidence only; pending state and fail-closed scan gate retained. No production migration, scanner policy or deployment.
