@@ -33,7 +33,7 @@ public final class JdbcDownloadTransfers {
                       Locator locator,long size,String digest,Instant expiresAt){
         @Override public String toString(){return "DownloadPin[redacted]";}
     }
-    private record Resource(Pin pin,String purpose,String ownerActor,String ownerConsumer){}
+    private record Resource(Pin pin,String purpose,String ownerActor,String ownerConsumer,long lifecycleRevision){}
 
     public Issued issue(Caller caller,FileId file,VersionId version,CorrelationContext correlation){
         byte[] bytes=new byte[32];random.nextBytes(bytes);
@@ -47,11 +47,11 @@ public final class JdbcDownloadTransfers {
             try(var ps=tx.statement(c,"""
                 INSERT INTO fs.download_transfer_handle
                     (handle_hash,tenant_id,actor,consumer,file_id,version_id,location_id,backend_id,
-                     config_revision,object_key,expected_size,sha256,expires_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     config_revision,object_key,expected_size,sha256,expires_at,lifecycle_revision)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,hash(handle),caller.tenant().value(),caller.actor(),caller.consumer(),file.value(),version.value(),
                 pin.locator().location().value(),pin.backend().value(),pin.revision(),pin.locator().objectKey(),
-                pin.size(),pin.digest(),expiry.atOffset(ZoneOffset.UTC))){
+                pin.size(),pin.digest(),expiry.atOffset(ZoneOffset.UTC),resource.lifecycleRevision())){
                 if(ps.executeUpdate()!=1)throw new Failure(Code.CONFLICT);
             }
             record(events,audits,correlation,pin,"issued");
@@ -61,8 +61,10 @@ public final class JdbcDownloadTransfers {
 
     public Lookup lookup(String handle){
         try(var c=source.getConnection();var ps=tx.statement(c,"""
-                SELECT tenant_id,file_id,version_id FROM fs.download_transfer_handle
-                WHERE handle_hash=? AND claimed_at IS NULL AND expires_at>?
+                SELECT h.tenant_id,h.file_id,h.version_id FROM fs.download_transfer_handle h
+                JOIN fs.file f ON f.tenant_id=h.tenant_id AND f.file_id=h.file_id
+                WHERE h.handle_hash=? AND h.claimed_at IS NULL AND h.expires_at>?
+                  AND f.state='ACTIVE' AND f.lifecycle_revision=h.lifecycle_revision
                 """,hash(handle),tx.now().atOffset(ZoneOffset.UTC));var rows=ps.executeQuery()){
             if(!rows.next())throw denied();
             return new Lookup(new TenantId(rows.getObject(1,UUID.class)),new FileId(rows.getString(2)),
@@ -79,10 +81,10 @@ public final class JdbcDownloadTransfers {
                     UPDATE fs.download_transfer_handle SET claimed_at=?
                     WHERE handle_hash=? AND tenant_id=? AND actor=? AND consumer=? AND file_id=? AND version_id=?
                       AND location_id=? AND backend_id=? AND config_revision=? AND object_key=? AND expected_size=?
-                      AND sha256=? AND claimed_at IS NULL AND expires_at>? RETURNING expires_at
+                      AND sha256=? AND lifecycle_revision=? AND claimed_at IS NULL AND expires_at>? RETURNING expires_at
                     """,now,hash(handle),caller.tenant().value(),caller.actor(),caller.consumer(),file.value(),version.value(),
                     pin.locator().location().value(),pin.backend().value(),pin.revision(),pin.locator().objectKey(),
-                    pin.size(),pin.digest(),now);var rows=ps.executeQuery()){
+                    pin.size(),pin.digest(),resource.lifecycleRevision(),now);var rows=ps.executeQuery()){
                 if(!rows.next())throw denied();
                 Instant expiry=rows.getObject(1,OffsetDateTime.class).toInstant();
                 if(!clock.instant().isBefore(expiry))throw denied();
@@ -96,7 +98,7 @@ public final class JdbcDownloadTransfers {
         // V5 immutable original pin + V6 measured integrity + V7 clean scan + succeeded scan operation.
         try(var ps=tx.statement(c,"""
                 SELECT s.backend_id,s.config_revision,v.location_id,v.object_key,e.observed_size,e.observed_sha256,
-                       s.purpose,r.actor,s.consumer
+                       s.purpose,r.actor,s.consumer,f.lifecycle_revision
                 FROM fs.file f JOIN fs.file_version v ON v.tenant_id=f.tenant_id AND v.file_id=f.file_id
                 JOIN fs.upload_session s ON s.tenant_id=v.tenant_id AND s.file_id=v.file_id
                     AND s.version_id=v.version_id AND s.location_id=v.location_id
@@ -123,7 +125,7 @@ public final class JdbcDownloadTransfers {
             var pin=new Pin(caller,file,version,new BackendId(rows.getObject(1,UUID.class)),rows.getLong(2),
                 new Locator(new LocationId(rows.getObject(3,UUID.class)),rows.getString(4),null),
                 rows.getLong(5),rows.getString(6),Instant.EPOCH);
-            return new Resource(pin,rows.getString(7),rows.getString(8),rows.getString(9));
+            return new Resource(pin,rows.getString(7),rows.getString(8),rows.getString(9),rows.getLong(10));
         }
     }
 

@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * No object-store operations run inside the transaction.
  */
 public final class FileApplication {
-    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER, LIST_METADATA }
+    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER, LIST_METADATA, DELETE_FILE, RESTORE_FILE }
     public enum Code { DENIED, NOT_FOUND, NO_PLACEMENT, CONFLICT, IN_PROGRESS, INVALID }
     public static final class Failure extends RuntimeException {
         private final Code code;
@@ -57,8 +57,12 @@ public final class FileApplication {
         }
     }
     /** Internal aggregate; never serialize into consumer API. */
-    public record Entry(File file,Version version,UploadSession session,RequestIdentity request,Initiate command) {
+    public record Entry(File file,Version version,UploadSession session,RequestIdentity request,Initiate command,long lifecycleRevision) {
+        public Entry(File file,Version version,UploadSession session,RequestIdentity request,Initiate command) {
+            this(file,version,session,request,command,0);
+        }
         public Entry {
+            if(lifecycleRevision<0)throw new Failure(Code.INVALID);
             Objects.requireNonNull(file);Objects.requireNonNull(version);Objects.requireNonNull(session);
             Objects.requireNonNull(request);Objects.requireNonNull(command);
             if(!file.id().equals(version.fileId()) || !file.tenant().equals(version.tenant())
@@ -79,6 +83,9 @@ public final class FileApplication {
      */
     public interface Transactions {
         <T> T execute(Function<Unit,T> work);
+        default LifecycleView lifecycle(Caller caller,FileId file,Action action,long expected,List<CatalogGrant> grants,CorrelationContext correlation) {
+            throw new Failure(Code.DENIED);
+        }
 
         /** Separate replay path cannot create a new aggregate. Durable adapters coordinate leases. */
         default View initiate(RequestIdentity identity, Initiate command,
@@ -110,7 +117,7 @@ public final class FileApplication {
                        Instant expiresAt) {}
 
     /** Metadata permission alone does not disclose the upload session. */
-    public record MetadataView(FileReference file,VersionId version,FileState fileState,VersionState versionState,String name,long declaredSize,String declaredMimeType) {}
+    public record MetadataView(FileReference file,VersionId version,FileState fileState,VersionState versionState,String name,long declaredSize,String declaredMimeType,long lifecycleRevision) {}
 
     /** Trusted, current LIST_METADATA grant projection; null file means owned files for purpose. */
     public record CatalogGrant(String purpose,FileId file,Instant expiresAt) {
@@ -123,6 +130,14 @@ public final class FileApplication {
     public record UsageBucket(VersionState state,long fileCount,String declaredBytes,String availableBytes) {}
     public record CatalogUsage(List<UsageBucket> states) {
         public CatalogUsage {states=List.copyOf(states);}
+    }
+
+    public record LifecycleView(FileReference file,FileState fileState,long lifecycleRevision) {}
+
+    public LifecycleView lifecycle(Caller caller,FileId file,Action action,long expected,List<CatalogGrant> grants,CorrelationContext correlation) {
+        if(caller==null)throw new Failure(Code.DENIED);
+        if(file==null||expected<0||expected==Long.MAX_VALUE||!(action==Action.DELETE_FILE||action==Action.RESTORE_FILE))throw new Failure(Code.INVALID);
+        return transactions.lifecycle(caller,file,action,expected,catalogScope(grants),Objects.requireNonNull(correlation));
     }
 
     public CatalogPage catalog(Caller caller,List<CatalogGrant> grants,FileId after,int limit) {
@@ -199,6 +214,7 @@ public final class FileApplication {
                 || !authorization.mayAccess(caller, Action.READ_SESSION, entry.resource())) {
             throw new Failure(Code.DENIED);
         }
+        if (entry.file().state()!=FileState.ACTIVE) throw new Failure(Code.NOT_FOUND);
         if (!entry.command().equals(command)) throw new Failure(Code.CONFLICT);
         return view(entry, clock.instant());
     }
@@ -209,7 +225,7 @@ public final class FileApplication {
             Entry e=unit.byFile(caller.tenant(),file).orElseThrow(()->new Failure(Code.NOT_FOUND));
             if(!e.file().id().equals(file))throw new Failure(Code.NOT_FOUND);
             requireAccess(caller,e,Action.READ_METADATA);
-            return new MetadataView(e.file().reference(),e.version().id(),e.file().state(),e.version().state(),e.file().name(),e.command().expectedSize(),e.command().mimeType());
+            return new MetadataView(e.file().reference(),e.version().id(),e.file().state(),e.version().state(),e.file().name(),e.command().expectedSize(),e.command().mimeType(),e.lifecycleRevision());
         });
     }
     public View session(Caller caller,SessionId session) {

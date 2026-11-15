@@ -127,14 +127,20 @@ public final class SecuredFiles {
         return execute(bearer,tenant,correlationId,Action.LIST_METADATA,null,
             (app,caller,correlation)->app.usage(caller,catalogGrants(caller)));
     }
-    private List<CatalogGrant> catalogGrants(Caller caller){
+    public Result<LifecycleView> lifecycle(String bearer,TenantId tenant,UUID correlationId,FileId file,Action action,long expected){
+        if(action!=Action.DELETE_FILE&&action!=Action.RESTORE_FILE)throw new Failure(Code.INVALID);
+        return execute(bearer,tenant,correlationId,action,null,
+            (app,caller,correlation)->app.lifecycle(caller,file,action,expected,resourceGrants(caller,action),correlation));
+    }
+    private List<CatalogGrant> catalogGrants(Caller caller){return resourceGrants(caller,Action.LIST_METADATA);}
+    private List<CatalogGrant> resourceGrants(Caller caller,Action action){
         try{
             var now=clock.instant();
             var current=List.copyOf(grants.current(caller));
             if(current.size()>4096)throw new IllegalArgumentException("grant scope exceeds bound");
             var result=new ArrayList<CatalogGrant>();
             for(var g:current){
-                if(g.action()!=Action.LIST_METADATA||!g.active(now)||!g.tenant().equals(caller.tenant())
+                if(g.action()!=action||!g.active(now)||!g.tenant().equals(caller.tenant())
                     ||!g.actor().equals(caller.actor())||!g.consumer().equals(caller.consumer()))continue;
                 if(g.scope()==GrantScope.OWNED_FILE||g.scope()==GrantScope.EXACT_FILE)
                     result.add(new CatalogGrant(g.purpose(),g.file(),g.expiresAt()));

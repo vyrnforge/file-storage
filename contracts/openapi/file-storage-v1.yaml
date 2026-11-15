@@ -143,6 +143,52 @@ paths:
           $ref: '#/components/responses/Error'
         '503':
           $ref: '#/components/responses/Error'
+  /v1/files/{fileId}/delete:
+    post:
+      operationId: deleteLogicalFile
+      description: Reversible lifecycle command; expected revision fences retries and stale commands. No provider deletion.
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Correlation'
+        - name: fileId
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 512}
+        - name: expectedRevision
+          in: query
+          required: true
+          schema: {type: integer, minimum: 0, format: int64}
+      responses:
+        '200':
+          description: Current logical lifecycle state and revision.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Lifecycle'}
+        default:
+          $ref: '#/components/responses/Error'
+  /v1/files/{fileId}/restore:
+    post:
+      operationId: restoreLogicalFile
+      description: Reversible lifecycle command; expected revision fences retries and stale commands. No provider deletion.
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Correlation'
+        - name: fileId
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 512}
+        - name: expectedRevision
+          in: query
+          required: true
+          schema: {type: integer, minimum: 0, format: int64}
+      responses:
+        '200':
+          description: Current logical lifecycle state and revision.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Lifecycle'}
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     bearer:
@@ -254,9 +300,16 @@ components:
         sessionId: {type: string, format: uuid}
         uploadState: {type: string, enum: [INITIATED, VERIFYING, COMPLETED, FAILED, EXPIRED]}
         expiresAt: {type: string, format: date-time}
+    Lifecycle:
+      type: object
+      required: [file, fileState, lifecycleRevision]
+      properties:
+        file: {$ref: '#/components/schemas/FileReference'}
+        fileState: {type: string, enum: [ACTIVE, SOFT_DELETED]}
+        lifecycleRevision: {type: integer, minimum: 0, format: int64}
     Metadata:
       type: object
-      required: [file, versionId, fileState, versionState, name, declaredSize, declaredMimeType]
+      required: [file, versionId, fileState, versionState, name, declaredSize, declaredMimeType, lifecycleRevision]
       properties:
         file: {$ref: '#/components/schemas/FileReference'}
         versionId: {type: string, format: uuid}
@@ -265,6 +318,7 @@ components:
         name: {type: string}
         declaredSize: {type: integer, format: int64}
         declaredMimeType: {type: string}
+        lifecycleRevision: {type: integer, minimum: 0, format: int64}
     Error:
       type: object
       required: [code, correlationId, requestId]
