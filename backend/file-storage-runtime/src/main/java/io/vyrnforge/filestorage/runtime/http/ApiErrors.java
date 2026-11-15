@@ -4,6 +4,7 @@ import io.vyrnforge.filestorage.application.FileApplication.Failure;
 import io.vyrnforge.filestorage.security.SecuredFiles.SecurityFailure;
 import io.vyrnforge.filestorage.security.SecuredFiles.SecurityCode;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -17,7 +18,10 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 @RestControllerAdvice
 public final class ApiErrors {
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<FileDtos.ErrorResponse> error(Exception ex, HttpServletRequest request) {
+    public ResponseEntity<FileDtos.ErrorResponse> error(Exception ex, HttpServletRequest request, HttpServletResponse response) throws Exception {
+        // A data-plane stream may already have emitted bytes in COMBINED mode.
+        // Never append a metadata error envelope to a committed response.
+        if (response.isCommitted()) throw ex;
         if (ex instanceof SecurityFailure failure) {
             int status = failure.code() == SecurityCode.AUTHENTICATION_FAILED ? 401 : 403;
             var result = ApiResponses.error(request, status, failure.code().name());

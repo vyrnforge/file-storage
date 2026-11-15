@@ -6,7 +6,7 @@ import sys
 root = Path(__file__).resolve().parents[1] / "backend"
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 allowed = {
-    "file-storage-runtime": {("org.testcontainers", "postgresql", "test"), ("io.vyrnforge.filestorage", "file-storage-persistence", "compile"), ("org.springframework.boot", "spring-boot-starter-webmvc", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
+    "file-storage-runtime": {("io.vyrnforge.filestorage", "file-storage-provider-spi", "compile"), ("org.testcontainers", "postgresql", "test"), ("io.vyrnforge.filestorage", "file-storage-persistence", "compile"), ("org.springframework.boot", "spring-boot-starter-webmvc", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-domain": {("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-application": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-security": {("com.nimbusds", "nimbus-jose-jwt", "compile"), ("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
@@ -37,7 +37,7 @@ for module, expected in allowed.items():
                 if module == "file-storage-persistence":
                     prefixes += ("javax.sql.", "org.flywaydb.", "io.vyrnforge.filestorage.application.", "io.vyrnforge.filestorage.security.")
                 if module == "file-storage-runtime":
-                    prefixes += ("javax.sql.", "jakarta.servlet.", "org.springframework.", "tools.jackson.core.", "tools.jackson.databind.", "io.vyrnforge.filestorage.runtime.", "io.vyrnforge.filestorage.application.", "io.vyrnforge.filestorage.security.", "io.vyrnforge.filestorage.persistence.")
+                    prefixes += ("javax.sql.", "jakarta.servlet.", "org.springframework.", "tools.jackson.core.", "tools.jackson.databind.", "io.vyrnforge.filestorage.spi.", "io.vyrnforge.filestorage.runtime.", "io.vyrnforge.filestorage.application.", "io.vyrnforge.filestorage.security.", "io.vyrnforge.filestorage.persistence.")
                 if not any(line.strip().startswith("import " + prefix) for prefix in prefixes):
                     sys.exit(f"Unexpected import in {path}: {line}")
 print("FS-300A domain, provider SPI, S3/OSS adapters, application, security, persistence and runtime dependency boundaries OK")

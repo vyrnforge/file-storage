@@ -80,3 +80,5 @@ Alternatives reviewed: in-process streaming (combined profile only), direct prov
 2026-11-15: Owner approved latest-only candidate revision guard, PR #69 merged 28f66a0 (139 tests). Continue #30 isolated API composition: explicit dependency bundle, both Flyway histories validated without migration, trusted authority readiness probe; combined stays unready pending transfer/worker. No production readiness claim.
 
 2026-11-15: #30 final isolated contract revision: strict Jackson metadata mapping in explicit HTTP config; verify draft OpenAPI route/response/request subset against actual HTTP tests; maintain kernel Unicode ID length. No production deployment or new file limits selected.
+
+2026-11-15: Owner approved PR #70 (a062618, 143 tests) and next #57. Proposed bounded gateway contract: opaque sensitive header, trusted atomic single-use claim, explicit exact pin/limits, provider SPI, no metadata transaction across bytes; failed attempts consume handle, reconcile/reissue separately. No production defaults or live IAM/provider policy. Review #57 design in 20_PRIVATE_TRANSFER_GATEWAY.md.

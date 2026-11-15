@@ -37,3 +37,5 @@ P07 owner approved DEC-FS012 on 2026-11-15. Isolated adapter test profile, SDK p
 
 ## Handoff
 #25 S3 and #26 native OSS: select reviewed SDK versions and isolated test targets; execute shared suite and profile-specific matrix, do not advertise untested capabilities. #28 validation, #30/#31/#35 real service transfer boundary, #32 integrity/scan, #33 quotas, #43 threat matrix, #44 workload limits. #16 open decisions: file size/types, transfer TTL/reuse/range, target profiles, throughput and cost; no production defaults. #14 legacy full build evidence remains open; no raw legacy source publication. #24 accepted and PR #56 merged at c2c3c9a8a5f18a6d66f859097ae3031ec73bb508. #25 isolated profile implemented and CI-verified; see [S3 adapter profile](11_S3_ADAPTER_PROFILE.md). No #26 implementation or deployment authorized.
+
+[FS-300G gateway foundation](20_PRIVATE_TRANSFER_GATEWAY.md) authorized after PR #70 accepted/merged a062618 (143 tests). Runtime consumes SPI only, trusted claim/resolver ports, explicit limits and private byte endpoints; synthetic authority/provider tests only initially.
