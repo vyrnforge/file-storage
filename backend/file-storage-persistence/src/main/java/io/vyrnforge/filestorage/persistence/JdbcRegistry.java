@@ -1,6 +1,7 @@
 package io.vyrnforge.filestorage.persistence;
 
 import io.vyrnforge.filestorage.application.CredentialResolver;
+import io.vyrnforge.filestorage.application.BackendValidator;
 import io.vyrnforge.filestorage.application.FileApplication.Code;
 import io.vyrnforge.filestorage.application.FileApplication.Failure;
 import io.vyrnforge.filestorage.domain.StorageModel.*;
@@ -24,6 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import javax.sql.DataSource;
 
@@ -212,6 +214,81 @@ public final class JdbcRegistry {
                 return List.copyOf(result);
             }
         });
+    }
+
+    /**
+     * Internal trusted composition only. The approved target set comes from
+     * deployment policy, never an admin request. The validator owns all actual
+     * network/credential controls; no network work occurs inside either DB transaction.
+     */
+    public long validateDraft(ActorReference actor, CorrelationContext correlation, BackendId backend,
+                              long revision, Set<Target> approvedTargets, BackendValidator validator) {
+        Objects.requireNonNull(actor);
+        Objects.requireNonNull(correlation);
+        Objects.requireNonNull(backend);
+        Objects.requireNonNull(validator);
+        Set<Target> approved = Set.copyOf(approvedTargets);
+        if (revision < 1) throw new Failure(Code.INVALID);
+        var candidate = execute((c, events, audits) -> draftCandidate(c, backend, revision));
+        Target target = candidate.target();
+        String host = target.endpoint().getHost().toLowerCase(Locale.ROOT);
+        // Reject literal IPs, single-label/local names and unsupported CNAME.
+        // An explicit allowlist is necessary but not sufficient: the trusted
+        // validator must also enforce DNS resolution and actual connection egress.
+        if (!approved.contains(target) || !host.matches("[a-z0-9-]+(\\.[a-z0-9-]+)+")
+                || !host.matches(".*[a-z].*") || host.endsWith(".localhost")
+                || host.equals("metadata.google.internal") || target.addressing() == Addressing.CNAME) {
+            throw new Failure(Code.DENIED);
+        }
+        BackendValidator.Report report;
+        try {
+            report = Objects.requireNonNull(validator.validate(candidate));
+        } catch (RuntimeException ex) {
+            throw new Failure(Code.DENIED);
+        }
+        var ids = candidate.locations().stream().map(Location::id).collect(java.util.stream.Collectors.toSet());
+        if (!backend.equals(report.backend()) || revision != report.revision()
+                || !ids.equals(report.checks().keySet())
+                || report.checks().values().stream().anyMatch(checks ->
+                        !checks.equals(java.util.EnumSet.allOf(BackendValidator.Check.class)))) {
+            throw new Failure(Code.DENIED);
+        }
+        return execute((c, events, audits) -> {
+            // Parent lock prevents registerLocation/revision changes during commit.
+            // Compare the exact snapshot again after the external validation.
+            if (!candidate.equals(draftCandidate(c, backend, revision))) throw new Failure(Code.CONFLICT);
+            update(c, """
+                    UPDATE fs.backend_revision SET validated_revision=config_revision
+                    WHERE backend_id=? AND config_revision=? AND status='DRAFT' AND validated_revision IS NULL
+                    """, backend.value(), revision);
+            record(events, audits, actor, correlation, "file-storage.backend.validated",
+                    "file-storage.backend", backend.value(),
+                    Map.of("revision", revision, "locationCount", candidate.locations().size()));
+            return revision;
+        });
+    }
+
+    private static BackendValidator.Candidate draftCandidate(Connection c, BackendId backend, long revision)
+            throws SQLException {
+        Target target = lockBackend(c, backend);
+        CredentialRef credential;
+        try (var ps = statement(c, """
+                SELECT credential_ref FROM fs.backend_revision
+                WHERE backend_id=? AND config_revision=? AND status='DRAFT' AND validated_revision IS NULL
+                """, backend.value(), revision); var rs = ps.executeQuery()) {
+            if (!rs.next()) throw new Failure(Code.CONFLICT);
+            credential = new CredentialRef(rs.getString(1));
+        }
+        List<Location> locations = new ArrayList<>();
+        try (var ps = statement(c, """
+                SELECT location_id, bucket, prefix FROM fs.storage_location
+                WHERE backend_id=? ORDER BY location_id LIMIT 101
+                """, backend.value()); var rs = ps.executeQuery()) {
+            while (rs.next()) locations.add(new Location(new LocationId(rs.getObject(1, UUID.class)),
+                    backend, rs.getString(2), rs.getString(3)));
+        }
+        if (locations.isEmpty() || locations.size() > 100) throw new Failure(Code.INVALID);
+        return new BackendValidator.Candidate(backend, revision, target, credential, locations);
     }
 
     private record Pinned(Target target, Location location, CredentialRef credential) {}
