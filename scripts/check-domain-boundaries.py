@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FS-120B2B dependency policy: domain + SPI + application + security + persistence, no runtime framework/provider SDK."""
+"""FS-120B2B dependency policy: domain + SPI + application + security + persistence, SDK confined to reviewed provider module."""
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import sys
@@ -10,6 +10,7 @@ allowed = {
     "file-storage-application": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-security": {("com.nimbusds", "nimbus-jose-jwt", "compile"), ("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-persistence": {("io.vyrnforge.filestorage", "file-storage-security", "compile"), ("io.github.vyrnforge", "platform-kernel-jdbc", "compile"), ("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("org.flywaydb", "flyway-core", "compile"), ("org.flywaydb", "flyway-database-postgresql", "runtime"), ("org.postgresql", "postgresql", "runtime"), ("org.testcontainers", "postgresql", "test"), ("org.junit.jupiter", "junit-jupiter", "test")},
+    "file-storage-provider-s3": {("io.vyrnforge.filestorage", "file-storage-provider-spi", "compile"), ("io.vyrnforge.filestorage", "file-storage-provider-spi", "test"), ("software.amazon.awssdk", "s3", "compile"), ("software.amazon.awssdk", "apache-client", "compile"), ("org.testcontainers", "testcontainers", "test"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-provider-spi": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
 }
 reactor = ET.parse(root / "pom.xml")
@@ -25,10 +26,12 @@ for module, expected in allowed.items():
         for line in path.read_text().splitlines():
             if line.strip().startswith("import "):
                 prefixes = ("java.", "io.vyrnforge.platform.kernel.", "io.vyrnforge.filestorage.domain.")
+                if module == "file-storage-provider-s3":
+                    prefixes += ("io.vyrnforge.filestorage.spi.", "software.amazon.awssdk.")
                 if module == "file-storage-security":
                     prefixes += ("io.vyrnforge.filestorage.application.", "com.nimbusds.")
                 if module == "file-storage-persistence":
                     prefixes += ("javax.sql.", "org.flywaydb.", "io.vyrnforge.filestorage.application.", "io.vyrnforge.filestorage.security.")
                 if not any(line.strip().startswith("import " + prefix) for prefix in prefixes):
                     sys.exit(f"Unexpected import in {path}: {line}")
-print("FS-120B2B domain, provider SPI, application, security and persistence dependency boundaries OK")
+print("FS-200B domain, provider SPI, S3 adapter, application, security and persistence dependency boundaries OK")

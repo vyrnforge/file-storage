@@ -7,6 +7,7 @@
     <modules>
         <module>file-storage-domain</module>
         <module>file-storage-provider-spi</module>
+        <module>file-storage-provider-s3</module>
         <module>file-storage-application</module>
         <module>file-storage-security</module>
         <module>file-storage-persistence</module>

@@ -1,6 +1,6 @@
 # Current state and legacy capability baseline
 
-Date: 2026-11-15. Phase 2 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged (PR #52); FS-120B2B merged (PR #53); FS-120C1 merged (PR #54); FS-120C2 merged (PR #55); FS-200A contract in review; DEC-FS012 approved. Java/Maven domain, provider SPI, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
+Date: 2026-11-15. Phase 2 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged (PR #52); FS-120B2B merged (PR #53); FS-120C1 merged (PR #54); FS-120C2 merged (PR #55); FS-200A contract merged; DEC-FS012 approved; FS-200B S3 adapter verified in PR #59. Java/Maven domain, provider SPI, S3 adapter, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
 
 ## Legacy inventory (sanitized)
 | Capability | Legacy evidence | Proposed treatment |
@@ -66,3 +66,5 @@ PR #12 merged at `f28e9093105e5620e2b9a0eb8e36b2de6595c9f2`; final hosted CI [43
 
 Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separate API/worker runtime roles, optional private CDN acceleration. One product, repository, domain and authoritative metadata store; combined local/small deployment permitted. API authorizes/orchestrates, never carries consumer file bodies in separated profile. Gateway streams to private providers, workers verify/scan/reconcile. No direct provider URL, locator, signature or credential exposure. CDN conditional, no shared confidential caching by default. No production deployment or limits approved.
 #25 authorized conditional on test-profile prerequisites; #57/#58 tracked, no runtime deployment.
+
+2026-11-15: owner confirmed both PRs reviewed. PR #56 squash merged at c2c3c9a8a5f18a6d66f859097ae3031ec73bb508; CI 43673922475 passed 78 tests. #25 isolated MinIO profile verified by CI 43675256063 (91 tests, including 13 real MinIO and 38 PostgreSQL; zero failures/errors/skips). PR #59 reconciled with merged baseline; final compatible CI required. No production target compatibility, deployed gateway or later authorization. #26 next candidate only.

@@ -32,3 +32,6 @@ V3 storage_operation, JdbcOperations and OutboxDelivery. Kernel JdbcOutboxPublis
 
 ## FS-200A
 Provider SPI exports reusable JUnit contract tests in the test-only `tests` classifier (Maven verify/package). Synthetic memory profile exercises minimum behavior; actual S3/OSS modules must extend ProviderContract and add advertised capability and failure/profile tests. No SDK dependencies or live provider adapters yet.
+
+## FS-200B
+S3 adapter implements the bounded unversioned profile using AWS SDK 2.57.2; see [profile](../docs/architecture/11_S3_ADAPTER_PROFILE.md). `make ci` prepares the official checksum-pinned local MinIO fixture and runs actual provider contract tests. CI 43675256063 passed 91 tests; final main-compatible evidence required. No optional capabilities or actual AWS/production target claim.
