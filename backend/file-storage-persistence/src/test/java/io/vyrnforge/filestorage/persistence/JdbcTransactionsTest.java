@@ -1196,9 +1196,14 @@ class JdbcTransactionsTest {
                 new CredentialRef("ref:synthetic/concurrent:v1"));
         var two = registry.registerBackend(ADMIN, ctx, registryTarget(Provider.S3, "https://CONCURRENT.example.test:443/"),
                 new CredentialRef("ref:synthetic/concurrent:v2"));
-        var results = competing(() -> registry.registerLocation(ADMIN, ctx, one, "concurrent-bucket", "area"),
-                () -> registry.registerLocation(ADMIN, ctx, two, "concurrent-bucket", "area/nested"));
-        assertEquals(1, results.stream().filter(v -> v instanceof LocationId).count());
+        var results = competing(() -> {
+            registry.registerLocation(ADMIN, ctx, one, "concurrent-bucket", "area");
+            return 1L;
+        }, () -> {
+            registry.registerLocation(ADMIN, ctx, two, "concurrent-bucket", "area/nested");
+            return 1L;
+        });
+        assertEquals(1, results.stream().filter(v -> v.equals(1L)).count());
         assertEquals(1, results.stream().filter(v -> v == Code.CONFLICT).count());
         assertEquals(1, scalar("SELECT count(*) FROM fs.storage_location WHERE bucket='concurrent-bucket'"));
         assertEquals(1, intents("platform_audit_event", "action", "file-storage.location.registered"));
