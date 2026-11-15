@@ -196,8 +196,17 @@ public final class StorageModel {
             this.scope=Objects.requireNonNull(scope);this.placement=Objects.requireNonNull(placement);this.expectedObject=Objects.requireNonNull(expectedObject);this.expires=Objects.requireNonNull(expires);this.state=state;
         }
         public static UploadSession initiate(SessionId id,File file,VersionId version,Scope scope,Placement placement,Locator expectedObject,Instant expires,Instant now) {
-            if (!file.tenant.equals(scope.tenant) || !scope.equals(placement.scope) || !placement.location.equals(expectedObject.location) || file.state!=FileState.ACTIVE || !expires.isAfter(now)) throw new IllegalArgumentException("invalid session");
-            return new UploadSession(id,file.id,version,scope,placement,expectedObject,expires,UploadState.INITIATED);
+            if (!expires.isAfter(now)) throw new IllegalArgumentException("invalid session expiry");
+            return restoreInitiated(id, file, version, scope, placement, expectedObject, expires);
+        }
+        /** Rehydrate an already-persisted initiation, even after expiry; never issues a grant. */
+        public static UploadSession restoreInitiated(SessionId id, File file, VersionId version, Scope scope,
+                                                     Placement placement, Locator expectedObject, Instant expires) {
+            if (!file.tenant.equals(scope.tenant) || !scope.equals(placement.scope)
+                    || !placement.location.equals(expectedObject.location) || file.state != FileState.ACTIVE) {
+                throw new IllegalArgumentException("invalid persisted session");
+            }
+            return new UploadSession(id, file.id, version, scope, placement, expectedObject, expires, UploadState.INITIATED);
         }
         public UploadSession start(Instant now){return advance(UploadState.INITIATED,UploadState.UPLOADING,now);}
         public UploadSession verify(Instant now){return advance(UploadState.UPLOADING,UploadState.VERIFYING,now);}

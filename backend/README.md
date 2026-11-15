@@ -11,3 +11,6 @@ Security module composes trusted credential verification and server-side binding
 
 ## FS-110B
 Security module uses pinned Nimbus JOSE+JWT 10.10 for RSA signature verification and JWT/JWK parsing. Explicit key snapshot source must be supplied by composition root. No live discovery or network retrieval, credentials, runtime HTTP or IAM registration. No dependency changes to domain/application/provider SPI.
+
+## FS-120A
+Persistence module adds service schema migrations, JDBC transaction adapter and PostgreSQL integration tests. `make ci` now requires Docker for a disposable Testcontainers PostgreSQL instance (no production connection). Flyway schema fs and migration location db/filestorage separate from Kernel migration history. Kernel JDBC integration deferred to FS-120B/C.
