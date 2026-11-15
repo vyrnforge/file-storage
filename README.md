@@ -54,3 +54,5 @@ Independent, multi-tenant, multi-provider enterprise file storage service for As
 Backend contains the domain, provider SPI, S3/OSS adapters, application, security and persistence Maven reactor; console, SDK, contracts, deployment and tests remain reserved areas with README files. FS-110B adds cryptographic access-token verification; no live IAM wiring or runtime API; no deployed service or infrastructure; FS-120A adds service-owned migrations. Verify with `make ci` (Java 21, Maven 3.9+, Docker for disposable PostgreSQL and MinIO tests, Kernel from Maven Central). See [FS-100A evidence](docs/project/08_FS100A_EVIDENCE.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Public repository: never commit secrets, private legacy source, real file content or production configuration. Licensed under [Apache-2.0](LICENSE).
+
+- [FS-210B backend lifecycle](docs/architecture/14_BACKEND_LIFECYCLE.md) — internal validation, drain and guarded retirement in review; concrete provider/authority gates pending.

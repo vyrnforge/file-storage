@@ -25,3 +25,6 @@ See [configuration revision contract](07_CONFIGURATION_REVISIONS.md). Internal C
 
 ## FS-210A registry
 [Registry contract](13_BACKEND_REGISTRY.md): trusted draft registration, immutable initial locations, append-only credential revision CAS, fresh DB snapshots, exact active/draining reference resolution. Actual secret manager/workload identity (#16), provider validation, network allowlist and later location admission (#28), administrator authorization and HTTP/console remain gates. No provider I/O during metadata transaction.
+
+## FS-210B internal lifecycle
+[Backend lifecycle](14_BACKEND_LIFECYCLE.md): exact draft validation boundary, exact active revision drain, V4 guarded retirement with atomic audit/event and stale-snapshot fencing. Existing pins preserved on drain. Concrete provider validation, later location admission and live network/credential policy remain pending.

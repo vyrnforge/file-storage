@@ -11,3 +11,5 @@ Work in focused branches and PRs. Update current state, decision record and back
 Keep Maven POMs readable: four-space indentation, one element per line, no compact/minified XML. Preserve coordinates and configuration when formatting. See CONTRIBUTING.md; `make ci` includes POM readability validation.
 
 FS-210A: internal trusted commands only; #16 actual secret manager/identity selection pending. No provider calls, admin HTTP, validation or activation in registry commands. See docs/architecture/13_BACKEND_REGISTRY.md.
+
+2026-11-15: PR #61 merged at `224eada` after owner acceptance, 108 tests at verified head. #27 live credential evidence still open; #28 authorized bounded lifecycle work (internal validation boundary, drain and V4 retirement in review). #16 actual credential/network authority, #26 OSS staging, #14 legacy parity and #28 concrete provider validation, late location admission and verification remain gates. No #29 or production authorization.
