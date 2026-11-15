@@ -110,3 +110,6 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 2026-11-15: PR #78 approved/merged edb185caa07332de52e84daabba2e201e41b998a; CI 43707217512 passed 173 tests. #31 terminal recovery accepted, cleanup HOLD remains. #35 V9 authorized download in review. [Download](../architecture/28_AUTHORIZED_DOWNLOAD.md).
 
 2026-11-15: PR #79 approved/merged b8450b3c9b046138353c400b86218c43cc485185; CI 43708868214 passed 177 tests. #35 isolated upload-to-download accepted. V10 scoped metadata catalog/usage in review. [Catalog](../architecture/29_METADATA_CATALOG.md).
+
+
+2026-11-15: Owner approved PR #80, squash merged `02814b4ae0d2c596be56b798067e7b0b696c8d84`; exact-head CI 43709875026 passed 180 tests. Owner authorized #36 FS-310A1 reversible logical lifecycle only. V11 candidate in review; retention/hold, quota, physical purge, production migration and deployment remain gated. See [FS-310A1 contract](../architecture/30_LOGICAL_FILE_LIFECYCLE.md).

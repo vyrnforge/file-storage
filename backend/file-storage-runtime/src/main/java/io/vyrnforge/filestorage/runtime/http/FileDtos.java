@@ -16,7 +16,7 @@ public final class FileDtos {
             String versionState, String sessionId, String uploadState, Instant expiresAt) {}
 
     public record MetadataResponse(FileReference file, String versionId, String fileState,
-            String versionState, String name, long declaredSize, String declaredMimeType) {}
+            String versionState, String name, long declaredSize, String declaredMimeType, long lifecycleRevision) {}
 
     public record CatalogResponse(java.util.List<MetadataResponse> items,String nextAfterFileId) {}
     static CatalogResponse catalog(io.vyrnforge.filestorage.application.FileApplication.CatalogPage page){
@@ -35,6 +35,6 @@ public final class FileDtos {
     static MetadataResponse metadata(MetadataView view) {
         return new MetadataResponse(view.file(), view.version().value().toString(),
                 view.fileState().name(), view.versionState().name(),
-                view.name(), view.declaredSize(), view.declaredMimeType());
+                view.name(), view.declaredSize(), view.declaredMimeType(), view.lifecycleRevision());
     }
 }

@@ -1120,6 +1120,99 @@ class DurableUploadAuthorityTest {
             assertEquals(401,catalogGet(http,base,"/v1/files","wrong",TENANT).statusCode());
         }
     }
+    @Test void logicalLifecycleFencesHandlesAndPreservesReference() throws Exception {
+        available();
+        for(String action:List.of("DELETE_FILE","RESTORE_FILE","READ_METADATA","LIST_METADATA","DOWNLOAD_TRANSFER"))
+            grant("fixture-user","asset",action,"OWNED_FILE",null);
+        var d=downloads(CLOCK);
+        var stale=d.issue("user",TENANT,fileId(),view.version(),null).value();
+        var deleted=secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0).value();
+        assertEquals(FileState.SOFT_DELETED,deleted.fileState());assertEquals(1,deleted.lifecycleRevision());
+        assertEquals(view.file(),deleted.file());
+        assertEquals(deleted,secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0).value());
+        assertEquals(Code.NOT_FOUND,assertThrows(Failure.class,()->secured.metadata("user",TENANT,null,fileId())).code());
+        assertEquals(Code.NOT_FOUND,assertThrows(Failure.class,()->secured.session("user",TENANT,null,view.session())).code());
+        assertThrows(RuntimeException.class,()->secured.initiate("user",TENANT,null,new Initiate("attachment","sample.txt",5,"text/plain","fixture-key")));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.file"));
+        assertTrue(secured.catalog("user",TENANT,null,null,10).value().items().isEmpty());
+        assertEquals(0,secured.usage("user",TENANT,null).value().states().stream().mapToLong(UsageBucket::fileCount).sum());
+        assertThrows(RuntimeException.class,()->d.issue("user",TENANT,fileId(),view.version(),null));
+        assertThrows(TransferFailure.class,()->d.claim("user",stale.handle(),TransferInstruction.Action.DOWNLOAD));
+        var restored=secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,1).value();
+        assertEquals(FileState.ACTIVE,restored.fileState());assertEquals(2,restored.lifecycleRevision());
+        assertEquals(view.file(),restored.file());
+        assertEquals(view.version(),secured.metadata("user",TENANT,null,fileId()).value().version());
+        assertEquals(2,secured.metadata("user",TENANT,null,fileId()).value().lifecycleRevision());
+        assertEquals(1,secured.catalog("user",TENANT,null,null,10).value().items().size());
+        assertEquals(Code.CONFLICT,assertThrows(Failure.class,()->secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0)).code());
+        assertThrows(TransferFailure.class,()->d.claim("user",stale.handle(),TransferInstruction.Action.DOWNLOAD));
+        var fresh=d.issue("user",TENANT,fileId(),view.version(),null).value();
+        assertEquals(fileId(),d.claim("user",fresh.handle(),TransferInstruction.Action.DOWNLOAD).file());
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.file.soft-deleted'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.file.restored'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='CLEANUP_UPLOAD'"));
+    }
+
+    @Test void logicalLifecycleRequiresBothAuthoritiesAndRollsBackIntent() throws Exception {
+        grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
+        assertEquals(Code.CONFLICT,assertThrows(Failure.class,()->secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0)).code());
+        available();
+        assertThrows(RuntimeException.class,()->secured.lifecycle("other",TENANT,null,fileId(),Action.DELETE_FILE,0));
+        assertThrows(RuntimeException.class,()->secured.lifecycle("other-app",TENANT,null,fileId(),Action.DELETE_FILE,0));
+        assertThrows(RuntimeException.class,()->secured.lifecycle("other-tenant",TENANT,null,fileId(),Action.DELETE_FILE,0));
+        var external=RuntimeComposition.secured(source,new Trust(ISS,AUD),proof->new VerifiedAccess(ISS,"user",Set.of(AUD),TokenKind.ACCESS,NOW,NOW.plusSeconds(300),NOW),
+            (issuer,subject,audience)->Optional.of(new Binding(USER,TENANT,"asset",Set.of(Action.DELETE_FILE))),
+            (actor,tenant)->true,(tenant,module)->new ModuleEntitlement(TENANT.value(),"file-storage",true,NOW),
+            caller->List.of(new Grant(TENANT,USER.actorId(),"asset",Action.DELETE_FILE,"attachment",GrantScope.EXACT_FILE,
+                fileId(),NOW,NOW.plusSeconds(300),false)),CLOCK,Duration.ofMinutes(5),Duration.ofSeconds(30));
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='DELETE_FILE'");
+        assertEquals(Code.NOT_FOUND,assertThrows(Failure.class,()->external.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0)).code());
+        sql("UPDATE fs.file_grant SET revoked=false WHERE action='DELETE_FILE'");
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_lifecycle CHECK (event_type <> 'file-storage.file.soft-deleted') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->external.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0));
+            assertEquals(0,scalar("SELECT lifecycle_revision FROM fs.file"));
+            assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.file.soft-deleted'"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_lifecycle");}
+        assertEquals(1,external.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0).value().lifecycleRevision());
+        assertThrows(RuntimeException.class,()->secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,1));
+        grant("fixture-other","asset","RESTORE_FILE","EXACT_FILE",fileId().value());
+        assertEquals(2,secured.lifecycle("other",TENANT,null,fileId(),Action.RESTORE_FILE,1).value().lifecycleRevision());
+    }
+
+    @Test void logicalLifecycleHttpContractAndConcurrentRetries() throws Exception {
+        available();
+        for(String action:List.of("DELETE_FILE","RESTORE_FILE","READ_METADATA","LIST_METADATA"))
+            grant("fixture-user","asset",action,"OWNED_FILE",null);
+        var app=RuntimeApplication.application(io.vyrnforge.filestorage.runtime.http.ApiHttpConfiguration.class);
+        app.addInitializers(ctx->ctx.getBeanFactory().registerSingleton("securedFiles",secured));
+        try(var ctx=app.run("--server.port=0","--fs.role=API");var http=HttpClient.newHttpClient()){
+            String base="http://127.0.0.1:"+ctx.getEnvironment().getProperty("local.server.port");
+            String path="/v1/files/"+fileId().value();
+            var request=HttpRequest.newBuilder(URI.create(base+path+"/delete?expectedRevision=0"))
+                .header("Authorization","Bearer user").header("X-Tenant-Id",TENANT.value().toString())
+                .POST(HttpRequest.BodyPublishers.noBody()).build();
+            var one=http.sendAsync(request,HttpResponse.BodyHandlers.ofString());
+            var two=http.sendAsync(request,HttpResponse.BodyHandlers.ofString());
+            for(var response:List.of(one.get(10,TimeUnit.SECONDS),two.get(10,TimeUnit.SECONDS))){
+                assertEquals(200,response.statusCode(),response.body());OpenApiContract.assertResponse(response);
+                assertTrue(response.body().contains("SOFT_DELETED"));
+            }
+            assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.file.soft-deleted'"));
+            var hidden=catalogGet(http,base,path,"user",TENANT);assertEquals(404,hidden.statusCode());OpenApiContract.assertResponse(hidden);
+            var list=catalogGet(http,base,"/v1/files","user",TENANT);assertEquals(200,list.statusCode());OpenApiContract.assertResponse(list);
+            assertTrue(tools.jackson.databind.json.JsonMapper.builder().build().readTree(list.body()).get("items").isEmpty());
+            var restore=HttpRequest.newBuilder(URI.create(base+path+"/restore?expectedRevision=1"))
+                .header("Authorization","Bearer user").header("X-Tenant-Id",TENANT.value().toString())
+                .POST(HttpRequest.BodyPublishers.noBody()).build();
+            var restored=http.send(restore,HttpResponse.BodyHandlers.ofString());
+            assertEquals(200,restored.statusCode(),restored.body());OpenApiContract.assertResponse(restored);
+            var metadata=catalogGet(http,base,path,"user",TENANT);assertEquals(200,metadata.statusCode());OpenApiContract.assertResponse(metadata);
+            assertEquals(2,tools.jackson.databind.json.JsonMapper.builder().build().readTree(metadata.body()).get("lifecycleRevision").asLong());
+        }
+    }
+
     private static HttpResponse<String> catalogGet(HttpClient http,String base,String path,String proof,TenantId tenant)throws Exception{
         return http.send(HttpRequest.newBuilder(URI.create(base+path)).header("Authorization","Bearer "+proof)
             .header("X-Tenant-Id",tenant.value().toString()).GET().build(),HttpResponse.BodyHandlers.ofString());

@@ -24,6 +24,7 @@ public final class JdbcTransactions implements Transactions {
     private final JdbcReliabilityTransaction transaction;
     private final java.time.Clock clock;
     private final InitiationReliability reliability;
+    private final JdbcFileLifecycle lifecycle;
 
     public JdbcTransactions(DataSource dataSource, java.time.Clock clock, java.time.Duration leaseTtl) {
         this.clock = Objects.requireNonNull(clock);
@@ -31,6 +32,7 @@ public final class JdbcTransactions implements Transactions {
                 new KernelDataSource(Objects.requireNonNull(dataSource), Connection.TRANSACTION_REPEATABLE_READ),
                 new JacksonRecordCodec(), clock);
         this.reliability = new InitiationReliability(dataSource, clock, leaseTtl);
+        this.lifecycle = new JdbcFileLifecycle(dataSource,clock);
     }
 
     @Override
@@ -78,6 +80,11 @@ public final class JdbcTransactions implements Transactions {
             return new Failure(Code.INVALID);
         }
         return new PersistenceFailure();
+    }
+
+    @Override
+    public LifecycleView lifecycle(Caller caller,FileId file,Action action,long expected,List<CatalogGrant> grants,CorrelationContext correlation){
+        return lifecycle.change(caller,file,action,expected,grants,correlation);
     }
 
     @Override
@@ -197,7 +204,7 @@ public final class JdbcTransactions implements Transactions {
         }
 
         private static final String ENTRY = """
-                SELECT f.file_id, f.tenant_id, f.name, f.state AS file_state,
+                SELECT f.file_id, f.tenant_id, f.name, f.state AS file_state, f.lifecycle_revision,
                        v.version_id, v.location_id, v.object_key, v.state AS version_state,
                        s.session_id, s.policy_revision, s.config_revision, s.consumer, s.purpose,
                        s.expires_at, s.expires_nano_remainder, s.state AS session_state,
@@ -222,13 +229,13 @@ public final class JdbcTransactions implements Transactions {
 
         @Override
         public Optional<Entry> byFile(TenantId tenant, FileId file) {
-            return find(ENTRY + "WHERE f.tenant_id = ? AND f.file_id = ?",
+            return find(ENTRY + "WHERE f.tenant_id = ? AND f.file_id = ? AND f.state='ACTIVE'",
                     tenant.value(), file.value());
         }
 
         @Override
         public Optional<Entry> bySession(TenantId tenant, SessionId session) {
-            return find(ENTRY + "WHERE f.tenant_id = ? AND s.session_id = ?",
+            return find(ENTRY + "WHERE f.tenant_id = ? AND s.session_id = ? AND f.state='ACTIVE'",
                     tenant.value(), session.value());
         }
 
@@ -267,7 +274,7 @@ public final class JdbcTransactions implements Transactions {
 
         private static Entry readEntry(ResultSet rs) throws SQLException {
             if (!"ACTIVE".equals(rs.getString("file_state"))) {
-                throw new PersistenceFailure();
+                throw new Failure(Code.NOT_FOUND);
             }
             TenantId tenant = new TenantId(rs.getObject("tenant_id", UUID.class));
             File file = File.create(new FileId(rs.getString("file_id")), tenant, rs.getString("name"));
@@ -300,7 +307,7 @@ public final class JdbcTransactions implements Transactions {
             String key = rs.getString("request_key");
             Initiate command = new Initiate(scope.purpose(), file.name(), rs.getLong("expected_size"),
                     rs.getString("declared_mime_type"), key);
-            return new Entry(file, version, session, new RequestIdentity(caller, key), command);
+            return new Entry(file, version, session, new RequestIdentity(caller, key), command,rs.getLong("lifecycle_revision"));
         }
 
         @Override

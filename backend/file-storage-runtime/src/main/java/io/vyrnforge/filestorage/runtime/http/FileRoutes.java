@@ -3,6 +3,7 @@ package io.vyrnforge.filestorage.runtime.http;
 import io.vyrnforge.filestorage.domain.StorageModel.FileId;
 import io.vyrnforge.filestorage.domain.StorageModel.SessionId;
 import io.vyrnforge.filestorage.security.SecuredFiles;
+import io.vyrnforge.filestorage.application.FileApplication.*;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Objects;
 import org.springframework.http.ResponseEntity;
@@ -47,6 +48,24 @@ public final class FileRoutes {
             throw new io.vyrnforge.filestorage.application.FileApplication.Failure(
                 io.vyrnforge.filestorage.application.FileApplication.Code.INVALID);
         var result=secured.usage(context.bearer(),context.tenant(),context.correlationId());
+        return ApiResponses.success(result.correlation(),result.value());
+    }
+
+    @PostMapping(value = "/files/{fileId}/delete", produces = "application/json")
+    public ResponseEntity<LifecycleView> delete(HttpServletRequest request,@PathVariable("fileId") String fileId) {
+        return lifecycle(request,fileId,Action.DELETE_FILE);
+    }
+
+    @PostMapping(value = "/files/{fileId}/restore", produces = "application/json")
+    public ResponseEntity<LifecycleView> restore(HttpServletRequest request,@PathVariable("fileId") String fileId) {
+        return lifecycle(request,fileId,Action.RESTORE_FILE);
+    }
+
+    private ResponseEntity<LifecycleView> lifecycle(HttpServletRequest request,String fileId,Action action) {
+        var context=ApiRequest.from(request);
+        if(!request.getParameterMap().keySet().equals(java.util.Set.of("expectedRevision")))throw new Failure(Code.INVALID);
+        long expected=ApiRequest.number(ApiRequest.query(request,"expectedRevision",null),0,Long.MAX_VALUE-1);
+        var result=secured.lifecycle(context.bearer(),context.tenant(),context.correlationId(),new FileId(ApiRequest.fileId(fileId)),action,expected);
         return ApiResponses.success(result.correlation(),result.value());
     }
 

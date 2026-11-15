@@ -47,3 +47,5 @@ FS-210A: internal trusted commands only; #16 actual secret manager/identity sele
 2026-11-15: PR #78 approved/merged edb185c (173 tests, CI 43707217512). Owner authorized #35 isolated authorized download. Explicit DOWNLOAD_TRANSFER grant, exact clean pin and single-use hash-only handle, no production migration/deployment.
 
 2026-11-15: PR #79 approved/merged b8450b3 (177 tests, CI 43708868214). Owner authorized #35 scoped catalog and usage. Explicit LIST_METADATA grant; logical visible usage only, no quota or deployment.
+
+2026-11-15: PR #80 accepted/merged 02814b4 (180 tests, CI 43709875026). Owner authorized #36 FS-310A1 reversible logical lifecycle only; #35 deleted-file denial remains in review. No physical purge, quota, retention policy or deployment.

@@ -16,7 +16,7 @@ final class JdbcCatalog {
     private static final int QUERY_TIMEOUT_SECONDS=5;
 
     private static final String VISIBLE="""
-        SELECT f.file_id,f.tenant_id,f.name,f.state AS file_state,v.version_id,v.state AS version_state,
+        SELECT f.file_id,f.tenant_id,f.name,f.state AS file_state,f.lifecycle_revision,v.version_id,v.state AS version_state,
                r.expected_size,r.declared_mime_type,
                CASE WHEN v.state='AVAILABLE' AND e.verdict='CLEAN' THEN e.observed_size ELSE 0 END AS available_size
         FROM fs.file f
@@ -68,7 +68,7 @@ final class JdbcCatalog {
                     FileState.valueOf(rows.getString("file_state")));
                 result.add(new MetadataView(file.reference(),new VersionId(rows.getObject("version_id",UUID.class)),
                     file.state(),VersionState.valueOf(rows.getString("version_state")),file.name(),
-                    rows.getLong("expected_size"),rows.getString("declared_mime_type")));
+                    rows.getLong("expected_size"),rows.getString("declared_mime_type"),rows.getLong("lifecycle_revision")));
             }
             FileId next=null;
             if(result.size()>limit){

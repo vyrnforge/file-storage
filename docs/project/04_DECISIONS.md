@@ -100,3 +100,7 @@ Alternatives reviewed: in-process streaming (combined profile only), direct prov
 2026-11-15: Owner approved PR #78 (edb185c, 173 tests) and #35 continuation. Proposed explicit DOWNLOAD_TRANSFER action, short-lived single-use opaque download handle, exact original clean pin and streaming digest final-chunk gate. No Range, CDN or production limits selected.
 
 2026-11-15: Owner approved PR #79 (b8450b3, 177 tests) and continuation. Proposed V10 LIST_METADATA action, scoped keyset pagination and visible logical usage; distinct from tenant-admin/physical/quota accounting. No production policy.
+
+
+2026-11-15: Owner approved PR #80, squash merged `02814b4ae0d2c596be56b798067e7b0b696c8d84`; exact-head CI 43709875026 passed 180 tests. Owner authorized #36 FS-310A1 reversible logical lifecycle only. V11 candidate in review; retention/hold, quota, physical purge, production migration and deployment remain gated. See [FS-310A1 contract](../architecture/30_LOGICAL_FILE_LIFECYCLE.md).
+Implementation choice: monotonic lifecycle CAS, explicit DELETE_FILE/RESTORE_FILE, external/local scope intersection, revision-fenced download handles, clean completed files only. No retention policy or purge authority.
