@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>io.vyrnforge.filestorage</groupId>
+        <artifactId>file-storage-parent</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+    <artifactId>file-storage-provider-oss</artifactId>
+    <dependencies>
+        <dependency>
+            <groupId>io.vyrnforge.filestorage</groupId>
+            <artifactId>file-storage-provider-spi</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.oss</groupId>
+            <artifactId>aliyun-sdk-oss</artifactId>
+            <version>3.18.4</version>
+        </dependency>
+        <dependency>
+            <groupId>io.vyrnforge.filestorage</groupId>
+            <artifactId>file-storage-provider-spi</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

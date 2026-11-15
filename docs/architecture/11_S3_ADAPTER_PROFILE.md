@@ -15,3 +15,5 @@ Run inherited ProviderContract against real disposable MinIO; additional tests f
 
 
 CI 43674477972 failed before provider tests: Testcontainers could not fetch quay.io MinIO image; no adapter behavior was exercised. The attempted official Docker Hub digest pre-pull also failed in CI 43675123035 (pull access denied). Replace both registry paths with the checksum-pinned official release binary and locally built disposable container. No third-party mirror or production image adopted. No tests disabled, no fallback to synthetic provider. Fresh full CI 43675256063 passed: 91 tests (13 real MinIO, 38 PostgreSQL), zero failures/errors/skips; fixture preparation, seven POMs and dependency boundary checks succeeded. Final reconciled head must pass CI again.
+
+Accepted and merged PR #59 at e567b2fc4df8ac4fcdcdde549c02cea3eaab9e71; [final CI 43675532564](https://github.com/vyrnforge/file-storage/actions/runs/43675532564) passed 91 tests. Issue #25 closed for isolated profile; production prerequisites unchanged.

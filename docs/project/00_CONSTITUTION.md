@@ -1,6 +1,6 @@
 # Project constitution
 
-Status: architecture direction approved 2026-11-14; Phase 2 through FS-120C2 merged (PR #55); later work requires owner authorization.
+Status: architecture direction approved 2026-11-14; Phase 2 through FS-200B merged (PR #59); later work requires owner authorization.
 
 ## Mission
 Provide a standalone enterprise storage service that abstracts storage-provider details for authorized applications and administrators without losing durable file identity or operational control.
