@@ -654,11 +654,50 @@ class DurableUploadAuthorityTest {
         assertEquals(VersionState.FAILED,secured.session("user",TENANT,null,view.session()).value().versionState());
     }
 
-    @Test void cleanWithoutFullConsumptionAndExpiredSessionFailClosed() throws Exception {
+    @Test void cleanWithoutFullConsumptionFailsClosed() throws Exception {
         var fixture=matched();var scans=scans(CLOCK,3);
         new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
         assertEquals(UploadScanWorker.Outcome.FAILED,worker(scans,fixture,(stream,size,deadline)->new ContentScanner.Verdict(Scan.CLEAN,"text/plain"),CLOCK).runOne());
         assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
         assertEquals(VersionState.FAILED,secured.session("user",TENANT,null,view.session()).value().versionState());
+    }
+
+    @Test void expiredSessionNeverScansOrBecomesAvailable() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        Clock expired=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);
+        var recovery=scans(expired,3);
+        assertEquals(UploadScanWorker.Outcome.FAILED,worker(recovery,fixture,scanner(Scan.CLEAN,"text/plain"),expired).runOne());
+        assertEquals(1,fixture.opens.get(),"only original integrity read");
+        var result=secured(expired).session("user",TENANT,null,view.session()).value();
+        assertEquals(VersionState.FAILED,result.versionState());assertEquals(UploadState.EXPIRED,result.uploadState());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+    }
+
+    @Test void cleanMimeMismatchFailsAndRevokedGrantCannotCommit() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        var claim=scans.claim(1).claims().getFirst();var snapshot=scans.load(claim);
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='UPLOAD_TRANSFER'");
+        assertThrows(Failure.class,()->scans.finish(snapshot,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+        sql("UPDATE fs.file_grant SET revoked=false WHERE action='UPLOAD_TRANSFER'");
+        assertTrue(scans.retry(claim));
+        assertEquals(UploadScanWorker.Outcome.FAILED,worker(scans,fixture,scanner(Scan.CLEAN,"application/octet-stream"),CLOCK).runOne());
+        assertEquals(VersionState.FAILED,secured.session("user",TENANT,null,view.session()).value().versionState());
+    }
+
+    @Test void scanCannotFollowDriftedPhysicalPin() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        String original=objectKey();
+        sql("UPDATE fs.file_version SET object_key='private-prefix/drifted'");
+        assertThrows(Failure.class,()->new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null));
+        sql("UPDATE fs.file_version SET object_key=?",original);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        sql("UPDATE fs.file_version SET object_key='private-prefix/drifted'");
+        var claim=scans.claim(1).claims().getFirst();
+        assertThrows(Failure.class,()->scans.load(claim));
+        assertEquals(1,fixture.opens.get());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
     }
 }

@@ -49,9 +49,14 @@ public final class JdbcUploadScan {
             transfers.lockCurrentGrant(c, resource);
             var pin = resource.pin();
             try (var ps = transfers.statement(c, """
-                    SELECT 1 FROM fs.upload_integrity_verification WHERE session_id=? AND verified_at IS NOT NULL
-                      AND observed_size=? FOR SHARE
-                    """, session.value(), pin.size()); var rows = ps.executeQuery()) {
+                    SELECT 1 FROM fs.upload_integrity_verification i JOIN fs.upload_transfer_handle h USING(session_id)
+                    WHERE i.session_id=? AND i.verified_at IS NOT NULL AND i.observed_size=?
+                      AND h.tenant_id=? AND h.actor=? AND h.consumer=? AND h.file_id=? AND h.version_id=?
+                      AND h.backend_id=? AND h.config_revision=? AND h.location_id=? AND h.object_key=?
+                      AND h.expected_size=i.observed_size AND h.claimed_at IS NOT NULL FOR SHARE OF i,h
+                    """, session.value(), pin.size(), caller.tenant().value(), caller.actor(), caller.consumer(),
+                    pin.file().value(),pin.version().value(),pin.backend().value(),pin.revision(),
+                    pin.locator().location().value(),pin.locator().objectKey()); var rows = ps.executeQuery()) {
                 if (!rows.next()) throw new Failure(Code.CONFLICT);
             }
             var id = operations.enqueue(c, new JdbcOperations.Request(caller.tenant(), pin.file(), pin.version(),
@@ -84,13 +89,18 @@ public final class JdbcUploadScan {
                 JOIN fs.file_version v ON v.tenant_id=s.tenant_id AND v.file_id=s.file_id AND v.version_id=s.version_id
                 JOIN fs.initiation_request r ON r.tenant_id=s.tenant_id AND r.session_id=s.session_id
                 JOIN fs.upload_integrity_verification i ON i.session_id=s.session_id
+                JOIN fs.upload_transfer_handle h ON h.session_id=s.session_id AND h.tenant_id=s.tenant_id
+                    AND h.actor=r.actor AND h.consumer=s.consumer AND h.file_id=s.file_id AND h.version_id=s.version_id
+                    AND h.backend_id=s.backend_id AND h.config_revision=s.config_revision
+                    AND h.location_id=s.location_id AND h.object_key=v.object_key AND h.expected_size=i.observed_size
+                    AND h.claimed_at IS NOT NULL
                 JOIN fs.backend_revision b ON b.backend_id=s.backend_id AND b.config_revision=s.config_revision
                 WHERE o.operation_id=? AND o.tenant_id=? AND o.file_id=? AND o.version_id=? AND o.location_id=?
                   AND o.kind='SCAN_UPLOAD' AND o.status='PENDING' AND o.claim_token=? AND o.locked_until>?
                   AND s.state='VERIFYING' AND v.state='VERIFYING' AND f.state='ACTIVE'
                   AND b.status IN ('ACTIVE','DRAINING') AND b.validated_revision=b.config_revision
                   AND i.verified_at IS NOT NULL AND i.observed_size=r.expected_size
-                FOR UPDATE OF s,v FOR SHARE OF f,r,i,b
+                FOR UPDATE OF s,v FOR SHARE OF f,r,i,b,h
                 """, claim.operation(), claim.tenant().value(), claim.file().value(), claim.version().value(),
                 claim.location().value(), claim.token(), transfers.now().atOffset(ZoneOffset.UTC));
              var rows = ps.executeQuery()) {
