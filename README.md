@@ -88,3 +88,5 @@ PR #76 accepted/merged 05b6b8d (165 tests). [Upload completion commands and work
 PR #77 accepted/merged 4f65a0d (168 tests). [Terminal upload recovery](docs/architecture/27_TERMINAL_UPLOAD_RECOVERY.md) — terminal replay and logical recovery in review; physical cleanup HOLD.
 
 PR #78 accepted/merged edb185c (173 tests). [Authorized private download](docs/architecture/28_AUTHORIZED_DOWNLOAD.md) — #35 exact clean-version download path in review.
+
+PR #79 accepted/merged b8450b3 (177 tests). [Metadata catalog and usage](docs/architecture/29_METADATA_CATALOG.md) — #35 bounded discovery and logical usage in review.

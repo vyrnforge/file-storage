@@ -10,3 +10,5 @@ JdbcDownloadTransfers requires original immutable V5 claimed pin, V6 matching ev
 
 ## Verification
 Extend actual disposable MinIO gateway test to download bytes after credential rotation and policy switch to another backend, exact original pin and lease closure; extend combined native OSS loopback HTTP flow to issue handle, deny absent permission, download identical bytes, no-store/no redirect and deny replay. Four new PostgreSQL tests cover pending/wrong version and exact-file delegated grant, wrong identity/app/tenant/action, revocation/expiry/concurrent single-use, verifying/quarantine, changed pin, required-intent rollback and same-length corrupt final chunk withholding. Expected 177 tests. Real scanner/OSS staging, production credentials and TLS/egress, capacity, rate limits/retention, actual deleted-file lifecycle and pagination/usage remain separate #35/#33/#36/#43 work. No public deployment or provider deletion.
+
+Owner approved PR #79; squash merged b8450b3c9b046138353c400b86218c43cc485185. Final CI 43708868214 at 197424f passed 177 tests after OpenAPI insertion correction. [Catalog/usage](29_METADATA_CATALOG.md) next.

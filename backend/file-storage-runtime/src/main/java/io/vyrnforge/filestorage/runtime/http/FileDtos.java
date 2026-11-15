@@ -18,6 +18,12 @@ public final class FileDtos {
     public record MetadataResponse(FileReference file, String versionId, String fileState,
             String versionState, String name, long declaredSize, String declaredMimeType) {}
 
+    public record CatalogResponse(java.util.List<MetadataResponse> items,String nextAfterFileId) {}
+    static CatalogResponse catalog(io.vyrnforge.filestorage.application.FileApplication.CatalogPage page){
+        return new CatalogResponse(page.items().stream().map(FileDtos::metadata).toList(),
+            page.nextAfter()==null?null:page.nextAfter().value());
+    }
+
     public record ErrorResponse(String code, UUID correlationId, UUID requestId) {}
 
     static SessionResponse session(View view) {

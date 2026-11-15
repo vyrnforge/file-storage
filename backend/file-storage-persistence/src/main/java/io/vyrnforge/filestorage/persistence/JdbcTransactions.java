@@ -232,6 +232,20 @@ public final class JdbcTransactions implements Transactions {
                     tenant.value(), session.value());
         }
 
+        @Override
+        public CatalogPage catalog(Caller caller,List<CatalogGrant> grants,FileId after,int limit,Instant now){
+            requireActive();
+            try{return JdbcCatalog.page(connection,caller,grants,after,limit,now);}
+            catch(SQLException ex){throw failure(ex);}
+        }
+
+        @Override
+        public CatalogUsage usage(Caller caller,List<CatalogGrant> grants,Instant now){
+            requireActive();
+            try{return JdbcCatalog.usage(connection,caller,grants,now);}
+            catch(SQLException ex){throw failure(ex);}
+        }
+
         private Optional<Entry> find(String sql, Object... parameters) {
             try (var ps = statement(sql, parameters); var rs = ps.executeQuery()) {
                 if (!rs.next()) {

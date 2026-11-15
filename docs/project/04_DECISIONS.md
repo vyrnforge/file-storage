@@ -98,3 +98,5 @@ Alternatives reviewed: in-process streaming (combined profile only), direct prov
 2026-11-15: Owner approved PR #77 (4f65a0d, 168 tests) and continuation. Proposed V8 bounded recovery and immutable cleanup HOLD; terminal replay current grant and original digest, 200 with logical states. Logical expiry does not prove remote write stopped; no delete/reissue without reviewed evidence.
 
 2026-11-15: Owner approved PR #78 (edb185c, 173 tests) and #35 continuation. Proposed explicit DOWNLOAD_TRANSFER action, short-lived single-use opaque download handle, exact original clean pin and streaming digest final-chunk gate. No Range, CDN or production limits selected.
+
+2026-11-15: Owner approved PR #79 (b8450b3, 177 tests) and continuation. Proposed V10 LIST_METADATA action, scoped keyset pagination and visible logical usage; distinct from tenant-admin/physical/quota accounting. No production policy.
