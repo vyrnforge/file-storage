@@ -1,6 +1,6 @@
 # Delivery roadmap and initial backlog
 
-Approved direction 2026-11-14. Phase 2 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged; FS-120B2B merged; FS-120C1 merged; FS-120C2 merged; FS-200A merged (PR #56); DEC-FS012 approved; FS-200B isolated S3 profile implemented and CI-verified (PR #59); FS-200C and later increments not authorized. Stable FS planning identifiers now map to GitHub issues via [master delivery tracker #13](https://github.com/vyrnforge/file-storage/issues/13). Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
+Approved direction 2026-11-14. Phase 2 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged; FS-120B2B merged; FS-120C1 merged; FS-120C2 merged; FS-200A merged (PR #56); DEC-FS012 approved; FS-200B isolated S3 profile merged (PR #59); FS-200C #26 authorized; FS-210 and later increments not authorized. Stable FS planning identifiers now map to GitHub issues via [master delivery tracker #13](https://github.com/vyrnforge/file-storage/issues/13). Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
 
 | ID | Phase | Priority | Deliverable / acceptance |
 |---|---|---|---|
@@ -79,3 +79,5 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 #57 FS-300G private transfer gateway is a P0 foundation after #30 and adapters/registry, before #31/#35. #58 FS-500D CDN acceleration is P2 conditional on #35/#42–#44 and approved content/cache policy. #30 composes roles, #42 deploys independently, #43 tests trust/cache isolation, #44 measures API latency under load, TTFB, throughput, origin traffic and cost/GB. #16 production choices remain open. #25 isolated profile may proceed once prerequisites resolved; no blanket production compatibility or merge authorization.
 
 2026-11-15: #24 accepted and merged at c2c3c9a8a5f18a6d66f859097ae3031ec73bb508; #25 reviewed, 91 tests passed in CI 43675256063, reconcile and verify final head before merge. #26 remains next candidate pending separate authorization and native OSS profile prerequisites.
+
+2026-11-15: #25 accepted and merged at e567b2fc4df8ac4fcdcdde549c02cea3eaab9e71; #26 authorized for native OSS adapter and local SDK wire tests. Actual OSS staging, #14 full legacy parity and owner acceptance remain gates; #27 separately gated.

@@ -35,3 +35,6 @@ Provider SPI exports reusable JUnit contract tests in the test-only `tests` clas
 
 ## FS-200B
 S3 adapter implements the bounded unversioned profile using AWS SDK 2.57.2; see [profile](../docs/architecture/11_S3_ADAPTER_PROFILE.md). `make ci` prepares the official checksum-pinned local MinIO fixture and runs actual provider contract tests. CI 43675256063 passed 91 tests; final main-compatible evidence required. No optional capabilities or actual AWS/production target claim.
+
+## FS-200C
+Native OSS adapter uses Alibaba SDK 3.18.4, explicit V4 client configuration and loopback native HTTP tests. [Profile](../docs/architecture/12_OSS_ADAPTER_PROFILE.md). No actual OSS target or legacy full-build claim; real staging remains required.

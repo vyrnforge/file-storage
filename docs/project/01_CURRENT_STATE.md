@@ -1,6 +1,6 @@
 # Current state and legacy capability baseline
 
-Date: 2026-11-15. Phase 2 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged (PR #52); FS-120B2B merged (PR #53); FS-120C1 merged (PR #54); FS-120C2 merged (PR #55); FS-200A contract merged; DEC-FS012 approved; FS-200B S3 adapter verified in PR #59. Java/Maven domain, provider SPI, S3 adapter, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
+Date: 2026-11-15. Phase 2 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged (PR #52); FS-120B2B merged (PR #53); FS-120C1 merged (PR #54); FS-120C2 merged (PR #55); FS-200A contract merged; DEC-FS012 approved; FS-200B S3 adapter merged (PR #59); FS-200C native OSS in review. Java/Maven domain, provider SPI, S3/OSS adapters, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
 
 ## Legacy inventory (sanitized)
 | Capability | Legacy evidence | Proposed treatment |
@@ -68,3 +68,5 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 #25 authorized conditional on test-profile prerequisites; #57/#58 tracked, no runtime deployment.
 
 2026-11-15: owner confirmed both PRs reviewed. PR #56 squash merged at c2c3c9a8a5f18a6d66f859097ae3031ec73bb508; CI 43673922475 passed 78 tests. #25 isolated MinIO profile verified by CI 43675256063 (91 tests, including 13 real MinIO and 38 PostgreSQL; zero failures/errors/skips). PR #59 reconciled with merged baseline; final compatible CI required. No production target compatibility, deployed gateway or later authorization. #26 next candidate only.
+
+2026-11-15: PR #59 accepted and merged at e567b2fc4df8ac4fcdcdde549c02cea3eaab9e71; final CI 43675532564 passed 91 tests (13 real MinIO, 38 PostgreSQL). #25 closed. Owner authorized #26; native SDK and loopback wire fixture, no real OSS staging/legacy full-build proof; #26 remains gated on those prerequisites. [OSS profile](../architecture/12_OSS_ADAPTER_PROFILE.md).
