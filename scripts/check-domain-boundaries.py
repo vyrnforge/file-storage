@@ -6,7 +6,7 @@ import sys
 root = Path(__file__).resolve().parents[1] / "backend"
 ns = {"m": "http://maven.apache.org/POM/4.0.0"}
 allowed = {
-    "file-storage-runtime": {("io.vyrnforge.filestorage", "file-storage-provider-s3", "test"), ("io.vyrnforge.filestorage", "file-storage-provider-spi", "compile"), ("org.testcontainers", "postgresql", "test"), ("io.vyrnforge.filestorage", "file-storage-persistence", "compile"), ("org.springframework.boot", "spring-boot-starter-webmvc", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
+    "file-storage-runtime": {("io.vyrnforge.filestorage", "file-storage-provider-oss", "test"), ("io.vyrnforge.filestorage", "file-storage-provider-s3", "test"), ("io.vyrnforge.filestorage", "file-storage-provider-spi", "compile"), ("org.testcontainers", "postgresql", "test"), ("io.vyrnforge.filestorage", "file-storage-persistence", "compile"), ("org.springframework.boot", "spring-boot-starter-webmvc", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-domain": {("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-application": {("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
     "file-storage-security": {("com.nimbusds", "nimbus-jose-jwt", "compile"), ("io.vyrnforge.filestorage", "file-storage-domain", "compile"), ("io.vyrnforge.filestorage", "file-storage-application", "compile"), ("io.github.vyrnforge", "platform-kernel", "compile"), ("org.junit.jupiter", "junit-jupiter", "test")},
