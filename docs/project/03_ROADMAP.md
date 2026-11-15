@@ -103,3 +103,5 @@ PR #69 accepted/merged 28f66a0; 139 verified tests. #28 latest-only validation/a
 PR #70 accepted/merged a062618; 143 tests. Isolated #30 complete; owner authorized #57 isolated gateway foundation. First slice explicit authority/resolver/limits and transfer-only HTTP roles, then durable claim and real adapter integration; actual IAM, provider evidence and production limits remain gated. #31/#35 separately scoped.
 
 PR #71 accepted/merged 270fd09; 148 verified tests. #57 continuation: V5 durable initial upload handle and explicit permission, one attempt per session, no automatic reissue; then registry provider resolution/real adapter gateway tests. Download availability #31/#35 and production decisions separately gated.
+
+PR #72 accepted/merged 4880a42 (152 verified tests). #57 continuation exact registry pin/adapter leases and actual MinIO gateway upload; then native OSS gateway fixture and #31 verified completion/reconciliation, #35 download. Live authority/provider/production gates deferred.

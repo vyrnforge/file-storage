@@ -12,6 +12,19 @@
     <dependencies>
         <dependency>
             <groupId>io.vyrnforge.filestorage</groupId>
+            <artifactId>file-storage-provider-s3</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+            <!-- Keep Spring Boot's SLF4J 2 API; AWS SDK transitively requests 1.7. -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.vyrnforge.filestorage</groupId>
             <artifactId>file-storage-provider-spi</artifactId>
             <version>${project.version}</version>
         </dependency>
