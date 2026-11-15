@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  */
 public final class FileApplication {
     public enum Action { INITIATE, READ_METADATA, READ_SESSION }
-    public enum Code { DENIED, NOT_FOUND, NO_PLACEMENT, CONFLICT, INVALID }
+    public enum Code { DENIED, NOT_FOUND, NO_PLACEMENT, CONFLICT, IN_PROGRESS, INVALID }
     public static final class Failure extends RuntimeException {
         private final Code code;
         public Failure(Code code){super(code.name());this.code=code;}
@@ -78,6 +78,12 @@ public final class FileApplication {
      */
     public interface Transactions {
         <T> T execute(Function<Unit,T> work);
+
+        /** Separate replay path cannot create a new aggregate. Durable adapters coordinate leases. */
+        default View initiate(RequestIdentity identity, Initiate command,
+                              Function<Unit, View> work, Function<Unit, View> replay) {
+            return execute(work);
+        }
     }
     public interface Unit {
         Optional<Configuration> configuration(Scope scope);
@@ -118,14 +124,10 @@ public final class FileApplication {
         if(!authorization.mayInitiate(caller,command.purpose()))throw new Failure(Code.DENIED);
         var identity=new RequestIdentity(caller,command.requestKey());
         var scope=new Scope(caller.tenant(),caller.consumer(),command.purpose());
-        return transactions.execute(unit->{
+        return transactions.initiate(identity, command, unit->{
             var existing=unit.byRequest(identity);
             if(existing.isPresent()){
-                Entry e=existing.get();
-                if(!e.request().equals(identity) || !authorization.mayAccess(caller,Action.READ_SESSION,e.resource()))
-                    throw new Failure(Code.DENIED);
-                if(!e.command().equals(command))throw new Failure(Code.CONFLICT);
-                return view(e,clock.instant());
+                return replay(caller, identity, command, existing.get());
             }
             Configuration c=unit.configuration(scope).orElseThrow(()->new Failure(Code.NO_PLACEMENT));
             Placement placement;
@@ -143,7 +145,16 @@ public final class FileApplication {
             var entry=new Entry(file,version,session,identity,command);
             unit.insert(entry);
             return view(entry,now);
-        });
+        }, unit -> replay(caller, identity, command,
+                unit.byRequest(identity).orElseThrow(() -> new Failure(Code.NOT_FOUND))));
+    }
+    private View replay(Caller caller, RequestIdentity identity, Initiate command, Entry entry) {
+        if (!entry.request().equals(identity) || !authorization.mayInitiate(caller, command.purpose())
+                || !authorization.mayAccess(caller, Action.READ_SESSION, entry.resource())) {
+            throw new Failure(Code.DENIED);
+        }
+        if (!entry.command().equals(command)) throw new Failure(Code.CONFLICT);
+        return view(entry, clock.instant());
     }
     public MetadataView metadata(Caller caller,FileId file) {
         if(caller==null)throw new Failure(Code.DENIED);

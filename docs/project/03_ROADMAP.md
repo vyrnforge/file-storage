@@ -1,6 +1,6 @@
 # Delivery roadmap and initial backlog
 
-Approved direction 2026-11-14. Phase 1 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A authorized; FS-120B/C and later increments not authorized. IDs are stable planning identifiers, not created GitHub issues. Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
+Approved direction 2026-11-14. Phase 1 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 in scope; FS-120B2/C and later increments not authorized. IDs are stable planning identifiers, not created GitHub issues. Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
 
 | ID | Phase | Priority | Deliverable / acceptance |
 |---|---|---|---|
@@ -41,4 +41,6 @@ PR #8 Kernel 0.3.2 maintenance merged; PR #9 synchronized with main. Combined CI
 
 2026-11-15: FS-120A authorized after PR #10 merge. Schema and JDBC adapter for existing initiation/read use cases, disposable PostgreSQL acceptance. FS-120B: Kernel executeIdempotent, activation CAS/concurrency and durable grant integration. FS-120C: Kernel audit/outbox, durable work/recovery. No production migrations or live IAM closure. [FS-120A contract](../architecture/05_POSTGRESQL_PERSISTENCE.md).
 
-FS-120A code CI 43667089332: 40 tests passed, 9 real PostgreSQL tests, five modules and six readable POMs. PR #11 review pending; local verification outstanding. FS-120B/C not started.
+FS-120A code CI 43667089332: 40 tests passed, 9 real PostgreSQL tests, five modules and six readable POMs. PR #11 merged; local verification outstanding. FS-120B1 in review; B2/C not started.
+
+FS-120B split into B1 (Kernel lease, atomic initiation and replay, concurrency/failure tests) and B2 (activation CAS, durable grant retrieval). B1 is the next bounded increment after PR #11 merge. FS-120C audit/outbox integration remains separate; no external I/O or public API.

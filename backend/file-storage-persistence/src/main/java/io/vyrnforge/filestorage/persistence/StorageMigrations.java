@@ -19,5 +19,14 @@ public final class StorageMigrations {
                 .baselineOnMigrate(false)
                 .load()
                 .migrate();
+        Flyway.configure()
+                .dataSource(dataSource)
+                .schemas("fs_kernel")
+                .defaultSchema("fs_kernel")
+                .locations("classpath:db/migration")
+                .cleanDisabled(true)
+                .baselineOnMigrate(false)
+                .load()
+                .migrate();
     }
 }

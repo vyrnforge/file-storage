@@ -2,7 +2,7 @@
 
 Independent, multi-tenant, multi-provider enterprise file storage service for Asset Management, ITSM and other applications.
 
-**Status: Phase 1 — FS-100A and FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A persistence in review.** No deployed service or released version.
+**Status: Phase 1 — FS-100A and FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 idempotency in review.** No deployed service or released version.
 
 ## Start here
 - [Project constitution](docs/project/00_CONSTITUTION.md)
@@ -28,6 +28,8 @@ Independent, multi-tenant, multi-provider enterprise file storage service for As
 - [FS-110B JWT verifier and deployment gate](docs/security/FS110B_JWT_VERIFIER.md)
 
 - [FS-120A persistence contract](docs/architecture/05_POSTGRESQL_PERSISTENCE.md)
+
+- [FS-120B1 transactional initiation](docs/architecture/06_TRANSACTIONAL_INITIATION.md)
 
 ## Ecosystem
 [Wyrmgate IAM](https://github.com/wyrmgate/iam) authenticates identities; [Platform Kernel v0.3.2](https://github.com/vyrnforge/platform-kernel/releases/tag/v0.3.2) provides shared context and reliability contracts; [VyrnForge UI](https://github.com/vyrnforge/vyrnforge-ui) provides console foundations; [VyrnRail](https://github.com/vyrnforge/vyrnrail) informs engineering governance. File Storage owns its own domain, database, storage and release.

@@ -14,14 +14,33 @@ import java.util.function.Function;
 import javax.sql.DataSource;
 
 /**
- * Persistence for the initial create/read aggregate only. No external side effects,
- * retries, live provider access, or Kernel reliability lease handling in this slice.
+ * Persistence for the initial create/read aggregate only. No external side effects or live provider access. Initiation uses Kernel JDBC leases.
  */
 public final class JdbcTransactions implements Transactions {
     private final DataSource dataSource;
+    private final InitiationReliability reliability;
 
-    public JdbcTransactions(DataSource dataSource) {
+    public JdbcTransactions(DataSource dataSource, java.time.Clock clock, java.time.Duration leaseTtl) {
         this.dataSource = Objects.requireNonNull(dataSource);
+        this.reliability = new InitiationReliability(dataSource, clock, leaseTtl);
+    }
+
+    @Override
+    public View initiate(RequestIdentity identity, Initiate command,
+                         Function<Unit, View> work, Function<Unit, View> replay) {
+        return reliability.initiate(identity, command, work, replay, this);
+    }
+
+    /** Kernel owns the connection and commit; this helper owns only the callback scope. */
+    static <T> T onConnection(Connection connection, Function<Unit, T> work) {
+        JdbcUnit unit = new JdbcUnit(connection);
+        try {
+            T result = work.apply(unit);
+            if (unit.failed) throw new PersistenceFailure();
+            return result;
+        } finally {
+            unit.active = false;
+        }
     }
 
     /** Neutral database failure. Do not expose SQL, connection details or row data. */

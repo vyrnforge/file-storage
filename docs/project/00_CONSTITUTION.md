@@ -19,3 +19,5 @@ Characterize legacy behavior; identify evidence; propose decisions; implement bo
 
 ## Governance
 Owner approves ADRs, scope expansion, technology selection, production releases and migration/cutover. Track Specified / Implemented / Applied / Verified separately. Changes to shared ecosystem repos require separate approval. Repository PR approval does not automatically approve every proposed architecture decision.
+
+2026-11-15: FS-120A merged; FS-120B1 transactional initiation in scope. FS-120B2/C and production work require review.

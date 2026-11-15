@@ -43,7 +43,7 @@ class JdbcTransactionsTest {
 
     @BeforeEach
     void seed() throws SQLException {
-        sql("TRUNCATE fs.backend, fs.policy_revision, fs.file, fs.file_grant CASCADE");
+        sql("TRUNCATE fs.backend, fs.policy_revision, fs.file, fs.file_grant, fs_kernel.platform_idempotency CASCADE");
         sql("""
                 INSERT INTO fs.backend VALUES (?, 'OSS', 'https://oss.example.test', 'test', 'AUTO'),
                     (?, 'S3', 'https://s3.example.test', 'test', 'PATH')
@@ -80,7 +80,7 @@ class JdbcTransactionsTest {
     }
 
     private static FileApplication application() {
-        return new FileApplication(new JdbcTransactions(dataSource), new Authorization() {
+        return new FileApplication(new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10)), new Authorization() {
             public boolean mayInitiate(Caller caller, String purpose) {
                 return caller.equals(ALICE) || caller.equals(BOB);
             }
@@ -106,6 +106,94 @@ class JdbcTransactionsTest {
         var session = UploadSession.initiate(new SessionId(id(n + 1)), file, version.id(),
                 SCOPE, placement, locator, NOW.plusSeconds(60), NOW);
         return new Entry(file, version, session, new RequestIdentity(ALICE, key), command(key));
+    }
+
+    @Test
+    void kernelLeaseCommitsAndReplaysCurrentState() throws SQLException {
+        var first = application().initiate(ALICE, command("kernel"));
+        assertEquals(first, application().initiate(ALICE, command("kernel")));
+        try (var c = dataSource.getConnection(); var s = c.createStatement();
+             var rs = s.executeQuery("SELECT status, result_text FROM fs_kernel.platform_idempotency")) {
+            assertTrue(rs.next());
+            assertEquals("COMPLETED", rs.getString(1));
+            assertEquals(first.session().value().toString(), rs.getString(2));
+            assertFalse(rs.next());
+        }
+        assertEquals(1, count("file"));
+    }
+
+    @Test
+    void kernelFailureAbortsLeaseAndRollsBack() throws SQLException {
+        sql("UPDATE fs.policy_rule SET eligible=false");
+        assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
+                () -> application().initiate(ALICE, command("retry"))).code());
+        assertEquals(0, count("file"));
+        try (var c = dataSource.getConnection(); var s = c.createStatement();
+             var rs = s.executeQuery("SELECT count(*) FROM fs_kernel.platform_idempotency")) {
+            rs.next();
+            assertEquals(0, rs.getLong(1));
+        }
+        sql("UPDATE fs.policy_rule SET eligible=true");
+        assertNotNull(application().initiate(ALICE, command("retry")));
+        assertEquals(1, count("file"));
+    }
+
+    @Test
+    void concurrentInitiationOneAggregate() throws Exception {
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var start = new java.util.concurrent.CyclicBarrier(2);
+            java.util.concurrent.Callable<Object> call = () -> {
+                start.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                try {
+                    return application().initiate(ALICE, command("concurrent"));
+                } catch (Failure ex) {
+                    return ex.code();
+                }
+            };
+            var a = executor.submit(call);
+            var b = executor.submit(call);
+            var first = a.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            var second = b.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            assertTrue(first instanceof View || second instanceof View);
+            var replay = application().initiate(ALICE, command("concurrent"));
+            for (Object result : List.of(first, second)) {
+                if (result instanceof View) {
+                    assertEquals(replay, result);
+                } else {
+                    assertEquals(Code.IN_PROGRESS, result);
+                }
+            }
+            assertEquals(1, count("file"));
+            assertEquals(1, count("file_version"));
+            assertEquals(1, count("upload_session"));
+            assertEquals(1, count("initiation_request"));
+        }
+    }
+
+    @Test
+    void replayReauthorizesAndNeverRecreatesMissingAggregate() throws SQLException {
+        var first = application().initiate(ALICE, command("guarded"));
+        var denyRead = new FileApplication(
+                new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10)),
+                new Authorization() {
+                    public boolean mayInitiate(Caller caller, String purpose) { return true; }
+                    public boolean mayAccess(Caller caller, Action action, Resource resource) { return false; }
+                }, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(5));
+        assertEquals(Code.DENIED, assertThrows(Failure.class,
+                () -> denyRead.initiate(ALICE, command("guarded"))).code());
+        sql("TRUNCATE fs.file CASCADE");
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                () -> application().initiate(ALICE, command("guarded"))).code());
+        assertEquals(0, count("file"));
+        assertNotNull(first);
+    }
+
+    @Test
+    void expiredKernelLeaseDoesNotCreateDuplicate() throws SQLException {
+        var first = application().initiate(ALICE, command("retained"));
+        sql("UPDATE fs_kernel.platform_idempotency SET expires_at = now() - interval '100 years'");
+        assertEquals(first, application().initiate(ALICE, command("retained")));
+        assertEquals(1, count("file"));
     }
 
     @Test
@@ -135,7 +223,7 @@ class JdbcTransactionsTest {
         assertEquals(created.file(), metadata.file());
         assertEquals("sample.txt", metadata.name());
         assertEquals(5, metadata.declaredSize());
-        var stored = new JdbcTransactions(dataSource).execute(
+        var stored = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10)).execute(
                 unit -> unit.bySession(A, created.session()).orElseThrow());
         assertEquals(OL, stored.session().placement().location().value());
         assertEquals(stored.version().locator(), stored.session().expectedObject());
@@ -153,7 +241,7 @@ class JdbcTransactionsTest {
         var first = application().initiate(ALICE, command("old"));
         switchPolicy();
         var second = application().initiate(ALICE, command("new"));
-        var jdbc = new JdbcTransactions(dataSource);
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
         var old = jdbc.execute(u -> u.bySession(A, first.session()).orElseThrow());
         var next = jdbc.execute(u -> u.bySession(A, second.session()).orElseThrow());
         assertEquals(OL, old.session().placement().location().value());
@@ -167,7 +255,7 @@ class JdbcTransactionsTest {
     void p04_tenantQueriesAndForeignKeys() throws SQLException {
         var first = application().initiate(ALICE, command("one"));
         var file = new FileId(first.file().fileId());
-        var jdbc = new JdbcTransactions(dataSource);
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
         assertTrue(jdbc.execute(u -> u.byFile(B, file)).isEmpty());
         assertTrue(jdbc.execute(u -> u.bySession(B, first.session())).isEmpty());
         assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
@@ -185,7 +273,7 @@ class JdbcTransactionsTest {
 
     @Test
     void p05_rollbackAndDuplicateIdentity() throws SQLException {
-        var jdbc = new JdbcTransactions(dataSource);
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
         assertThrows(IllegalStateException.class, () -> jdbc.execute(unit -> {
             unit.insert(entry(unit, "rollback", 100));
             throw new IllegalStateException("synthetic callback failure");
@@ -224,7 +312,7 @@ class JdbcTransactionsTest {
 
     @Test
     void consistentSnapshotAndClosedUnit() {
-        var jdbc = new JdbcTransactions(dataSource);
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
         Unit escaped = jdbc.execute(unit -> {
             assertEquals(1, unit.configuration(SCOPE).orElseThrow().policy().revision());
             try {
@@ -252,7 +340,7 @@ class JdbcTransactionsTest {
 
     @Test
     void caughtSqlFailureCannotCommitPartialWork() throws SQLException {
-        var jdbc = new JdbcTransactions(dataSource);
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
         application().initiate(ALICE, command("one"));
         assertThrows(JdbcTransactions.PersistenceFailure.class, () -> jdbc.execute(unit -> {
             assertThrows(Failure.class, () -> unit.insert(entry(unit, "one", 120)));

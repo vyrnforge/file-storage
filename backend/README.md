@@ -14,3 +14,6 @@ Security module uses pinned Nimbus JOSE+JWT 10.10 for RSA signature verification
 
 ## FS-120A
 Persistence module adds service schema migrations, JDBC transaction adapter and PostgreSQL integration tests. `make ci` now requires Docker for a disposable Testcontainers PostgreSQL instance (no production connection). Flyway schema fs and migration location db/filestorage separate from Kernel migration history. Kernel JDBC integration deferred to FS-120B/C.
+
+## FS-120B1
+Kernel JDBC 0.3.2 is used for initiation leases and atomic completion on the same database connection as metadata. Separate fs_kernel migration history; explicit trusted DataSource, Clock and lease TTL. No production pooling/role or retention defaults; see transactional initiation contract.
