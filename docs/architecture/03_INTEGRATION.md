@@ -24,3 +24,6 @@ See [identity authorization contract](../security/FS110_IDENTITY_AUTHORIZATION.m
 
 ## FS-120C1
 [Atomic mutation intents](08_ATOMIC_MUTATION_INTENTS.md): existing initiation/configuration mutations commit required Kernel audit and outbox intents on the supplied connection, versioned minimal internal event payloads, no duplicate initiation events on replay. No broker delivery yet; read/denial policy and public event schema approval remain separate.
+
+## FS-120C2
+[Durable recovery](09_DURABLE_RECOVERY.md) uses Kernel JdbcOutboxPublisher with the fs_kernel schema and explicit injected transport. File Storage owns operation records pinned to tenant/file/version/location. No broker delivery evidence or public consumer dedup implementation; synthetic durable receiver tests demonstrate at-least-once stable event identity.

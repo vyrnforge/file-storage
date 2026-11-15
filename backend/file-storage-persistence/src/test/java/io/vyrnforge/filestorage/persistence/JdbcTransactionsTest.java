@@ -276,9 +276,9 @@ class JdbcTransactionsTest {
         StorageMigrations.migrate(dataSource);
         try (var connection = dataSource.getConnection();
              var statement = connection.createStatement();
-             var rs = statement.executeQuery("SELECT count(*) FROM fs.flyway_schema_history WHERE version = '1' AND success")) {
+             var rs = statement.executeQuery("SELECT count(*) FROM fs.flyway_schema_history WHERE version IN ('1', '2', '3') AND success")) {
             rs.next();
-            assertEquals(1, rs.getLong(1));
+            assertEquals(3, rs.getLong(1));
         }
         assertEquals(2, count("backend"));
     }
@@ -830,6 +830,213 @@ class JdbcTransactionsTest {
             sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_test_policy");
         }
         assertEquals(2, configuration().publishPolicy(ADMIN, CorrelationContext.create(), SCOPE, 1, List.of(rule(SL, 0, true))));
+    }
+
+    private static final class WorkerClock extends Clock {
+        private Instant current = NOW;
+        public ZoneId getZone() { return ZoneOffset.UTC; }
+        public Clock withZone(ZoneId zone) { return Clock.fixed(current, zone); }
+        public Instant instant() { return current; }
+        void advance(long seconds) { current = current.plusSeconds(seconds); }
+    }
+
+    private static JdbcOperations operations(Clock clock) {
+        return new JdbcOperations(dataSource, clock, Duration.ofSeconds(10), Duration.ofSeconds(5), 4);
+    }
+
+    private static JdbcOperations.Request operation(String key, int maxAttempts) throws SQLException {
+        var view = application().initiate(ALICE, command(key));
+        var entry = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10))
+                .execute(u -> u.bySession(A, view.session()).orElseThrow());
+        return new JdbcOperations.Request(A, entry.file().id(), entry.version().id(),
+                entry.version().locator().location(), JdbcOperations.Kind.VERIFY_UPLOAD, key, id(990), maxAttempts);
+    }
+
+    private static UUID enqueue(JdbcOperations ops, JdbcOperations.Request request) throws SQLException {
+        try (var c = dataSource.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                UUID result = ops.enqueue(c, request);
+                c.commit();
+                return result;
+            } catch (SQLException | RuntimeException ex) {
+                c.rollback();
+                throw ex;
+            }
+        }
+    }
+
+    @Test
+    void operationEnqueueIsDurableIdempotentAndTenantBound() throws SQLException {
+        var ops = operations(new WorkerClock());
+        var request = operation("job", 3);
+        try (var c = dataSource.getConnection()) {
+            c.setAutoCommit(false);
+            ops.enqueue(c, request);
+            c.rollback();
+        }
+        assertEquals(0, count("storage_operation"));
+        UUID job = enqueue(ops, request);
+        assertEquals(job, enqueue(operations(new WorkerClock()), request));
+        assertEquals(1, count("storage_operation"));
+        var changed = new JdbcOperations.Request(A, request.file(), request.version(), request.location(),
+                request.kind(), request.key(), request.correlation(), 4);
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> enqueue(ops, changed)).code());
+        var foreign = new JdbcOperations.Request(B, request.file(), request.version(), request.location(),
+                request.kind(), request.key(), request.correlation(), 3);
+        assertEquals("23503", assertThrows(SQLException.class, () -> enqueue(ops, foreign)).getSQLState());
+        assertEquals(1, count("storage_operation"));
+        assertThrows(IllegalArgumentException.class, () -> ops.claim(request.kind(), 5));
+        assertTrue(ops.claim(JdbcOperations.Kind.PURGE_VERSION, 1).claims().isEmpty());
+    }
+
+    @Test
+    void operationClaimsRecoverAndFenceStaleWorkers() throws SQLException {
+        var clock = new WorkerClock();
+        var ops = operations(clock);
+        var request = operation("recover", 3);
+        UUID job = enqueue(ops, request);
+        var first = ops.claim(request.kind(), 1).claims().getFirst();
+        assertEquals(job, first.operation());
+        assertTrue(ops.stillOwned(first));
+        assertTrue(ops.claim(request.kind(), 1).claims().isEmpty());
+        clock.advance(10);
+        assertFalse(ops.stillOwned(first));
+        assertFalse(ops.finish(first, null));
+        var second = operations(clock).claim(request.kind(), 1).claims().getFirst();
+        assertEquals(job, second.operation());
+        assertEquals(2, second.attempt());
+        assertNotEquals(first.token(), second.token());
+        assertFalse(ops.finish(first, JdbcOperations.ErrorCode.PERMANENT));
+        assertTrue(ops.finish(second, null));
+        assertFalse(ops.finish(second, null));
+        assertEquals(1, scalar("SELECT count(*) FROM fs.storage_operation WHERE status='SUCCEEDED'"));
+    }
+
+    @Test
+    void operationRetryExhaustionAndDeadInspection() throws SQLException {
+        var clock = new WorkerClock();
+        var ops = operations(clock);
+        var request = operation("retry-job", 2);
+        enqueue(ops, request);
+        var first = ops.claim(request.kind(), 1).claims().getFirst();
+        assertTrue(ops.finish(first, JdbcOperations.ErrorCode.TRANSIENT));
+        assertTrue(ops.claim(request.kind(), 1).claims().isEmpty());
+        clock.advance(5);
+        var second = ops.claim(request.kind(), 1).claims().getFirst();
+        assertEquals(2, second.attempt());
+        clock.advance(10); // worker crashes during final attempt
+        var exhausted = ops.claim(request.kind(), 1);
+        assertEquals(1, exhausted.exhausted());
+        assertTrue(exhausted.claims().isEmpty());
+        assertFalse(ops.finish(second, null));
+        assertEquals("ATTEMPTS_EXHAUSTED", ops.dead(A, 1).getFirst().errorCode());
+        assertTrue(ops.dead(B, 1).isEmpty());
+        assertTrue(ops.claim(request.kind(), 1).claims().isEmpty());
+        var permanent = operation("permanent-job", 3);
+        enqueue(ops, permanent);
+        assertTrue(ops.finish(ops.claim(permanent.kind(), 1).claims().getFirst(), JdbcOperations.ErrorCode.PERMANENT));
+        assertEquals(2, ops.dead(A, 4).size());
+    }
+
+    @Test
+    void operationFinishParticipatesInCallerTransaction() throws SQLException {
+        var ops = operations(new WorkerClock());
+        var request = operation("finish-transaction", 2);
+        enqueue(ops, request);
+        var claim = ops.claim(request.kind(), 1).claims().getFirst();
+        try (var c = dataSource.getConnection()) {
+            assertThrows(IllegalArgumentException.class, () -> ops.finishOnConnection(c, claim, null));
+            c.setAutoCommit(false);
+            assertTrue(ops.finishOnConnection(c, claim, null));
+            c.rollback();
+        }
+        assertTrue(ops.stillOwned(claim));
+        assertTrue(ops.finish(claim, null));
+    }
+
+    @Test
+    void concurrentWorkersClaimOnlyOneOperation() throws Exception {
+        var ops = operations(new WorkerClock());
+        var request = operation("concurrent-job", 3);
+        enqueue(ops, request);
+        var results = competing(() -> (long) ops.claim(request.kind(), 1).claims().size(),
+                () -> (long) ops.claim(request.kind(), 1).claims().size());
+        assertEquals(1, results.stream().filter(r -> r.equals(1L)).count());
+        assertEquals(1, results.stream().filter(r -> r.equals(0L)).count());
+        assertEquals(1, scalar("SELECT attempts FROM fs.storage_operation"));
+    }
+
+    @Test
+    void kernelOutboxRetriesAndDeadLettersAreBounded() throws SQLException {
+        // Discard seed events in this disposable test only; no production purge.
+        sql("TRUNCATE fs_kernel.platform_event_outbox");
+        application().initiate(ALICE, command("outbox-one"));
+        application().initiate(ALICE, command("outbox-two"));
+        var clock = new WorkerClock();
+        var worker = new OutboxDelivery(dataSource, event -> {
+            throw new IllegalStateException("synthetic private transport detail");
+        }, clock, 2, Duration.ofSeconds(5), Duration.ofSeconds(10), 1);
+        assertThrows(IllegalArgumentException.class, () -> worker.tick(2));
+        assertEquals(1, worker.tick(1).retried());
+        assertEquals(1, worker.tick(1).retried());
+        assertEquals(0, worker.tick(1).claimed());
+        clock.advance(5);
+        assertEquals(1, worker.tick(1).dead());
+        assertEquals(1, worker.tick(1).dead());
+        assertEquals(2, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='DEAD' AND last_error_code='DeliveryFailed'"));
+        assertEquals(0, worker.tick(1).claimed());
+        assertEquals(1, worker.dead(A.value(), 1).size());
+        assertTrue(worker.dead(B.value(), 1).isEmpty());
+        assertTrue(worker.dead(null, 1).isEmpty());
+    }
+
+    @Test
+    void kernelOutboxCrashAfterDeliveryRecoversWithSameEventId() throws SQLException {
+        sql("TRUNCATE fs_kernel.platform_event_outbox");
+        application().initiate(ALICE, command("outbox-crash"));
+        var clock = new WorkerClock();
+        // Synthetic durable receiver: unique event ID represents a consumer's
+        // transactionally deduplicated effect. No actual consumer/broker configured.
+        sql("CREATE TABLE fs.test_receiver (event_id uuid PRIMARY KEY)");
+        try {
+            var seen = new ArrayList<UUID>();
+            var crash = new OutboxDelivery(dataSource, event -> {
+                seen.add(event.eventId());
+                sql("INSERT INTO fs.test_receiver VALUES (?) ON CONFLICT DO NOTHING", event.eventId());
+                throw new AssertionError("synthetic process crash after send");
+            }, clock, 3, Duration.ofSeconds(5), Duration.ofSeconds(10), 1);
+            assertThrows(AssertionError.class, () -> crash.tick(1));
+            assertEquals(1, count("test_receiver"));
+            var recovery = new OutboxDelivery(dataSource, event -> {
+                seen.add(event.eventId());
+                sql("INSERT INTO fs.test_receiver VALUES (?) ON CONFLICT DO NOTHING", event.eventId());
+            }, clock, 3, Duration.ofSeconds(5), Duration.ofSeconds(10), 1);
+            assertEquals(0, recovery.tick(1).claimed());
+            clock.advance(10);
+            assertEquals(1, recovery.tick(1).published());
+            assertEquals(2, seen.size());
+            assertEquals(seen.getFirst(), seen.getLast());
+            assertEquals(1, count("test_receiver"));
+            assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PUBLISHED' AND attempts=2"));
+        } finally {
+            sql("DROP TABLE fs.test_receiver");
+        }
+    }
+
+    @Test
+    void kernelOutboxStaleClaimCannotFinalizeNewerClaim() throws SQLException {
+        sql("TRUNCATE fs_kernel.platform_event_outbox");
+        application().initiate(ALICE, command("outbox-fence"));
+        var clock = new WorkerClock();
+        var newer = new OutboxDelivery(dataSource, event -> {}, clock, 3,
+                Duration.ofSeconds(5), Duration.ofSeconds(10), 1);
+        var older = new OutboxDelivery(dataSource, event -> {
+            clock.advance(10);
+            assertEquals(1, newer.tick(1).published());
+        }, clock, 3, Duration.ofSeconds(5), Duration.ofSeconds(10), 1);
+        assertEquals(1, older.tick(1).lostClaims());
+        assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PUBLISHED' AND attempts=2"));
     }
 
     @Test
