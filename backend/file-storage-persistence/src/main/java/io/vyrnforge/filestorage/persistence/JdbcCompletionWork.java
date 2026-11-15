@@ -27,7 +27,7 @@ public final class JdbcCompletionWork {
         this.attempts=attempts;
     }
 
-    public record Accepted(SessionId session, UUID operation, String status) {}
+    public record Accepted(SessionId session, UUID operation, String status, UploadState uploadState, VersionState versionState) {}
     public record Work(JdbcOperations.Claim claim, JdbcUploadVerification.Job job) {
         @Override public String toString(){return "CompletionWork[redacted]";}
     }
@@ -43,6 +43,8 @@ public final class JdbcCompletionWork {
                 if(!rows.next())throw new Failure(Code.DENIED);
                 state=rows.getString(1);
             }
+            if (java.util.Set.of("COMPLETED","FAILED","EXPIRED").contains(state))
+                return terminal(c,caller,session,digest);
             boolean verifying="VERIFYING".equals(state);
             var resource=transfers.resource(c,caller,session,verifying);
             transfers.lockCurrentGrant(c,resource);
@@ -63,12 +65,49 @@ public final class JdbcCompletionWork {
 
     private Accepted existing(Connection c,JdbcUploadTransfers.Pin pin)throws SQLException{
         try(var ps=transfers.statement(c,"""
-                SELECT operation_id,status FROM fs.storage_operation WHERE tenant_id=? AND file_id=? AND version_id=?
-                  AND location_id=? AND kind='VERIFY_UPLOAD' AND operation_key=?
+                SELECT o.operation_id,o.status,s.state,v.state FROM fs.storage_operation o
+                JOIN fs.upload_session s ON s.tenant_id=o.tenant_id AND s.file_id=o.file_id
+                    AND s.version_id=o.version_id AND s.location_id=o.location_id AND s.session_id::text=o.operation_key
+                JOIN fs.file_version v ON v.tenant_id=s.tenant_id AND v.version_id=s.version_id
+                WHERE o.tenant_id=? AND o.file_id=? AND o.version_id=?
+                  AND o.location_id=? AND o.kind='VERIFY_UPLOAD' AND o.operation_key=?
                 """,pin.caller().tenant().value(),pin.file().value(),pin.version().value(),pin.locator().location().value(),
                 pin.session().value().toString());var rows=ps.executeQuery()){
             if(!rows.next())throw new Failure(Code.CONFLICT);
-            return new Accepted(pin.session(),rows.getObject(1,UUID.class),rows.getString(2));
+            return new Accepted(pin.session(),rows.getObject(1,UUID.class),rows.getString(2),
+                    UploadState.valueOf(rows.getString(3)),VersionState.valueOf(rows.getString(4)));
+        }
+    }
+
+    /** Read-only terminal replay. No new job or provider resolution, no expiry extension. */
+    private Accepted terminal(Connection c,Caller caller,SessionId session,String digest)throws SQLException{
+        try(var ps=transfers.statement(c,"""
+                SELECT s.file_id,s.version_id,s.location_id,s.backend_id,s.config_revision,v.object_key,
+                       h.expected_size,s.expires_at,s.expires_nano_remainder,s.purpose,i.expected_sha256
+                FROM fs.upload_session s
+                JOIN fs.file f ON f.tenant_id=s.tenant_id AND f.file_id=s.file_id
+                JOIN fs.file_version v ON v.tenant_id=s.tenant_id AND v.file_id=s.file_id
+                    AND v.version_id=s.version_id AND v.location_id=s.location_id
+                JOIN fs.initiation_request r ON r.tenant_id=s.tenant_id AND r.session_id=s.session_id AND r.consumer=s.consumer
+                JOIN fs.upload_transfer_handle h ON h.session_id=s.session_id AND h.tenant_id=s.tenant_id
+                    AND h.actor=r.actor AND h.consumer=s.consumer AND h.file_id=s.file_id AND h.version_id=s.version_id
+                    AND h.backend_id=s.backend_id AND h.config_revision=s.config_revision AND h.location_id=s.location_id
+                    AND h.object_key=v.object_key AND h.expected_size=r.expected_size AND h.claimed_at IS NOT NULL
+                JOIN fs.upload_integrity_verification i ON i.session_id=s.session_id
+                WHERE s.tenant_id=? AND s.session_id=? AND r.actor=? AND s.consumer=? AND f.state='ACTIVE'
+                    AND ((s.state='COMPLETED' AND v.state='AVAILABLE')
+                      OR (s.state='FAILED' AND v.state IN ('FAILED','QUARANTINED'))
+                      OR (s.state='EXPIRED' AND v.state='FAILED'))
+                FOR SHARE OF f,v,r,h,i
+                """,caller.tenant().value(),session.value(),caller.actor(),caller.consumer());var rows=ps.executeQuery()){
+            if(!rows.next())throw new Failure(Code.DENIED);
+            var expiry=rows.getObject(8,java.time.OffsetDateTime.class).toInstant().plusNanos(rows.getInt(9));
+            var pin=new JdbcUploadTransfers.Pin(caller,new FileId(rows.getString(1)),new VersionId(rows.getObject(2,UUID.class)),
+                session,new BackendId(rows.getObject(4,UUID.class)),rows.getLong(5),
+                new Locator(new LocationId(rows.getObject(3,UUID.class)),rows.getString(6),null),rows.getLong(7),expiry);
+            transfers.lockCurrentGrant(c,new JdbcUploadTransfers.Resource(pin,expiry,rows.getString(10)));
+            if(!digest.equals(rows.getString(11)))throw new Failure(Code.CONFLICT);
+            return existing(c,pin);
         }
     }
 

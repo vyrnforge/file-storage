@@ -202,7 +202,7 @@ public final class FileApplication {
         });
     }
 
-    /** Start or replay completion while the exact initiating session is open. */
+    /** Start completion or replay an existing result for the exact initiating caller. */
     public void authorizeCompletion(Caller caller, SessionId session) {
         if (caller == null) throw new Failure(Code.DENIED);
         Objects.requireNonNull(session);
@@ -210,9 +210,15 @@ public final class FileApplication {
             Entry e = unit.bySession(caller.tenant(), session).orElseThrow(() -> new Failure(Code.DENIED));
             boolean pending = e.version().state() == VersionState.PENDING && e.session().state() == UploadState.INITIATED;
             boolean verifying = e.version().state() == VersionState.VERIFYING && e.session().state() == UploadState.VERIFYING;
+            boolean terminal = switch (e.session().state()) {
+                case COMPLETED -> e.version().state() == VersionState.AVAILABLE;
+                case FAILED -> e.version().state() == VersionState.FAILED || e.version().state() == VersionState.QUARANTINED;
+                case EXPIRED -> e.version().state() == VersionState.FAILED;
+                default -> false;
+            };
             if (!session.equals(e.session().id()) || !caller.equals(e.request().caller())
-                    || e.file().state() != FileState.ACTIVE || !(pending || verifying)
-                    || !clock.instant().isBefore(e.session().expires())) throw new Failure(Code.DENIED);
+                    || e.file().state() != FileState.ACTIVE || !(terminal || ((pending || verifying)
+                    && clock.instant().isBefore(e.session().expires())))) throw new Failure(Code.DENIED);
             requireAccess(caller, e, Action.UPLOAD_TRANSFER);
             return null;
         });

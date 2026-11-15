@@ -48,21 +48,32 @@ paths:
               properties:
                 sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
       responses:
-        '202':
-          description: Durable verification operation status, not file availability. Same open session/digest replays.
+        '200':
+          description: Authorized terminal replay of the original completion operation.
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: false
-                required: [sessionId, operationId, status]
-                properties:
-                  sessionId: {type: string, format: uuid}
-                  operationId: {type: string, format: uuid}
-                  status: {type: string, enum: [PENDING, SUCCEEDED, DEAD]}
+                $ref: '#/components/schemas/CompletionStatus'
+        '202':
+          description: Durable verification operation status and logical lifecycle. Same session/digest replays.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompletionStatus'
         default:
           $ref: '#/components/responses/Error'
 components:
+  schemas:
+    CompletionStatus:
+      type: object
+      additionalProperties: false
+      required: [sessionId, operationId, status, uploadState, versionState]
+      properties:
+        sessionId: {type: string, format: uuid}
+        operationId: {type: string, format: uuid}
+        status: {type: string, enum: [PENDING, SUCCEEDED, DEAD]}
+        uploadState: {type: string, enum: [INITIATED, VERIFYING, COMPLETED, FAILED, EXPIRED]}
+        versionState: {type: string, enum: [PENDING, VERIFYING, AVAILABLE, QUARANTINED, FAILED]}
   securitySchemes:
     bearer:
       type: http
