@@ -107,6 +107,11 @@ BEGIN
     IF NEW.validated_revision IS NOT DISTINCT FROM OLD.validated_revision THEN
         IF OLD.status = 'DRAFT' AND NEW.status = 'ACTIVE'
             AND OLD.validated_revision = OLD.config_revision THEN
+            IF EXISTS (SELECT 1 FROM fs.backend_revision
+                WHERE backend_id = NEW.backend_id AND config_revision >= NEW.config_revision
+                  AND status <> 'DRAFT') THEN
+                RAISE EXCEPTION 'backend activation must advance' USING ERRCODE = '23514';
+            END IF;
             RETURN NEW;
         END IF;
         IF OLD.status = 'ACTIVE' AND NEW.status = 'DRAINING' THEN

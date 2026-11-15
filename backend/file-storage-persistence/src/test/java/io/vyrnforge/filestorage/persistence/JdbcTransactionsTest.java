@@ -368,7 +368,7 @@ class JdbcTransactionsTest {
     void p06_missingIneligibleAndAmbiguousFailClosed() throws SQLException {
         assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
                 () -> application().initiate(BOB, command("other"))).code());
-        sql("UPDATE fs.policy_rule SET eligible=false");
+        fixturePolicy(2, false, false);
         assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class,
                 () -> application().initiate(ALICE, command("one"))).code());
         fixturePolicy(3, true, true);
@@ -443,6 +443,36 @@ class JdbcTransactionsTest {
             return List.of(a.get(30, java.util.concurrent.TimeUnit.SECONDS),
                     b.get(30, java.util.concurrent.TimeUnit.SECONDS));
         }
+    }
+
+    @Test
+    void backendActivationFailureRollsBackDrain() throws SQLException {
+        draft(2, true);
+        sql("""
+                CREATE FUNCTION fs.test_reject_activation() RETURNS trigger LANGUAGE plpgsql AS $
+                BEGIN
+                    IF NEW.config_revision = 2 AND NEW.status = 'ACTIVE' THEN
+                        RAISE EXCEPTION 'synthetic activation failure' USING ERRCODE = '23514';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $
+                """);
+        try {
+            sql("""
+                    CREATE TRIGGER test_reject_activation BEFORE UPDATE ON fs.backend_revision
+                    FOR EACH ROW EXECUTE FUNCTION fs.test_reject_activation()
+                    """);
+            assertEquals(Code.INVALID, assertThrows(Failure.class,
+                    () -> configuration().activateBackend(new BackendId(OSS), 1, 2)).code());
+            assertEquals(1, scalar("SELECT config_revision FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='ACTIVE'"));
+            assertEquals(1, scalar("SELECT count(*) FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='DRAFT'"));
+            assertEquals(0, scalar("SELECT count(*) FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='DRAINING'"));
+        } finally {
+            sql("DROP TRIGGER IF EXISTS test_reject_activation ON fs.backend_revision");
+            sql("DROP FUNCTION fs.test_reject_activation()");
+        }
+        assertEquals(2, configuration().activateBackend(new BackendId(OSS), 1, 2));
     }
 
     @Test
