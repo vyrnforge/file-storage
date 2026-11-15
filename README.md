@@ -56,3 +56,5 @@ Backend contains the domain, provider SPI, S3/OSS adapters, application, securit
 Public repository: never commit secrets, private legacy source, real file content or production configuration. Licensed under [Apache-2.0](LICENSE).
 
 - [FS-210B backend lifecycle](docs/architecture/14_BACKEND_LIFECYCLE.md) — internal validation, drain and guarded retirement in review; concrete provider/authority gates pending.
+
+- [FS-220 policy control plane](docs/architecture/15_POLICY_CONTROL_PLANE.md) — bounded internal policy management in review.

@@ -1464,4 +1464,98 @@ class JdbcTransactionsTest {
         assertEquals(1, config.retireBackend(ADMIN, ctx, s3, 1));
     }
 
+
+    private static JdbcPolicyControl policies(io.vyrnforge.filestorage.application.PolicyAuthority authority) {
+        return new JdbcPolicyControl(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), authority);
+    }
+
+    @Test
+    void policyControlSwitchesAndRollsBackWithoutChangingExistingPlacements() throws SQLException {
+        var policy = policies((actor, scope, locations) -> actor.equals(ADMIN) && scope.equals(SCOPE)
+                && Set.of(new LocationId(OL), new LocationId(SL)).containsAll(locations));
+        var ctx = CorrelationContext.create();
+        var old = application().initiate(ALICE, command("policy-old"));
+        assertEquals(1L, policy.active(ADMIN, SCOPE).orElseThrow().revision());
+        assertEquals(2L, policy.publish(ADMIN, ctx, SCOPE, 1, List.of(rule(SL, 0, true))));
+        var next = application().initiate(ALICE, command("policy-new"));
+        assertEquals(2L, policy.active(ADMIN, SCOPE).orElseThrow().revision());
+        assertEquals(List.of(rule(OL, 0, true)), policy.revision(ADMIN, SCOPE, 1).orElseThrow().rules());
+        assertEquals(3L, policy.rollback(ADMIN, ctx, SCOPE, 2, 1));
+        var restored = application().initiate(ALICE, command("policy-restored"));
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
+        var first = jdbc.execute(u -> u.bySession(A, old.session()).orElseThrow());
+        var second = jdbc.execute(u -> u.bySession(A, next.session()).orElseThrow());
+        var third = jdbc.execute(u -> u.bySession(A, restored.session()).orElseThrow());
+        assertEquals(new LocationId(OL), first.session().placement().location());
+        assertEquals(new LocationId(SL), second.session().placement().location());
+        assertEquals(new LocationId(OL), third.session().placement().location());
+        assertEquals(1L, first.session().placement().policyRevision());
+        assertEquals(2L, second.session().placement().policyRevision());
+        assertEquals(3L, third.session().placement().policyRevision());
+        assertEquals(old, application().initiate(ALICE, command("policy-old")));
+        assertEquals(List.of(3L, 2L), policy.history(ADMIN, SCOPE, 0, 2));
+        assertEquals(List.of(1L), policy.history(ADMIN, SCOPE, 2, 2));
+        assertEquals(List.of(rule(OL, 0, true)), policy.active(ADMIN, SCOPE).orElseThrow().rules());
+        assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.policy.published' AND payload_json->>'rollbackSourceRevision'='1'"));
+        assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.policy.published' AND changes_json->>'rollbackSourceRevision'='1'"));
+    }
+
+    @Test
+    void policyControlDeniesOtherScopesAndEveryUnapprovedLocation() throws SQLException {
+        var policy = policies((actor, scope, locations) -> actor.equals(ADMIN) && scope.equals(SCOPE)
+                && Set.of(new LocationId(OL)).containsAll(locations));
+        var ctx = CorrelationContext.create();
+        for (Scope wrong : List.of(new Scope(B, "asset", "attachment"),
+                new Scope(A, "itsm", "attachment"), new Scope(A, "asset", "other"))) {
+            assertEquals(Code.DENIED, assertThrows(Failure.class,
+                    () -> policy.active(ADMIN, wrong)).code());
+            assertEquals(Code.DENIED, assertThrows(Failure.class,
+                    () -> policy.publish(ADMIN, ctx, wrong, 0, List.of(rule(OL, 0, true)))).code());
+        }
+        var stranger = new ActorReference(ActorType.USER, "other-admin", null, null);
+        assertEquals(Code.DENIED, assertThrows(Failure.class, () -> policy.history(stranger, SCOPE, 0, 10)).code());
+        // A non-winning or disabled rule may not smuggle an unapproved location.
+        assertEquals(Code.DENIED, assertThrows(Failure.class, () -> policy.publish(ADMIN, ctx, SCOPE, 1,
+                List.of(rule(OL, 0, true), rule(SL, 1, false)))).code());
+        var broken = policies((actor, scope, locations) -> { throw new IllegalStateException("authority unavailable"); });
+        assertEquals(Code.DENIED, assertThrows(Failure.class, () -> broken.active(ADMIN, SCOPE)).code());
+        assertEquals(1, count("policy_revision"));
+        assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.policy.published'"));
+    }
+
+    @Test
+    void policyControlRollbackReauthorizesAndRejectsDrainedOrStaleRouting() throws SQLException {
+        var allowed = new HashSet<>(Set.of(new LocationId(OL), new LocationId(SL)));
+        var policy = policies((actor, scope, locations) -> actor.equals(ADMIN) && scope.equals(SCOPE)
+                && allowed.containsAll(locations));
+        var ctx = CorrelationContext.create();
+        assertEquals(2L, policy.publish(ADMIN, ctx, SCOPE, 1, List.of(rule(SL, 0, true))));
+        allowed.remove(new LocationId(OL));
+        assertEquals(Code.DENIED, assertThrows(Failure.class, () -> policy.rollback(ADMIN, ctx, SCOPE, 2, 1)).code());
+        assertEquals(Code.DENIED, assertThrows(Failure.class, () -> policy.revision(ADMIN, SCOPE, 1)).code());
+        allowed.add(new LocationId(OL));
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> policy.rollback(ADMIN, ctx, SCOPE, 3, 1)).code());
+        configuration().drainBackend(ADMIN, ctx, new BackendId(OSS), 1);
+        assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class, () -> policy.rollback(ADMIN, ctx, SCOPE, 2, 1)).code());
+        assertEquals(2L, policy.active(ADMIN, SCOPE).orElseThrow().revision());
+        assertEquals(2, count("policy_revision"));
+        assertEquals(0, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.policy.published' AND payload_json ? 'rollbackSourceRevision'"));
+    }
+
+    @Test
+    void policyControlRejectsAmbiguousIneligibleAndOversizedRules() throws SQLException {
+        var policy = policies((actor, scope, locations) -> true);
+        var ctx = CorrelationContext.create();
+        assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class, () -> policy.publish(ADMIN, ctx, SCOPE, 1,
+                List.of(rule(OL, 0, true), rule(SL, 0, true)))).code());
+        assertEquals(Code.NO_PLACEMENT, assertThrows(Failure.class, () -> policy.publish(ADMIN, ctx, SCOPE, 1,
+                List.of(rule(OL, 0, false), rule(SL, 1, true)))).code());
+        assertEquals(Code.INVALID, assertThrows(Failure.class, () -> policy.publish(ADMIN, ctx, SCOPE, 1,
+                List.of(rule(OL, 0, true), rule(OL, 1, true)))).code());
+        assertEquals(Code.INVALID, assertThrows(Failure.class, () -> policy.publish(ADMIN, ctx, SCOPE, 1,
+                Collections.nCopies(101, rule(OL, 0, true)))).code());
+        assertEquals(Code.INVALID, assertThrows(Failure.class, () -> policy.history(ADMIN, SCOPE, 0, 101)).code());
+        assertEquals(1L, policy.active(ADMIN, SCOPE).orElseThrow().revision());
+        assertEquals(1, count("policy_revision"));
+    }
 }
