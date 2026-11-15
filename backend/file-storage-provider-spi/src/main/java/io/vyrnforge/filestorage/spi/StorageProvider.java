@@ -6,9 +6,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.net.URI;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /** Internal provider port. No vendor types or externally visible locations.
- * Each call has a deadline; adapter enforces bounded I/O and observes thread interruption.
+ * Each call has a timeout; adapter enforces bounded I/O (including returned stream reads)
+ * and observes interruption. Timeout/transient errors can leave uncertain external effects.
+ * Callers reconcile before retrying writes; no provider I/O inside metadata transactions.
  * Caller closes put stream; caller closes returned get stream. Closing get must release resources.
  * Failures use neutral codes; no raw provider response, credential or URL in error text.
  */
@@ -24,18 +27,31 @@ public interface StorageProvider {
         public Call { Objects.requireNonNull(timeout); if(timeout.isNegative()||timeout.isZero())throw new IllegalArgumentException("timeout"); }
     }
     record Metadata(long size,String sha256,String mimeType) {
-        public Metadata { if(size<0)throw new IllegalArgumentException("size"); Objects.requireNonNull(mimeType); }
+        public Metadata {
+            if (size < 0 || mimeType == null || mimeType.isBlank()
+                    || (sha256 != null && !Pattern.matches("[0-9a-f]{64}", sha256))) {
+                throw new IllegalArgumentException("invalid object metadata");
+            }
+        }
     }
     record Page(List<Locator> objects, String nextCursor) {
         public Page { objects=List.copyOf(objects); }
     }
     Set<Capability> capabilities();
-    /** Writes a new staged key; must not silently overwrite verified content. */
+    /**
+     * Create-only write to a new staged key; concurrent writers cannot replace it.
+     * Exact expected size (including zero); reject short/long input without committing
+     * a successful object. Caller owns input. Never emulate create-only with HEAD+PUT.
+     * A provider version, if supplied, must not be silently ignored.
+     */
     Metadata put(Locator object, InputStream bytes, long expectedSize, Call call);
+    /** Caller owns returned stream; exact version if specified, no fallback to latest. */
     InputStream get(Locator object,Call call);
+    /** SHA-256 is lowercase hex of actual bytes or null; ETag is not SHA-256. */
     Metadata head(Locator object,Call call);
-    /** Idempotent deletion: absent object is success. */
+    /** Idempotent deletion of exact target: absent is success, not authorization failure. */
     void delete(Locator object,Call call);
+    /** Bounded location/prefix page; opaque continuation bound to that listing; null ends listing. */
     Page list(LocationId location,String prefix,String cursor,int limit,Call call);
     /** Optional capabilities are negotiated; no capability is implemented by this default. */
     default Metadata copy(Locator source,Locator destination,Call call){throw new StorageFailure(ErrorCode.UNSUPPORTED);}

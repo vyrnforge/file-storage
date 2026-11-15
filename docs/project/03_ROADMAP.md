@@ -1,6 +1,6 @@
 # Delivery roadmap and initial backlog
 
-Approved direction 2026-11-14. Phase 1 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged; FS-120B2B merged; FS-120C1 merged; FS-120C2 authorized; FS-200 and later increments not authorized. Stable FS planning identifiers now map to GitHub issues via [master delivery tracker #13](https://github.com/vyrnforge/file-storage/issues/13). Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
+Approved direction 2026-11-14. Phase 2 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged; FS-120B2B merged; FS-120C1 merged; FS-120C2 merged; FS-200A contract/test work authorized; DEC-FS012 approved; FS-200B authorized conditional on prerequisites; FS-200C and later increments not authorized. Stable FS planning identifiers now map to GitHub issues via [master delivery tracker #13](https://github.com/vyrnforge/file-storage/issues/13). Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
 
 | ID | Phase | Priority | Deliverable / acceptance |
 |---|---|---|---|
@@ -71,3 +71,9 @@ Recommended next authorization: FS-120B2A [#20](https://github.com/vyrnforge/fil
 2026-11-15: #21 accepted and PR #53 merged at 137ebeab9a8e83b33219f9d3ae3ccc83f775abd1; #22 authorized for atomic mutation audit/outbox intents. #23 dispatch, jobs and recovery remains separately gated. Read/denial audit policy and live IAM remain open.
 
 2026-11-15: #22 accepted and merged at 271403d9eb968a2224f7cab963da486b3b0eca89; #23 authorized for internal worker foundation. #24 provider/privacy contract is next candidate, subject to explicit owner approval and open #16 decisions. Actual provider operation handlers and broker integration remain later work.
+
+2026-11-15: #23 accepted and PR #55 merged at b5e8159843fb41121eeabe309497899c3bcd7257. #24 provider contract and tests authorized; owner/security transfer decision and relevant #16 product/profile choices remain pending. #25/#26 require separate approval and real profile evidence; no provider-SDK implementation in #24.
+
+## DEC-FS012 delivery refinement (2026-11-15)
+Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separate API/worker runtime roles, optional private CDN acceleration. One product, repository, domain and authoritative metadata store; combined local/small deployment permitted. API authorizes/orchestrates, never carries consumer file bodies in separated profile. Gateway streams to private providers, workers verify/scan/reconcile. No direct provider URL, locator, signature or credential exposure. CDN conditional, no shared confidential caching by default. No production deployment or limits approved.
+#57 FS-300G private transfer gateway is a P0 foundation after #30 and adapters/registry, before #31/#35. #58 FS-500D CDN acceleration is P2 conditional on #35/#42–#44 and approved content/cache policy. #30 composes roles, #42 deploys independently, #43 tests trust/cache isolation, #44 measures API latency under load, TTFB, throughput, origin traffic and cost/GB. #16 production choices remain open. #25 isolated profile may proceed once prerequisites resolved; no blanket production compatibility or merge authorization.

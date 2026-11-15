@@ -29,3 +29,6 @@ MutationIntents composes Kernel JDBC audit/event writers with aggregate insertio
 
 ## FS-120C2
 V3 storage_operation, JdbcOperations and OutboxDelivery. Kernel JdbcOutboxPublisher reused; no new external library. Disposable PostgreSQL tests simulate worker crashes, retry, stale fences, dead-letter inspection and consumer dedup. No scheduler or actual provider/broker handler yet.
+
+## FS-200A
+Provider SPI exports reusable JUnit contract tests in the test-only `tests` classifier (Maven verify/package). Synthetic memory profile exercises minimum behavior; actual S3/OSS modules must extend ProviderContract and add advertised capability and failure/profile tests. No SDK dependencies or live provider adapters yet.

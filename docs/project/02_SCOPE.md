@@ -8,9 +8,9 @@ Approved direction, 2026-11-14; individual implementation increments require aut
 | Storage providers | S3 and native Alibaba OSS; tested S3-compatible profiles | Azure/GCS/other adapters |
 | Control plane | Backend/location registry, credential references, validation, activation, policy assignment, drain/retire, audit | automated tiering, replication |
 | Lifecycle | explicit pending/available/quarantined/deleted/purged, bounded cleanup and reconciliation | advanced retention/legal hold when required |
-| Security | verified IAM, tenant/file/application authorization, private buckets, scanning/quarantine for untrusted content, safe signed URLs | customer-managed keys, regulatory residency controls |
+| Security | verified IAM, tenant/file/application authorization, private buckets, scanning/quarantine for untrusted content, opaque service-controlled transfer handles | customer-managed keys, regulatory residency controls |
 | Integration | stable FileReference, versioned API/events, consumer SDK | optional kernel integration artifact after real consumers |
-| Operations | independent deployment, health, metrics, backups/restore, migration runbooks | multi-region active-active |
+| Operations | independent API/transfer/worker deployment roles, health, metrics, backups/restore, migration runbooks | optional private CDN, multi-region active-active |
 
 Out of scope: object-storage server implementation, filesystem protocol, IAM replacement, generic BPM, arbitrary runtime plugins, consumer business workflows, shared consumer database, direct consumer bucket management.
 

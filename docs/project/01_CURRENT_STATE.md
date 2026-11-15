@@ -1,11 +1,11 @@
 # Current state and legacy capability baseline
 
-Date: 2026-11-15. Phase 1 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged (PR #52); FS-120B2B merged (PR #53); FS-120C1 merged (PR #54); FS-120C2 in review. Java/Maven domain, provider SPI, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
+Date: 2026-11-15. Phase 2 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged (PR #52); FS-120B2B merged (PR #53); FS-120C1 merged (PR #54); FS-120C2 merged (PR #55); FS-200A contract in review; DEC-FS012 approved. Java/Maven domain, provider SPI, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
 
 ## Legacy inventory (sanitized)
 | Capability | Legacy evidence | Proposed treatment |
 |---|---|---|
-| Upload policy / completion | FileController, FileService, OssService | Preserve direct-upload behavior, constrain signing and verify completion |
+| Upload policy / completion | FileController, FileService, OssService | Preserve upload/completion outcomes; replace direct provider exposure with private transfer boundary |
 | Batch/status/progress/cancel/refresh | FileController, UploadSession | Preserve semantics; pin session placement |
 | Download URL, list and pagination | FileController, FileService | Preserve APIs where compatibility requires; strengthen authorization |
 | Tenant usage and reservations | TenantQuotaService, StorageUsageService | Preserve accounting; concurrency and cleanup regression tests |
@@ -61,3 +61,8 @@ PR #12 merged at `f28e9093105e5620e2b9a0eb8e36b2de6595c9f2`; final hosted CI [43
 2026-11-15: owner accepted continuation and merge of PR #53 at 137ebeab9a8e83b33219f9d3ae3ccc83f775abd1; CI 43669360900 passed 57 tests (26 PostgreSQL). #21 closed, #22 authorized. FS-120C1 uses actual Kernel transaction-bound audit/event writers for initiation, backend activation and policy publication; no dispatch/runtime or production migration. See [atomic intents](../architecture/08_ATOMIC_MUTATION_INTENTS.md).
 
 2026-11-15: owner explicitly accepted and authorized merge of PR #54 at 271403d9eb968a2224f7cab963da486b3b0eca89; CI 43669852898 passed 61 tests (30 PostgreSQL). Issue #22 closed; #23 authorized. Internal operation ledger V3 and Kernel outbox delivery tick in review. [Recovery contract](../architecture/09_DURABLE_RECOVERY.md). No deployed worker, external transport or provider I/O; #24 separately gated.
+
+2026-11-15: owner explicitly approved merge PR #55 at b5e8159843fb41121eeabe309497899c3bcd7257; CI 43670297365 passed 69 tests (38 PostgreSQL). Issue #23 closed; #24 authorized for provider-neutral contract and synthetic reusable tests. [Provider transfer contract](../architecture/10_PROVIDER_TRANSFER_CONTRACT.md). Private-location requirement remains binding; service-controlled transfer design proposed, owner decision and relevant #16 inputs pending. No SDK, cloud I/O, transfer runtime or production migration.
+
+Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separate API/worker runtime roles, optional private CDN acceleration. One product, repository, domain and authoritative metadata store; combined local/small deployment permitted. API authorizes/orchestrates, never carries consumer file bodies in separated profile. Gateway streams to private providers, workers verify/scan/reconcile. No direct provider URL, locator, signature or credential exposure. CDN conditional, no shared confidential caching by default. No production deployment or limits approved.
+#25 authorized conditional on test-profile prerequisites; #57/#58 tracked, no runtime deployment.

@@ -5,7 +5,7 @@ Owner approval recorded 2026-11-14 (explicit conversation instruction). DEC-FS00
 | ID | Decision | Status | Rationale / open issue |
 |---|---|---|---|
 | DEC-FS001 | Independent file domain, selective modernization | Approved | Preserve proven behavior; owner review of reuse |
-| DEC-FS002 | Single product repository, modular monolith | Approved | Avoid premature distributed topology |
+| DEC-FS002 | Single product repository, modular architecture | Approved; runtime refined by DEC-FS012 | Avoid separate business ownership; independent API/transfer/worker roles |
 | DEC-FS003 | Stable file ID, separate physical locator, pinned sessions | Approved | Safe provider change and migration |
 | DEC-FS004 | Console-managed backend/location/policy revisions | Approved | No consumer deployment for new configured backend |
 | DEC-FS005 | Compiled S3 and native OSS adapters, capability matrix | Approved | No arbitrary runtime executable plugins |
@@ -15,6 +15,7 @@ Owner approval recorded 2026-11-14 (explicit conversation instruction). DEC-FS00
 | DEC-FS009 | Private-by-default data, public repo only sanitized docs | Approved | Security and least privilege |
 | DEC-FS010 | Legacy migration via registered location, no forced byte copy | Approved | Preserve IDs; confirm actual data/compatibility |
 | DEC-FS011 | Apache-2.0, public repository | Approved; version scheme open | Owner confirmed public and Apache-2.0; release numbering later |
+| DEC-FS012 | Independent transfer gateway, API/worker roles, optional private CDN | Approved by owner 2026-11-15 | Isolate byte traffic from API, retain private placement and scalable provider-neutral contracts; see [transfer contract](../architecture/10_PROVIDER_TRANSFER_CONTRACT.md) |
 
 Decision approval must record date, approver, rationale, alternatives, consequences and affected contracts. Never change status from proposal based on assistant inference.
 
@@ -50,3 +51,8 @@ Owner confirmed PR #12 merged and requested the Product & Business Analysis / Te
 2026-11-15: owner approved proceeding and moving to next issue; interpreted as merge of reviewed PR #53 and authorization of #22 only. Squash merge 137ebeab9a8e83b33219f9d3ae3ccc83f775abd1. FS-120C1 uses Kernel v0.3.2 AuditEvent/EventEnvelope and existing JDBC writers; internal event v1 for initiation, backend activation, policy publication. Minimal identifiers/revisions, canonical actor without issuer/subject/display name; explicit trusted actor/correlation for admin commands. No read/denial audit policy approval, event publication, grant issuance, production migration or #23 authorization.
 
 2026-11-15: owner reviewed and explicitly directed merge PR #54 and next issue. Squash merge 271403d9eb968a2224f7cab963da486b3b0eca89; #22 closed, #23 authorized. Adopt Kernel JdbcOutboxPublisher 0.3.2 with bounded ticks and neutral transport error, service V3 typed operation ledger, immutable request identity via unique tenant/kind/key and target match, persisted attempt budget, claim token/expiry CAS and bounded dead inspection. No auto redrive, live broker, provider effects, scheduling, global capacity/defaults or public worker API; future handlers must authorize/reconcile and fence metadata completion. No #24 authorization.
+
+2026-11-15: owner explicitly instructed merge PR #55 and proceed next. Squash merge b5e8159843fb41121eeabe309497899c3bcd7257; #23 accepted. #24 authorized for contract/test work only. Reusable test-only SPI classifier and stricter metadata/byte semantics specified; private service-controlled streaming/tickets proposed (DEC-FS012, pending). No direct-provider consumer grant exception, actual SDK version/profile, production limits or later implementation approved. See provider transfer contract.
+
+Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separate API/worker runtime roles, optional private CDN acceleration. One product, repository, domain and authoritative metadata store; combined local/small deployment permitted. API authorizes/orchestrates, never carries consumer file bodies in separated profile. Gateway streams to private providers, workers verify/scan/reconcile. No direct provider URL, locator, signature or credential exposure. CDN conditional, no shared confidential caching by default. No production deployment or limits approved.
+Alternatives reviewed: in-process streaming (combined profile only), direct provider URLs (rejected under privacy rule), dedicated gateway (selected), private CDN (conditional). Gateway still transports bytes; latency/cost improvement not measured. Affected #24/#25/#30/#31/#35/#42–#44/#57/#58. Owner authorizes #25 after relevant prerequisites; production profiles, limits, CDN vendor and deployment remain unapproved.
