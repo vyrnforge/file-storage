@@ -113,7 +113,11 @@ public final class OssStorageProvider implements StorageProvider, AutoCloseable 
         Deadline deadline = deadline(call);
         for (String bucket : locations.values().stream().map(Location::bucket).distinct().toList()) {
             String status = invoke(deadline, () -> client.getBucketVersioning(bucket).getStatus(), value -> {});
-            if (!BucketVersioningConfiguration.OFF.equals(status)) throw failure(ErrorCode.UNSUPPORTED);
+            // A successful GetBucketVersioning response omits Status for an
+            // unversioned bucket. The SDK represents that as null/empty.
+            if (status != null && !status.isEmpty() && !BucketVersioningConfiguration.OFF.equals(status)) {
+                throw failure(ErrorCode.UNSUPPORTED);
+            }
         }
         validated.set(true);
     }

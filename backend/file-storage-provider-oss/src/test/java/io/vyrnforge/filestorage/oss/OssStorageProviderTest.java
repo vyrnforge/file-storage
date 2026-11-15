@@ -206,7 +206,7 @@ class OssStorageProviderTest extends ProviderContract {
     @Test
     void unvalidatedAndVersionedBucketsFailClosed() {
         LocationId id = new LocationId(UUID.randomUUID());
-        for (String status : java.util.List.of("Enabled", "Suspended")) {
+        for (String status : java.util.List.of("Enabled", "Suspended", "Unknown")) {
             String bucket = "versioned-" + status.toLowerCase();
             VERSIONING.put(bucket, status);
             try (var provider = new OssStorageProvider(client(USER), Map.of(id, new Location(id, BACKEND, bucket, "")),
