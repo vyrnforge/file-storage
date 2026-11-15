@@ -181,13 +181,20 @@ public final class JdbcOperations {
      */
     public boolean finish(Claim claim, ErrorCode error) {
         try (var c = fresh()) {
-            return finishOnConnection(c, claim, error);
+            return finishStatement(c, claim, error);
         } catch (SQLException ex) {
             throw JdbcTransactions.translate(ex);
         }
     }
 
     public boolean finishOnConnection(Connection connection, Claim claim, ErrorCode error) throws SQLException {
+        if (connection.getAutoCommit()) {
+            throw new IllegalArgumentException("transaction required");
+        }
+        return finishStatement(connection, claim, error);
+    }
+
+    private boolean finishStatement(Connection connection, Claim claim, ErrorCode error) throws SQLException {
         Objects.requireNonNull(claim);
         var now = clock.instant();
         var current = time(now);

@@ -940,6 +940,22 @@ class JdbcTransactionsTest {
     }
 
     @Test
+    void operationFinishParticipatesInCallerTransaction() throws SQLException {
+        var ops = operations(new WorkerClock());
+        var request = operation("finish-transaction", 2);
+        enqueue(ops, request);
+        var claim = ops.claim(request.kind(), 1).claims().getFirst();
+        try (var c = dataSource.getConnection()) {
+            assertThrows(IllegalArgumentException.class, () -> ops.finishOnConnection(c, claim, null));
+            c.setAutoCommit(false);
+            assertTrue(ops.finishOnConnection(c, claim, null));
+            c.rollback();
+        }
+        assertTrue(ops.stillOwned(claim));
+        assertTrue(ops.finish(claim, null));
+    }
+
+    @Test
     void concurrentWorkersClaimOnlyOneOperation() throws Exception {
         var ops = operations(new WorkerClock());
         var request = operation("concurrent-job", 3);
@@ -970,6 +986,9 @@ class JdbcTransactionsTest {
         assertEquals(1, worker.tick(1).dead());
         assertEquals(2, scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='DEAD' AND last_error_code='DeliveryFailed'"));
         assertEquals(0, worker.tick(1).claimed());
+        assertEquals(1, worker.dead(A.value(), 1).size());
+        assertTrue(worker.dead(B.value(), 1).isEmpty());
+        assertTrue(worker.dead(null, 1).isEmpty());
     }
 
     @Test

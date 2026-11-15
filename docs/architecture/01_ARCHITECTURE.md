@@ -1,6 +1,6 @@
 # Architecture and domain boundaries
 
-Approved architecture direction; FS-110A/B verifier merged; FS-120A merged; FS-120B1 transactional initiation authorized. Start with a modular monolith; separate worker execution if scale or reliability requires. Java 21 / Maven / Spring Boot / PostgreSQL / Flyway approved; exact framework/database versions selected in relevant later increments.
+Approved architecture direction; FS-120C1 merged; FS-120C2 durable recovery foundation authorized. Start with a modular monolith; separate worker execution if scale or reliability requires. Java 21 / Maven / Spring Boot / PostgreSQL / Flyway approved; exact framework/database versions selected in relevant later increments.
 
 ```mermaid
 flowchart TD
@@ -39,3 +39,5 @@ Initiate -> uploading -> verifying/scanning -> available or quarantined/failed. 
 
 ## Deployment
 One independent API/service release, console build, optional worker deployment. Service-owned metadata database, backend connections and secrets. No live credentials or deployment targets yet. Configuration control plane must converge revisions across instances and preserve existing reads during drain. Health distinguishes process liveness, readiness and per-backend degradation.
+
+FS-120C2 internal work ledger and Kernel outbox dispatcher: [recovery contract](09_DURABLE_RECOVERY.md). No external side effects in DB transactions; actual worker deployment and provider handlers later.

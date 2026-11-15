@@ -1,6 +1,6 @@
 # Delivery roadmap and initial backlog
 
-Approved direction 2026-11-14. Phase 1 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged; FS-120B2B merged; FS-120C1 authorized; FS-120C2 and later increments not authorized. Stable FS planning identifiers now map to GitHub issues via [master delivery tracker #13](https://github.com/vyrnforge/file-storage/issues/13). Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
+Approved direction 2026-11-14. Phase 1 FS-100A merged; FS-100B merged; FS-110A/B verifier merged; FS-120A merged; FS-120B1 merged (PR #12); FS-120B2A merged; FS-120B2B merged; FS-120C1 merged; FS-120C2 authorized; FS-200 and later increments not authorized. Stable FS planning identifiers now map to GitHub issues via [master delivery tracker #13](https://github.com/vyrnforge/file-storage/issues/13). Priorities P0 release-blocking, P1 initial enterprise scope, P2 later.
 
 | ID | Phase | Priority | Deliverable / acceptance |
 |---|---|---|---|
@@ -69,3 +69,5 @@ Recommended next authorization: FS-120B2A [#20](https://github.com/vyrnforge/fil
 2026-11-15: #20 accepted, PR #52 squash merged at 32b387cd1b3ee2113832e4eff0ab224da53926d0 (51 hosted tests). #21 authorized, durable grant read adapter only; authoritative issuance and live IAM remain blocked on #17/#19. #22 is next candidate after owner acceptance; no automatic authorization.
 
 2026-11-15: #21 accepted and PR #53 merged at 137ebeab9a8e83b33219f9d3ae3ccc83f775abd1; #22 authorized for atomic mutation audit/outbox intents. #23 dispatch, jobs and recovery remains separately gated. Read/denial audit policy and live IAM remain open.
+
+2026-11-15: #22 accepted and merged at 271403d9eb968a2224f7cab963da486b3b0eca89; #23 authorized for internal worker foundation. #24 provider/privacy contract is next candidate, subject to explicit owner approval and open #16 decisions. Actual provider operation handlers and broker integration remain later work.

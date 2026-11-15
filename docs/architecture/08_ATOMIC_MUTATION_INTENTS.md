@@ -18,3 +18,5 @@ A05 all prior real PostgreSQL tests, POM/dependency checks pass. No production d
 
 ## Handoff
 #23 outbox dispatch/recovery and durable jobs; #16/#43 owner decision and threat verification for audit retention/read/denial policy and least privilege. Local full verification outstanding. No later increment or merge authorization.
+
+Accepted PR #54 squash merged at 271403d9eb968a2224f7cab963da486b3b0eca89 after owner review. [CI 43669852898](https://github.com/vyrnforge/file-storage/actions/runs/43669852898) passed 61 tests. #22 closed. FS-120C2 adds internal dispatch and recovery; see [recovery contract](09_DURABLE_RECOVERY.md).

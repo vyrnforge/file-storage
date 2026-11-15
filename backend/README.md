@@ -26,3 +26,6 @@ JdbcGrants implements the existing SecuredFiles.Grants port using fs.file_grant.
 
 ## FS-120C1
 MutationIntents composes Kernel JDBC audit/event writers with aggregate insertion and configuration CAS. No new dependencies or migrations. Outbox rows are pending, not published; #23 handles delivery/recovery.
+
+## FS-120C2
+V3 storage_operation, JdbcOperations and OutboxDelivery. Kernel JdbcOutboxPublisher reused; no new external library. Disposable PostgreSQL tests simulate worker crashes, retry, stale fences, dead-letter inspection and consumer dedup. No scheduler or actual provider/broker handler yet.
