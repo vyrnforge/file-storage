@@ -33,7 +33,7 @@ public final class PolicyAdminRoutes {
     @GetMapping(value = "/revisions/{revision}", produces = "application/json")
     public ResponseEntity<PolicyDtos.Policy> revision(HttpServletRequest request, @PathVariable("revision") String revision) {
         var context = context(request, Action.POLICY_READ);
-        var result = policies.revision(context.actor(), context.scope(), number(revision, 1, Long.MAX_VALUE))
+        var result = policies.revision(context.actor(), context.scope(), ApiRequest.number(revision, 1, Long.MAX_VALUE))
                 .orElseThrow(() -> new Failure(Code.NOT_FOUND));
         return ApiResponses.success(context.correlation(), PolicyDtos.view(result));
     }
@@ -41,8 +41,8 @@ public final class PolicyAdminRoutes {
     @GetMapping(value = "/revisions", produces = "application/json")
     public ResponseEntity<PolicyDtos.History> history(HttpServletRequest request) {
         var context = context(request, Action.POLICY_READ);
-        long before = number(optional(request, "before", "0"), 0, Long.MAX_VALUE);
-        int limit = (int) number(optional(request, "limit", "50"), 1, 100);
+        long before = ApiRequest.number(ApiRequest.query(request, "before", "0"), 0, Long.MAX_VALUE);
+        int limit = (int) ApiRequest.number(ApiRequest.query(request, "limit", "50"), 1, 100);
         return ApiResponses.success(context.correlation(),
                 new PolicyDtos.History(policies.history(context.actor(), context.scope(), before, limit)));
     }
@@ -72,31 +72,9 @@ public final class PolicyAdminRoutes {
 
     private Context context(HttpServletRequest request, Action action) {
         var input = ApiRequest.from(request);
-        var scope = new Scope(input.tenant(), ApiRequest.bounded(single(request, "application"), 128),
-                ApiRequest.bounded(single(request, "purpose"), 128));
+        var scope = new Scope(input.tenant(), ApiRequest.bounded(ApiRequest.query(request, "application", null), 128),
+                ApiRequest.bounded(ApiRequest.query(request, "purpose", null), 128));
         return new Context(scope, security.authorize(input.bearer(), scope, input.correlationId(), action));
     }
 
-    private static String single(HttpServletRequest request, String name) {
-        var values = request.getParameterValues(name);
-        if (values == null) return null;
-        if (values.length != 1) throw new Failure(Code.INVALID);
-        return values[0];
-    }
-
-    private static String optional(HttpServletRequest request, String name, String fallback) {
-        var value = single(request, name);
-        return value == null ? fallback : value;
-    }
-
-    private static long number(String value, long min, long max) {
-        try {
-            if (value == null || !value.matches("[0-9]{1,19}")) throw new Failure(Code.INVALID);
-            long parsed = Long.parseLong(value);
-            if (parsed < min || parsed > max) throw new Failure(Code.INVALID);
-            return parsed;
-        } catch (NumberFormatException ex) {
-            throw new Failure(Code.INVALID);
-        }
-    }
 }

@@ -62,5 +62,21 @@ record ApiRequest(String bearer, TenantId tenant, UUID correlationId) {
         return value;
     }
 
+    static String query(HttpServletRequest request, String name, String fallback) {
+        var values = request.getParameterValues(name);
+        if (values == null) return fallback;
+        if (values.length != 1) throw new Failure(Code.INVALID);
+        return values[0];
+    }
+
+    static long number(String value, long min, long max) {
+        try {
+            if (value == null || !value.matches("[0-9]{1,19}")) throw new Failure(Code.INVALID);
+            long parsed = Long.parseLong(value);
+            if (parsed < min || parsed > max) throw new Failure(Code.INVALID);
+            return parsed;
+        } catch (NumberFormatException ex) { throw new Failure(Code.INVALID); }
+    }
+
     @Override public String toString() { return "ApiRequest[redacted]"; }
 }

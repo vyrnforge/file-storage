@@ -28,7 +28,7 @@ public final class BackendAdminRoutes {
     @GetMapping(produces = "application/json")
     public ResponseEntity<List<BackendDtos.Backend>> list(HttpServletRequest request) {
         var context = authorize(request, Action.LIST, null);
-        return ApiResponses.success(context.correlation(), admin.registry().backends(after(request), limit(request))
+        return ApiResponses.success(context.correlation(), admin.backends(after(request), limit(request))
                 .stream().map(BackendDtos::backend).toList());
     }
 
@@ -43,7 +43,7 @@ public final class BackendAdminRoutes {
     public ResponseEntity<BackendDtos.Revision> active(HttpServletRequest request, @PathVariable("backendId") String id) {
         var backend = backend(id);
         var context = authorize(request, Action.READ, backend);
-        var view = admin.registry().active(backend).orElseThrow(() -> new Failure(Code.NOT_FOUND));
+        var view = admin.active(backend).orElseThrow(() -> new Failure(Code.NOT_FOUND));
         return ApiResponses.success(context.correlation(), BackendDtos.revision(view));
     }
 
@@ -51,8 +51,8 @@ public final class BackendAdminRoutes {
     public ResponseEntity<List<BackendDtos.Revision>> history(HttpServletRequest request, @PathVariable("backendId") String id) {
         var backend = backend(id);
         var context = authorize(request, Action.READ, backend);
-        long before = number(single(request, "before", "0"), 0, Long.MAX_VALUE);
-        return ApiResponses.success(context.correlation(), admin.registry().history(backend, before, limit(request))
+        long before = ApiRequest.number(ApiRequest.query(request, "before", "0"), 0, Long.MAX_VALUE);
+        return ApiResponses.success(context.correlation(), admin.history(backend, before, limit(request))
                 .stream().map(BackendDtos::revision).toList());
     }
 
@@ -60,7 +60,7 @@ public final class BackendAdminRoutes {
     public ResponseEntity<List<BackendDtos.Location>> locations(HttpServletRequest request, @PathVariable("backendId") String id) {
         var backend = backend(id);
         var context = authorize(request, Action.READ, backend);
-        return ApiResponses.success(context.correlation(), admin.registry().locations(backend, after(request), limit(request))
+        return ApiResponses.success(context.correlation(), admin.locations(backend, after(request), limit(request))
                 .stream().map(BackendDtos::location).toList());
     }
 
@@ -70,7 +70,7 @@ public final class BackendAdminRoutes {
         var backend = backend(id);
         var context = authorize(request, Action.REGISTER_LOCATION, backend);
         if (body == null || body.prefix() == null || body.prefix().length() > 512) throw new Failure(Code.INVALID);
-        var location = admin.registry().registerLocation(context.actor(), context.correlation(), backend,
+        var location = admin.registerLocation(context, backend,
                 ApiRequest.bounded(body.bucket(), 63), body.prefix());
         return ApiResponses.success(context.correlation(), new BackendDtos.Location(location.value(), backend.value()));
     }
@@ -81,7 +81,7 @@ public final class BackendAdminRoutes {
         var backend = backend(id);
         var context = authorize(request, Action.REVISE_CREDENTIAL, backend);
         if (body == null) throw new Failure(Code.INVALID);
-        long revision = admin.registry().reviseCredential(context.actor(), context.correlation(), backend,
+        long revision = admin.reviseCredential(context, backend,
                 BackendDtos.revision(body.expectedRevision(), 1), BackendDtos.reference(body.credentialRef()));
         return ApiResponses.success(context.correlation(), new BackendDtos.Changed(revision));
     }
@@ -131,24 +131,10 @@ public final class BackendAdminRoutes {
         return BackendDtos.revision(body.revision(), 1);
     }
     private static UUID after(HttpServletRequest request) {
-        String value = single(request, "after", null);
+        String value = ApiRequest.query(request, "after", null);
         return value == null ? null : ApiRequest.uuid(value);
     }
     private static int limit(HttpServletRequest request) {
-        return (int) number(single(request, "limit", "50"), 1, 100);
-    }
-    private static String single(HttpServletRequest request, String name, String fallback) {
-        var values = request.getParameterValues(name);
-        if (values == null) return fallback;
-        if (values.length != 1) throw new Failure(Code.INVALID);
-        return values[0];
-    }
-    private static long number(String value, long min, long max) {
-        try {
-            if (value == null || !value.matches("[0-9]{1,19}")) throw new Failure(Code.INVALID);
-            long parsed = Long.parseLong(value);
-            if (parsed < min || parsed > max) throw new Failure(Code.INVALID);
-            return parsed;
-        } catch (NumberFormatException ex) { throw new Failure(Code.INVALID); }
+        return (int) ApiRequest.number(ApiRequest.query(request, "limit", "50"), 1, 100);
     }
 }

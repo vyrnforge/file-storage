@@ -9,6 +9,9 @@ import io.vyrnforge.filestorage.persistence.JdbcRegistry;
 import io.vyrnforge.filestorage.security.SecuredBackendAdmin.Authorized;
 import java.time.Clock;
 import java.util.Objects;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.Set;
 import javax.sql.DataSource;
 
@@ -26,7 +29,22 @@ public final class BackendAdministration {
         this.validator = Objects.requireNonNull(validator);
     }
 
-    public JdbcRegistry registry() { return registry; }
+    public List<JdbcRegistry.BackendView> backends(UUID after, int limit) { return registry.backends(after, limit); }
+    public Optional<JdbcRegistry.RevisionView> active(BackendId backend) { return registry.active(backend); }
+    public List<JdbcRegistry.RevisionView> history(BackendId backend, long before, int limit) {
+        return registry.history(backend, before, limit);
+    }
+    public List<JdbcRegistry.LocationView> locations(BackendId backend, UUID after, int limit) {
+        return registry.locations(backend, after, limit);
+    }
+
+    public LocationId registerLocation(Authorized context, BackendId backend, String bucket, String prefix) {
+        return registry.registerLocation(context.actor(), context.correlation(), backend, bucket, prefix);
+    }
+
+    public long reviseCredential(Authorized context, BackendId backend, long expected, CredentialRef reference) {
+        return registry.reviseCredential(context.actor(), context.correlation(), backend, expected, reference);
+    }
 
     public BackendId register(Authorized context, Target target, CredentialRef reference) {
         // Admission uses exact canonical deployment targets; no network work or caller approval assertions.
