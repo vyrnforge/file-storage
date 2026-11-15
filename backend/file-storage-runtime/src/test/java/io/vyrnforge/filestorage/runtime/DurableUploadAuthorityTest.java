@@ -290,6 +290,11 @@ class DurableUploadAuthorityTest {
                     assertArrayEquals(content,inspection.getObjectAsBytes(req -> req.bucket("fixture-bucket").key(objectKeyUnchecked())).asByteArray());
                     assertEquals(403,http.send(request,HttpResponse.BodyHandlers.ofString()).statusCode());
                     assertEquals(1,credentials.get()); assertEquals(1,credentialCloses.get()); assertEquals(1,adapterCloses.get());
+                    var verifier=verification(resolver);
+                    assertTrue(verifier.verify("user",TENANT,view.session(),sha256(content),null).integrityMatched());
+                    assertTrue(verifier.verify("user",TENANT,view.session(),sha256(content),null).integrityMatched());
+                    assertEquals(2,credentials.get());assertEquals(2,credentialCloses.get());assertEquals(2,adapterCloses.get());
+                    assertEquals(1,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL AND observed_size=5"));
                     assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
                     assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
                     assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session WHERE state='INITIATED'"));
@@ -419,6 +424,12 @@ class DurableUploadAuthorityTest {
                 }
                 assertArrayEquals(payload,fixture.bytes("fixture-oss",key));
                 assertEquals(1,opened.get());assertEquals(1,closed.get());assertEquals(1,adapterCloses.get());
+                var verifier=new UploadIntegrityVerification(ctx.getBean(SecuredFiles.class),
+                    new JdbcUploadVerification(new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5)),
+                    resolver,new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(15)),CLOCK);
+                assertTrue(verifier.verify("user",TENANT,session,sha256(payload),null).integrityMatched());
+                assertEquals(2,opened.get());assertEquals(2,closed.get());assertEquals(2,adapterCloses.get());
+                assertEquals(1,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL AND observed_size=32768"));
                 try(var files=Files.list(spool)){assertEquals(0,files.count());}
                 var metadata=HttpRequest.newBuilder(URI.create(base+"/v1/files/"+file)).header("Authorization","Bearer user")
                     .header("X-Tenant-Id",TENANT.value().toString()).GET().build();
@@ -434,5 +445,91 @@ class DurableUploadAuthorityTest {
                 assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
             }
         }
+    }
+
+    private static String sha256(byte[] bytes) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    private UploadIntegrityVerification verification(TransferProviderResolver resolver) {
+        return new UploadIntegrityVerification(secured(CLOCK),
+                new JdbcUploadVerification(new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5)),
+                resolver,new TransferLimits(1024*1024,2,1024,Duration.ofSeconds(15)),CLOCK);
+    }
+
+    /** Controlled provider outcomes for negative paths; real S3/OSS reads are exercised above. */
+    private static final class IntegrityFixture implements TransferProviderResolver {
+        volatile byte[] bytes;
+        volatile Long headSize;
+        volatile boolean failClose;
+        final AtomicInteger opens=new AtomicInteger(),closes=new AtomicInteger(),streams=new AtomicInteger();
+        @Override public Lease resolve(TransferInstruction instruction) {
+            opens.incrementAndGet();
+            return new Lease() {
+                @Override public StorageProvider provider() {
+                    return new StorageProvider() {
+                        @Override public Set<Capability> capabilities(){return Set.of();}
+                        @Override public Metadata head(Locator key,Call call){
+                            if(bytes==null)throw new StorageFailure(ErrorCode.NOT_FOUND);
+                            return new Metadata(headSize==null?bytes.length:headSize,null,"application/octet-stream");
+                        }
+                        @Override public java.io.InputStream get(Locator key,Call call){
+                            return new java.io.ByteArrayInputStream(bytes){
+                                @Override public void close(){streams.incrementAndGet();}
+                            };
+                        }
+                        @Override public Metadata put(Locator key,java.io.InputStream body,long size,Call call){throw new AssertionError("verification cannot write");}
+                        @Override public void delete(Locator key,Call call){throw new AssertionError("verification cannot delete");}
+                        @Override public Page list(LocationId location,String prefix,String cursor,int limit,Call call){throw new AssertionError("verification cannot list");}
+                    };
+                }
+                @Override public void close(){closes.incrementAndGet();if(failClose)throw new TransferFailure(TransferFailure.Code.UNAVAILABLE);}
+            };
+        }
+    }
+
+    @Test void verificationRequiresClaimAndRetriesMissingObjectWithoutReissuingUpload() throws Exception {
+        allow();var issued=issue();var fixture=new IntegrityFixture();var verifier=verification(fixture);
+        byte[] bytes="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);String digest=sha256(bytes);
+        assertThrows(RuntimeException.class,()->verifier.verify("user",TENANT,view.session(),digest,null));
+        assertEquals(0,fixture.opens.get());
+        authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        assertEquals(TransferFailure.Code.NOT_FOUND,assertThrows(TransferFailure.class,()->verifier.verify("user",TENANT,view.session(),digest,null)).code());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NULL"));
+        assertThrows(Failure.class,()->verifier.verify("user",TENANT,view.session(),"0".repeat(64),null));
+        assertThrows(RuntimeException.class,()->verifier.verify("other",TENANT,view.session(),digest,null));
+        fixture.bytes=bytes;
+        assertTrue(verifier.verify("user",TENANT,view.session(),digest,null).integrityMatched());
+        assertTrue(verification(fixture).verify("user",TENANT,view.session(),digest,null).integrityMatched());
+        assertEquals(2,fixture.opens.get());assertEquals(2,fixture.closes.get());assertEquals(1,fixture.streams.get());
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.transfer.upload.integrity-matched'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.upload_integrity_verification SET verified_at=NULL,observed_size=NULL,observed_sha256=NULL"));
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='UPLOAD_TRANSFER'");
+        assertThrows(RuntimeException.class,()->verifier.verify("user",TENANT,view.session(),digest,null));
+        assertEquals(2,fixture.opens.get());
+    }
+
+    @Test void mismatchedBytesAndFailedIntentNeverRecordMatchingEvidence() throws Exception {
+        allow();var issued=issue();authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        var fixture=new IntegrityFixture();var verifier=verification(fixture);
+        byte[] expected="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);String digest=sha256(expected);
+        fixture.bytes="wrong".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(TransferFailure.Code.INVALID,assertThrows(TransferFailure.class,()->verifier.verify("user",TENANT,view.session(),digest,null)).code());
+        fixture.bytes=new byte[4];fixture.headSize=5L;
+        assertEquals(TransferFailure.Code.INVALID,assertThrows(TransferFailure.class,()->verifier.verify("user",TENANT,view.session(),digest,null)).code());
+        fixture.bytes=new byte[6];
+        assertEquals(TransferFailure.Code.INVALID,assertThrows(TransferFailure.class,()->verifier.verify("user",TENANT,view.session(),digest,null)).code());
+        fixture.bytes=expected;fixture.headSize=null;fixture.failClose=true;
+        assertEquals(TransferFailure.Code.UNAVAILABLE,assertThrows(TransferFailure.class,()->verifier.verify("user",TENANT,view.session(),digest,null)).code());
+        fixture.failClose=false;
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_integrity_test CHECK (event_type <> 'file-storage.transfer.upload.integrity-matched') NOT VALID");
+        try {
+            assertThrows(RuntimeException.class,()->verifier.verify("user",TENANT,view.session(),digest,null));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL"));
+            assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.transfer.upload.integrity-matched'"));
+        } finally {sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_integrity_test");}
+        assertTrue(verifier.verify("user",TENANT,view.session(),digest,null).integrityMatched());
+        assertEquals(6,fixture.opens.get());assertEquals(6,fixture.closes.get());assertEquals(6,fixture.streams.get());
     }
 }
