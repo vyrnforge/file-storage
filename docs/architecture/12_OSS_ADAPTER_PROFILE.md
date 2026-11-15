@@ -34,3 +34,5 @@ mvn -f backend/pom.xml -pl file-storage-provider-oss -am verify \
 The suite writes only unique synthetic contract prefixes and deletes its own test objects. Inspect and reconcile residual objects after any interrupted test. Record sanitized results and exact revision; additionally verify actual target-specific RAM denial, TLS/egress, CRC, stream stalls, versioning constraints, logging/credential hygiene, optional capability matrix and any legacy CNAME requirement. No staging credentials or actual execution available in this increment.
 
 CI 43676179408 compiled native SDK code but failed test admission because the SDK returned absent Status for the empty unversioned configuration. Corrected to accept the documented successful empty response, reject enabled/suspended/unknown. No tests disabled.
+
+CI 43676317334: 11/12 OSS loopback tests passed; zero-byte upload failed because native SDK InputStream request did not satisfy the fixture's exact Content-Length requirement. Use SDK file-based PutObjectRequest with the already validated staged file; preserve strict wire test, conditional header, exact bytes and cleanup. Fresh CI required.

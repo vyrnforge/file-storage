@@ -156,18 +156,16 @@ public final class OssStorageProvider implements StorageProvider, AutoCloseable 
             // The request thread owns the staged file until the SDK really returns,
             // even if the caller's deadline expires. No early deletion or permit release.
             CompletableFuture<Metadata> future = submit(() -> {
-                try (var input = Files.newInputStream(staged)) {
+                try {
                     deadline.check();
                     var metadata = new ObjectMetadata();
                     metadata.setContentLength(expectedSize);
                     metadata.setContentType(MIME);
                     metadata.setHeader("x-oss-forbid-overwrite", "true");
-                    var request = new PutObjectRequest(location.bucket(), object.objectKey(), input);
-                    request.setMetadata(metadata);
+                    // File-based SDK request retains exact known length, including zero.
+                    var request = new PutObjectRequest(location.bucket(), object.objectKey(), staged.toFile(), metadata);
                     client.putObject(request);
                     return new Metadata(expectedSize, null, MIME);
-                } catch (IOException ex) {
-                    throw failure(ErrorCode.TRANSIENT);
                 } finally {
                     cleanup(staged);
                 }
