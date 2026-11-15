@@ -76,3 +76,5 @@ PR #70 accepted/merged a062618 (143 tests); isolated #30 complete, live exposure
 PR #71 accepted/merged 270fd09 (148 tests). [Durable upload transfer authorization](docs/architecture/21_DURABLE_UPLOAD_TRANSFER.md) — V5 digest-only handle and explicit upload grant in review.
 
 PR #72 accepted/merged 4880a42 (152 tests). [Registry-pinned provider transfer](docs/architecture/22_REGISTRY_PROVIDER_TRANSFER.md) — real PostgreSQL/MinIO gateway upload in review; no verified completion or live exposure.
+
+PR #73 accepted/merged 771ed70 (154 tests). [Native OSS and combined gateway](docs/architecture/23_OSS_COMBINED_GATEWAY.md) — isolated integration in review.
