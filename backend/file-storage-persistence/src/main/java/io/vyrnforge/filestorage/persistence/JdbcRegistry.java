@@ -165,6 +165,26 @@ public final class JdbcRegistry {
         });
     }
 
+    /** Latest registered revision per backend; active revision is read separately. */
+    public List<RevisionView> backends(UUID after, int limit) {
+        bound(limit);
+        return execute((c, events, audits) -> {
+            try (var ps = statement(c, """
+                    SELECT b.provider, r.config_revision, r.status, r.validated_revision, b.backend_id
+                    FROM fs.backend b JOIN LATERAL (
+                        SELECT config_revision, status, validated_revision FROM fs.backend_revision
+                        WHERE backend_id=b.backend_id ORDER BY config_revision DESC LIMIT 1
+                    ) r ON true
+                    WHERE (?::uuid IS NULL OR b.backend_id>?)
+                    ORDER BY b.backend_id LIMIT ?
+                    """, after, after, limit); var rs = ps.executeQuery()) {
+                List<RevisionView> result = new ArrayList<>();
+                while (rs.next()) result.add(view(new BackendId(rs.getObject(5, UUID.class)), rs));
+                return List.copyOf(result);
+            }
+        });
+    }
+
     /** Fresh committed state, never an in-memory active pointer cache. */
     public Optional<RevisionView> active(BackendId backend) {
         Objects.requireNonNull(backend);
