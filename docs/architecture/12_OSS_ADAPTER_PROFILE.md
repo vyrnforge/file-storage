@@ -15,3 +15,20 @@ Sanitized #14 inventory confirms legacy OSS exact key, forbid-overwrite, CNAME/p
 O01 shared ProviderContract against actual native SDK loopback: exact bytes/size/zero, conditional overwrite/concurrency, list cursor scope, missing/delete/version/optional behavior.
 O02 native V4 header, forbidden overwrite and content length observed on wire; versioning/permission errors and timeout neutral; stream expiry, spool cleanup, namespace checks.
 O03 actual staging evidence and #14 legacy parity; pending. No deployment or later work authorized.
+
+
+## Explicit staging acceptance (not executed)
+`OssStagingIT` reuses the same contract against actual OSS via the production client factory. It is deliberately outside default Surefire discovery and must be selected explicitly; no skipped-test claim. Use only two dedicated disposable, never-versioned buckets with approved private TLS endpoint, region and short-lived STS credentials limited to the test prefix and required bucket versioning/list permissions. No bucket creation/deletion or production data. Run locally in an approved secret-injection environment, not by adding credentials to public CI or chat.
+
+```sh
+# Inject the following variables securely outside source control:
+# FS_OSS_STAGING_ENDPOINT, FS_OSS_STAGING_REGION
+# FS_OSS_STAGING_BUCKET_A, FS_OSS_STAGING_BUCKET_B
+# FS_OSS_STAGING_ACCESS_KEY_ID, FS_OSS_STAGING_ACCESS_KEY_SECRET
+# FS_OSS_STAGING_SECURITY_TOKEN
+export FS_OSS_STAGING_CONFIRM=DEDICATED_DISPOSABLE_OSS_BUCKETS
+mvn -f backend/pom.xml -pl file-storage-provider-oss -am verify \
+    -Dtest=OssStagingIT -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+The suite writes only unique synthetic contract prefixes and deletes its own test objects. Inspect and reconcile residual objects after any interrupted test. Record sanitized results and exact revision; additionally verify actual target-specific RAM denial, TLS/egress, CRC, stream stalls, versioning constraints, logging/credential hygiene, optional capability matrix and any legacy CNAME requirement. No staging credentials or actual execution available in this increment.
