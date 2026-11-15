@@ -9,6 +9,11 @@
     <artifactId>file-storage-persistence</artifactId>
     <dependencies>
         <dependency>
+            <groupId>io.vyrnforge.filestorage</groupId>
+            <artifactId>file-storage-security</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>io.github.vyrnforge</groupId>
             <artifactId>platform-kernel-jdbc</artifactId>
             <version>${kernel.version}</version>

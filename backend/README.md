@@ -20,3 +20,6 @@ Kernel JDBC 0.3.2 is used for initiation leases and atomic completion on the sam
 
 ## FS-120B2A
 Internal JdbcConfiguration reuses Kernel JDBC transactions for backend revision activation and policy publication. Service V2 migration seals historical policies and guards immutable revision payload; no production migration. Integration tests use real disposable PostgreSQL, including V1 upgrade and competing writers.
+
+## FS-120B2B
+JdbcGrants implements the existing SecuredFiles.Grants port using fs.file_grant. One-way persistence-to-security module dependency; no new external dependency or migration. Fresh committed reads, exact caller scope, bounded results and fail-closed errors. See [grant contract](../docs/security/FS120B2B_DURABLE_GRANTS.md).

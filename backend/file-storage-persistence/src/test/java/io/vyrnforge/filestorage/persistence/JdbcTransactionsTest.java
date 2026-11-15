@@ -3,6 +3,9 @@ package io.vyrnforge.filestorage.persistence;
 import io.vyrnforge.filestorage.application.FileApplication;
 import io.vyrnforge.filestorage.application.FileApplication.*;
 import io.vyrnforge.filestorage.domain.StorageModel.*;
+import io.vyrnforge.filestorage.security.SecuredFiles;
+import io.vyrnforge.filestorage.security.SecuredFiles.*;
+import io.vyrnforge.platform.kernel.context.*;
 import java.sql.*;
 import java.time.*;
 import java.util.*;
@@ -529,6 +532,186 @@ class JdbcTransactionsTest {
         assertEquals("23514", assertThrows(SQLException.class, () -> sql(
                 "UPDATE fs.active_policy SET policy_revision=1")).getSQLState());
         assertEquals(3, config.publishPolicy(SCOPE, 2, List.of(rule(OL, 0, true))));
+    }
+
+    private static final Caller ITSM = new Caller(A, "actor-a", "itsm");
+    private static final Caller SAME_TENANT = new Caller(A, "actor-b", "asset");
+
+    private static JdbcGrants grants() {
+        return new JdbcGrants(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), 100, 5);
+    }
+
+    private static SecuredFiles secured(Grants source) {
+        String issuer = "https://iam.example.test";
+        String audience = "file-storage-test";
+        Map<String, Caller> callers = Map.of("alice", ALICE, "bob", SAME_TENANT, "itsm", ITSM,
+                "other-tenant", BOB);
+        return new SecuredFiles(new Trust(issuer, audience),
+                bearer -> {
+                    if (!callers.containsKey(bearer)) throw new IllegalArgumentException("invalid synthetic token");
+                    return new VerifiedAccess(issuer, bearer, Set.of(audience), TokenKind.ACCESS,
+                            NOW.minusSeconds(1), NOW.plusSeconds(300), NOW);
+                },
+                (iss, subject, aud) -> Optional.ofNullable(callers.get(subject)).map(c ->
+                        new Binding(new ActorReference(ActorType.USER, c.actor(), null, null),
+                                c.tenant(), c.consumer(), Set.of(Action.values()))),
+                (actor, tenant) -> true,
+                (tenant, module) -> new ModuleEntitlement(tenant, module, true, NOW),
+                source, new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10)),
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(5));
+    }
+
+    private static UUID grant(Caller caller, Action action, String purpose, GrantScope scope, FileId file,
+                              Instant before, Instant expires, boolean revoked) throws SQLException {
+        UUID id = UUID.randomUUID();
+        sql("""
+                INSERT INTO fs.file_grant (grant_id, tenant_id, actor, consumer, purpose, action, scope,
+                    file_id, not_before, expires_at, revoked)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, id, caller.tenant().value(), caller.actor(), caller.consumer(), purpose,
+                action.name(), scope.name(), file == null ? null : file.value(),
+                before.atOffset(ZoneOffset.UTC), expires.atOffset(ZoneOffset.UTC), revoked);
+        return id;
+    }
+
+    private static UUID grant(Caller caller, Action action, GrantScope scope, FileId file) throws SQLException {
+        return grant(caller, action, "attachment", scope, file, NOW.minusSeconds(1), NOW.plusSeconds(300), false);
+    }
+
+    private static View securedInitiation(SecuredFiles facade, String key) throws SQLException {
+        grant(ALICE, Action.INITIATE, GrantScope.INITIATE_PURPOSE, null);
+        return facade.initiate("alice", A, null, command(key)).value();
+    }
+
+    @Test
+    void durableGrantsAuthorizeOnlyExactActorAppPurposeAndAction() throws SQLException {
+        var facade = secured(grants());
+        assertEquals(SecurityCode.ACCESS_DENIED, assertThrows(SecurityFailure.class,
+                () -> facade.initiate("alice", A, null, command("denied"))).code());
+        assertEquals(0, count("file"));
+        var first = securedInitiation(facade, "secured");
+        var file = new FileId(first.file().fileId());
+        grant(ALICE, Action.READ_METADATA, GrantScope.OWNED_FILE, null);
+        grant(SAME_TENANT, Action.READ_METADATA, GrantScope.OWNED_FILE, null);
+        grant(ITSM, Action.READ_METADATA, GrantScope.OWNED_FILE, null);
+        grant(BOB, Action.READ_METADATA, GrantScope.OWNED_FILE, null);
+        assertEquals(first.file(), facade.metadata("alice", A, null, file).value().file());
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                () -> facade.metadata("bob", A, null, file)).code());
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                () -> facade.metadata("itsm", A, null, file)).code());
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                () -> facade.metadata("other-tenant", B, null, file)).code());
+        assertEquals(SecurityCode.ACCESS_DENIED, assertThrows(SecurityFailure.class,
+                () -> facade.metadata("alice", B, null, file)).code());
+        grant(ITSM, Action.READ_METADATA, "other-purpose", GrantScope.EXACT_FILE, file,
+                NOW.minusSeconds(1), NOW.plusSeconds(60), false);
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                () -> facade.metadata("itsm", A, null, file)).code());
+        grant(ITSM, Action.READ_METADATA, GrantScope.EXACT_FILE, file);
+        assertEquals(first.file(), facade.metadata("itsm", A, null, file).value().file());
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                () -> facade.session("itsm", A, null, first.session())).code());
+        grant(ITSM, Action.READ_SESSION, GrantScope.EXACT_FILE, file);
+        assertEquals(first.session(), facade.session("itsm", A, null, first.session()).value().session());
+        assertEquals(1, count("file"));
+    }
+
+    @Test
+    void revokedGrantDeniesReplayWithoutRecreatingAggregate() throws SQLException {
+        var facade = secured(grants());
+        var first = securedInitiation(facade, "replay-grant");
+        UUID read = grant(ALICE, Action.READ_SESSION, GrantScope.OWNED_FILE, null);
+        assertEquals(first, facade.initiate("alice", A, null, command("replay-grant")).value());
+        sql("UPDATE fs.file_grant SET revoked=true WHERE grant_id=?", read);
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                () -> facade.session("alice", A, null, first.session())).code());
+        assertEquals(Code.DENIED, assertThrows(Failure.class,
+                () -> facade.initiate("alice", A, null, command("replay-grant"))).code());
+        assertEquals(1, count("file"));
+        assertEquals(1, count("initiation_request"));
+        assertEquals(1, scalar("SELECT count(*) FROM fs_kernel.platform_idempotency WHERE status='COMPLETED'"));
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='INITIATE'");
+        assertEquals(SecurityCode.ACCESS_DENIED, assertThrows(SecurityFailure.class,
+                () -> facade.initiate("alice", A, null, command("replay-grant"))).code());
+    }
+
+    @Test
+    void grantValidityUsesInclusiveStartExclusiveEnd() throws SQLException {
+        Instant boundary = NOW.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        grant(ALICE, Action.INITIATE, "attachment", GrantScope.INITIATE_PURPOSE, null,
+                boundary.minusSeconds(1), boundary, false);
+        grant(ALICE, Action.INITIATE, "attachment", GrantScope.INITIATE_PURPOSE, null,
+                boundary.plusNanos(1000), boundary.plusSeconds(1), false);
+        grant(ALICE, Action.INITIATE, "attachment", GrantScope.INITIATE_PURPOSE, null,
+                boundary.minusSeconds(1), boundary.plusSeconds(1), true);
+        assertTrue(grants().current(ALICE).isEmpty());
+        grant(ALICE, Action.INITIATE, "attachment", GrantScope.INITIATE_PURPOSE, null,
+                boundary, boundary.plusNanos(1000), false);
+        assertEquals(1, grants().current(ALICE).size());
+        assertNotNull(secured(grants()).initiate("alice", A, null, command("boundary")));
+    }
+
+    @Test
+    void grantReadsObserveCommittedRevocationOutsideMetadataSnapshot() throws SQLException {
+        UUID grantId = grant(ALICE, Action.INITIATE, GrantScope.INITIATE_PURPOSE, null);
+        var source = grants();
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
+        jdbc.execute(unit -> {
+            assertTrue(unit.configuration(SCOPE).isPresent());
+            assertEquals(1, source.current(ALICE).size());
+            try (var c = dataSource.getConnection(); var ps = c.prepareStatement(
+                    "UPDATE fs.file_grant SET revoked=true WHERE grant_id=?")) {
+                c.setAutoCommit(false);
+                ps.setObject(1, grantId);
+                ps.executeUpdate();
+                assertEquals(1, source.current(ALICE).size());
+                c.commit();
+            } catch (SQLException ex) {
+                throw new AssertionError(ex);
+            }
+            assertTrue(source.current(ALICE).isEmpty());
+            return null;
+        });
+    }
+
+    @Test
+    void grantQueryFailureAndOverflowFailClosed() throws SQLException {
+        var facade = secured(grants());
+        var first = securedInitiation(facade, "outage");
+        var file = new FileId(first.file().fileId());
+        grant(ALICE, Action.READ_METADATA, GrantScope.OWNED_FILE, null);
+        var bounded = new JdbcGrants(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), 1, 5);
+        assertEquals("GRANT_SOURCE_UNAVAILABLE", assertThrows(JdbcGrants.GrantSourceUnavailable.class,
+                () -> bounded.current(ALICE)).getMessage());
+        assertEquals(SecurityCode.ACCESS_DENIED, assertThrows(SecurityFailure.class,
+                () -> secured(bounded).initiate("alice", A, null, command("overflow"))).code());
+        sql("ALTER TABLE fs.file_grant RENAME TO unavailable_grant");
+        try {
+            assertEquals("GRANT_SOURCE_UNAVAILABLE", assertThrows(JdbcGrants.GrantSourceUnavailable.class,
+                    () -> grants().current(ALICE)).getMessage());
+            assertEquals(SecurityCode.ACCESS_DENIED, assertThrows(SecurityFailure.class,
+                    () -> facade.initiate("alice", A, null, command("outage-new"))).code());
+            assertEquals(Code.NOT_FOUND, assertThrows(Failure.class,
+                    () -> facade.metadata("alice", A, null, file)).code());
+        } finally {
+            sql("ALTER TABLE fs.unavailable_grant RENAME TO file_grant");
+        }
+        assertEquals(1, count("file"));
+        assertEquals(first.file(), facade.metadata("alice", A, null, file).value().file());
+    }
+
+    @Test
+    void grantQueryIsExactAndParameterized() throws SQLException {
+        grant(ALICE, Action.INITIATE, GrantScope.INITIATE_PURPOSE, null);
+        grant(SAME_TENANT, Action.READ_METADATA, GrantScope.OWNED_FILE, null);
+        grant(ITSM, Action.READ_METADATA, GrantScope.OWNED_FILE, null);
+        grant(BOB, Action.READ_METADATA, GrantScope.OWNED_FILE, null);
+        assertEquals(1, grants().current(ALICE).size());
+        assertEquals(Action.INITIATE, grants().current(ALICE).getFirst().action());
+        assertTrue(grants().current(new Caller(A, "actor-a' OR '1'='1", "asset")).isEmpty());
+        assertTrue(grants().current(new Caller(A, "actor-a", "asset' OR '1'='1")).isEmpty());
+        assertTrue(grants().current(new Caller(B, "actor-a", "asset")).isEmpty());
     }
 
     @Test

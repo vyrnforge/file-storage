@@ -21,3 +21,6 @@ C06 actual application policy switch and repeatable-read snapshot, durable repla
 
 ## Handoff
 #21 durable grants, #22 atomic audit/event intents, #23 recovery; #27/#28 real registry, validation, retirement, #29 control plane and #30 authorized API. No public route or production use until those and live IAM gates. Local Maven/Docker verification remains outstanding. No new dependency or POM changes.
+
+## Accepted implementation evidence
+Owner reviewed and authorized squash merge of PR #52 at 32b387cd1b3ee2113832e4eff0ab224da53926d0. [CI 43668967693](https://github.com/vyrnforge/file-storage/actions/runs/43668967693) passed 51 tests, 20 real PostgreSQL 17.12; V1-to-V2 upgrade, concurrency, rollback, immutability and pinned sessions. Initial synthetic trigger delimiter error corrected. Issue #20 accepted/closed; no production migration.
