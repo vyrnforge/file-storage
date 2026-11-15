@@ -59,23 +59,34 @@ public final class PrivateTransferGateway {
                 // Do not advertise a zero-byte success before checking the stream.
                 if (instruction.size() > 0) length.accept(instruction.size());
                 byte[] buffer = new byte[limits.bufferBytes()];
+                var digest = instruction.sha256() == null ? null : sha256();
                 long remaining = instruction.size();
                 while (remaining > 0) {
                     deadline.check();
                     int count = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
                     if (count <= 0) throw new TransferFailure(Code.UNAVAILABLE);
-                    // Check for extra bytes before releasing the final chunk.
+                    if (digest != null) digest.update(buffer, 0, count);
+                    // Check for extra bytes and digest before releasing the final chunk.
                     if (count == remaining && input.read() != -1) throw new TransferFailure(Code.UNAVAILABLE);
+                    if (count == remaining && digest != null && !instruction.sha256().equals(java.util.HexFormat.of().formatHex(digest.digest())))
+                        throw new TransferFailure(Code.UNAVAILABLE);
                     output.write(buffer, 0, count);
                     remaining -= count;
                 }
                 if (instruction.size() == 0) {
                     if (input.read() != -1) throw new TransferFailure(Code.UNAVAILABLE);
+                    if (digest != null && !instruction.sha256().equals(java.util.HexFormat.of().formatHex(digest.digest())))
+                        throw new TransferFailure(Code.UNAVAILABLE);
                     length.accept(0);
                 }
                 deadline.check();
             }
         });
+    }
+
+    private static java.security.MessageDigest sha256() {
+        try { return java.security.MessageDigest.getInstance("SHA-256"); }
+        catch (java.security.NoSuchAlgorithmException ex) { throw new TransferFailure(Code.UNAVAILABLE); }
     }
 
     private void execute(String bearer, String handle, Action action, Work work) {
