@@ -101,3 +101,5 @@ PR #68 accepted and merged 4c61e16; 137 verified tests. Owner directed dependenc
 PR #69 accepted/merged 28f66a0; 139 verified tests. #28 latest-only validation/activation guard complete, concrete evidence still gated. #30 isolated runtime composition/readiness in review; #57 next candidate after acceptance, live integration separately gated.
 
 PR #70 accepted/merged a062618; 143 tests. Isolated #30 complete; owner authorized #57 isolated gateway foundation. First slice explicit authority/resolver/limits and transfer-only HTTP roles, then durable claim and real adapter integration; actual IAM, provider evidence and production limits remain gated. #31/#35 separately scoped.
+
+PR #71 accepted/merged 270fd09; 148 verified tests. #57 continuation: V5 durable initial upload handle and explicit permission, one attempt per session, no automatic reissue; then registry provider resolution/real adapter gateway tests. Download availability #31/#35 and production decisions separately gated.
