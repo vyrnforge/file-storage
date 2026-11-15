@@ -1246,6 +1246,11 @@ class JdbcTransactionsTest {
         var second = registry();
         assertEquals(List.of(new JdbcRegistry.LocationView(location, s3)), second.locations(s3, null, 10));
         assertEquals(List.of(new JdbcRegistry.LocationView(other, oss)), second.locations(oss, null, 10));
+        var registered = second.backends(null, 100);
+        assertEquals(4, registered.size());
+        assertTrue(registered.stream().anyMatch(v -> v.backend().equals(s3) && v.status() == BackendStatus.DRAFT));
+        assertEquals(registered.subList(1, 4), second.backends(registered.getFirst().backend().value(), 100));
+        assertEquals(Code.INVALID, assertThrows(Failure.class, () -> second.backends(null, 101)).code());
         assertTrue(second.active(s3).isEmpty());
         assertEquals(BackendStatus.DRAFT, second.history(s3, 0, 1).getFirst().status());
         assertEquals(Provider.OSS, second.history(oss, 0, 1).getFirst().provider());
