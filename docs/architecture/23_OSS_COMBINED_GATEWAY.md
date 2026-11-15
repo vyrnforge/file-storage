@@ -1,0 +1,11 @@
+# FS-300G — Native OSS gateway and combined runtime (#57)
+
+Owner approved PR #73 and authorized continuation. Baseline 771ed70c2881e7ae0cba033f19dd5f20b8e86443; CI 43700750262 passed 154 tests after correcting S3 test-classpath SLF4J conflict.
+
+## Isolated integration
+Extract the existing native OSS SDK loopback protocol fixture into reusable test-only OssWireFixture. Existing adapter contract tests reuse it; runtime test scope consumes only the fixture test JAR and native adapter. SLF4J and commons-logging transitive exclusions preserve Boot logging. No SDK imports in runtime main, no production runtime dependency, no schema change. Fixture checks V4 authorization header shape and synthetic credential identity, exact length and forbid-overwrite header; it does not verify cryptographic signatures, CRC, actual provider-side concurrency or TLS. It is not Alibaba OSS staging.
+
+Combined development integration uses actual PostgreSQL V1–V5, ApiRuntimeConfiguration and TransferHttpConfiguration on one embedded server, same SecuredFiles bean for metadata and durable claim, distinct admin authorities, explicit local upload grant and registry resolver. Add OSS backend and publish new policy revision; initiate new logical file via metadata HTTP, issue internal durable handle, stream 32 KiB via transfer HTTP into actual native OSS SDK adapter against isolated loopback fixture. Verify bytes, replay denial, exact OSS pin, lease/spool cleanup, metadata redaction, backend admin access, pending state and denied download. Payload exceeds metadata 16 KiB bound; bytes use separate transfer route, never metadata JSON. Combined readiness remains 503 until worker/transfer readiness production composition is implemented. Synthetic identity, validation report, credential and explicit fixture endpoint mapping only.
+
+## Evidence and remaining scope
+Exact-head CI required; one new integrated test (155 expected), existing adapter contracts unchanged in semantics. After acceptance, isolated #57 foundation can be recorded as accepted with live authorization, provider validation, independent process deployment/load/readiness and production limits still gated. #31 upload verification/completion/reconciliation, #32 scanner policy and #35 download availability remain separate. No real OSS staging, live IAM, production deployment or migration.

@@ -12,6 +12,39 @@
     <dependencies>
         <dependency>
             <groupId>io.vyrnforge.filestorage</groupId>
+            <artifactId>file-storage-provider-oss</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.vyrnforge.filestorage</groupId>
+            <artifactId>file-storage-provider-oss</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.vyrnforge.filestorage</groupId>
             <artifactId>file-storage-provider-s3</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>

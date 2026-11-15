@@ -86,3 +86,5 @@ Alternatives reviewed: in-process streaming (combined profile only), direct prov
 2026-11-15: PR #71 owner reviewed and merged 270fd09 (148 tests). #57 proposed first-attempt durable upload policy: explicit UPLOAD_TRANSFER grant, one hash-only random handle/session, atomic claim + required intents, no reissue before reconciliation decision; download claims denied pending verified version model. External authority revocation check-time race acknowledged; no production settings approved.
 
 2026-11-15: PR #72 owner approved/merged 4880a42 (152 tests). #57 proposed exact canonical target/provider factory admission before credential lookup, resolver-owned adapter/credential leases; no latest fallback. Test-only S3 fixture mapping to disposable MinIO, no production routing or limits decision.
+
+2026-11-15: Owner approved PR #73 (771ed70, 154 tests) and continued #57. Reuse native OSS wire fixture as test-only JAR, combined metadata/transfer composition shares secured facade, retain pending state and unready worker profile. No new production policy.

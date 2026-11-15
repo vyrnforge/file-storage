@@ -105,3 +105,5 @@ PR #70 accepted/merged a062618; 143 tests. Isolated #30 complete; owner authoriz
 PR #71 accepted/merged 270fd09; 148 verified tests. #57 continuation: V5 durable initial upload handle and explicit permission, one attempt per session, no automatic reissue; then registry provider resolution/real adapter gateway tests. Download availability #31/#35 and production decisions separately gated.
 
 PR #72 accepted/merged 4880a42 (152 verified tests). #57 continuation exact registry pin/adapter leases and actual MinIO gateway upload; then native OSS gateway fixture and #31 verified completion/reconciliation, #35 download. Live authority/provider/production gates deferred.
+
+PR #73 accepted/merged 771ed70 (154 tests). #57 isolated native OSS gateway and combined runtime integration next, then #31 verification/completion; actual OSS, IAM, limits and deployment gates deferred.
