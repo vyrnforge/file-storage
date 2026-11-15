@@ -493,9 +493,16 @@ class DurableUploadAuthorityTest {
         byte[] bytes="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);String digest=sha256(bytes);
         assertThrows(RuntimeException.class,()->verifier.verify("user",TENANT,view.session(),digest,null));
         assertEquals(0,fixture.opens.get());
+        assertThrows(SQLException.class,()->sql("INSERT INTO fs.upload_integrity_verification(session_id,expected_sha256,requested_at) VALUES (?,?,?)",
+                view.session().value(),digest,NOW.atOffset(ZoneOffset.UTC)));
         authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        assertThrows(SQLException.class,()->sql("""
+                INSERT INTO fs.upload_integrity_verification(session_id,expected_sha256,requested_at,verified_at,observed_size,observed_sha256)
+                VALUES (?,?,?,?,?,?)
+                """,view.session().value(),digest,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC),5,digest));
         assertEquals(TransferFailure.Code.NOT_FOUND,assertThrows(TransferFailure.class,()->verifier.verify("user",TENANT,view.session(),digest,null)).code());
         assertEquals(1,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NULL"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.upload_integrity_verification SET verified_at=?,observed_size=6,observed_sha256=expected_sha256",NOW.atOffset(ZoneOffset.UTC)));
         assertThrows(Failure.class,()->verifier.verify("user",TENANT,view.session(),"0".repeat(64),null));
         assertThrows(RuntimeException.class,()->verifier.verify("other",TENANT,view.session(),digest,null));
         fixture.bytes=bytes;

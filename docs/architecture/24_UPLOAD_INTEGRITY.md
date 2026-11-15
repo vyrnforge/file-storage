@@ -11,3 +11,5 @@ Unversioned create-only storage profile and controlled service writes assumed. O
 
 ## Verification
 Expand both integrated MinIO and native OSS wire fixture tests to read actual uploaded bytes via registry-pinned verifier, prove matching persisted evidence, repeat/no duplicate provider read (MinIO), leave version PENDING. Two additional PostgreSQL tests: require claim, missing-object retry and immutable expected digest, wrong identity/revocation and idempotency; short/long/wrong bytes, lease-close failure and required-intent rollback never record match, retry after failure. V6 migration repeatability assertion. Exact-head CI required, expected 157 tests. No real scanner or production schema applied.
+
+Database guard refinement: initial insert must be an unverified request for a claimed session; transition requires exact claimed expected size, immutable first digest and monotonic matching evidence. Regression rejects unclaimed insert, direct preverified insert, wrong-size update and resetting evidence. Trusted verifier still owns byte measurement, not a DB-computed checksum. Privileged database access remains a deployment gate.
