@@ -35,3 +35,5 @@ FS-100B PR #6 merged at 0f08b3054c6835c8f40913c38ca09c8d359d6ce1; final hosted C
 FS-110A hosted CI 43611269131 passed 25 tests, four-module Maven reactor, checksum and dependency checks. PR #7 open; local verification and FS-110B live verifier/authority integration pending. Wyrmgate source shows aud=clientId, not a separate storage resource audience; no arbitrary client login token accepted by design.
 
 2026-11-15: PR #7 merged at 69d0ef978a5f04c283331851c00368632639de5c; final CI 43611373559 successful. Owner directed next. FS-110B verifier slice uses Nimbus JOSE+JWT and explicit trusted JWKS snapshots, tests real signed synthetic access tokens. Live IAM registration/key transport/authority store remain unconfigured. See [FS-110B](../security/FS110B_JWT_VERIFIER.md). FS-120 not started.
+
+FS-110B verifier implementation hosted CI 43665624103 passed 31 tests (including 6 real-signature test methods), no failures/errors/skips. PR #9 review pending; no live Wyrmgate registration, retrieval, binding or HTTP runtime. Local toolchain/DNS gap reconfirmed.

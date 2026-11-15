@@ -18,3 +18,6 @@ J01 valid real RSA signed synthetic access token accepted; opaque sub, null auth
 
 ## Remaining FS-110B gate
 Owner/IAM operator must confirm intended client registration and live issuer/JWKS, approved key transport/cache and verifier wiring, authoritative binding/membership/entitlement/grant source and revocation behavior. Actual IAM-issued token and real transport tests, runtime HTTP route/error mapping, machine/delegation contract and staging acceptance remain unimplemented. FS-120 durable persistence not authorized; no public endpoint/deploy. Local full build remains pending. No external repository modifications or registration attempted.
+
+## Hosted verification
+[CI 43665624103](https://github.com/vyrnforge/file-storage/actions/runs/43665624103) at 1526242d5191216b527c49f7c6390d2bcf68ceb1 succeeded. Actual job logs show 31 tests (8 domain, 2 SPI, 8 application, 7 security facade, 6 JWT verifier), zero failures/errors/skips; four-module Maven BUILD SUCCESS, Kernel SHA-256, dependency boundaries and hygiene passed. J01–J07 hosted acceptance passed with generated RSA keys and trusted synthetic authority snapshots; not a live IAM test. Local Java 21 present but Maven absent and GitHub DNS unresolved, rechecked 2026-11-15. PR #9 unmerged. Live FS-110B gate remains open; no waiver or FS-120 authorization.
