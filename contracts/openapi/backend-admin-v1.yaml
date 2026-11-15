@@ -1,0 +1,926 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "VyrnForge File Storage — Backend Administration",
+    "version": "0.1.0-draft",
+    "description": "Isolated platform-level administrative contract. No tenant header. LIST/REGISTER require global authority; others exact backend. Validation uses server-owned target policy and validator; request cannot assert validation. No published or live API."
+  },
+  "security": [
+    {
+      "bearer": []
+    }
+  ],
+  "paths": {
+    "/v1/admin/backends": {
+      "get": {
+        "operationId": "listBackends",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/After"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "$ref": "#/components/schemas/Backend"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "registerBackend",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Register"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Registered"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/backends/{backendId}/active": {
+      "get": {
+        "operationId": "activeBackend",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/Backend"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Revision"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/backends/{backendId}/revisions": {
+      "get": {
+        "operationId": "backendHistory",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/Backend"
+          },
+          {
+            "$ref": "#/components/parameters/Before"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "$ref": "#/components/schemas/Revision"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/backends/{backendId}/locations": {
+      "get": {
+        "operationId": "listLocations",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/Backend"
+          },
+          {
+            "$ref": "#/components/parameters/After"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "maxItems": 100,
+                  "items": {
+                    "$ref": "#/components/schemas/Location"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "registerLocation",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/Backend"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Location"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/backends/{backendId}/credentials": {
+      "post": {
+        "operationId": "reviseCredential",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/Backend"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/backends/{backendId}/validate": {
+      "post": {
+        "operationId": "validateBackend",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/Backend"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/backends/{backendId}/drain": {
+      "post": {
+        "operationId": "drainBackend",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/Backend"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/backends/{backendId}/retire": {
+      "post": {
+        "operationId": "retireBackend",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/Backend"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/admin/backends/{backendId}/activate": {
+      "post": {
+        "operationId": "activateBackend",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Correlation"
+          },
+          {
+            "$ref": "#/components/parameters/Backend"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logical result; no physical settings or credential references.",
+            "headers": {
+              "X-Correlation-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Request-Id": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "parameters": {
+      "Correlation": {
+        "name": "X-Correlation-Id",
+        "in": "header",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "Backend": {
+        "name": "backendId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "After": {
+        "name": "after",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "Before": {
+        "name": "before",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 0,
+          "format": "int64",
+          "default": 0
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      }
+    },
+    "schemas": {
+      "Register": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "endpoint",
+          "region",
+          "addressing",
+          "credentialRef"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "S3",
+              "OSS"
+            ]
+          },
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "format": "uri",
+            "writeOnly": true
+          },
+          "region": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "addressing": {
+            "type": "string",
+            "enum": [
+              "AUTO",
+              "PATH",
+              "VIRTUAL_HOST",
+              "CNAME"
+            ]
+          },
+          "credentialRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^ref:[A-Za-z0-9/_:.-]+$",
+            "writeOnly": true
+          }
+        }
+      },
+      "LocationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bucket",
+          "prefix"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 63,
+            "writeOnly": true
+          },
+          "prefix": {
+            "type": "string",
+            "maxLength": 512,
+            "writeOnly": true
+          }
+        }
+      },
+      "CredentialInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "credentialRef"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "format": "int64"
+          },
+          "credentialRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^ref:[A-Za-z0-9/_:.-]+$",
+            "writeOnly": true
+          }
+        }
+      },
+      "RevisionInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "format": "int64"
+          }
+        }
+      },
+      "ActivateInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "candidateRevision"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "candidateRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "format": "int64"
+          }
+        }
+      },
+      "Registered": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backendId",
+          "revision"
+        ],
+        "properties": {
+          "backendId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "format": "int64"
+          }
+        }
+      },
+      "Location": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "locationId",
+          "backendId"
+        ],
+        "properties": {
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "backendId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "Backend": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backendId",
+          "provider",
+          "latestRevision",
+          "activeRevision"
+        ],
+        "properties": {
+          "backendId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "S3",
+              "OSS"
+            ]
+          },
+          "latestRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "format": "int64"
+          },
+          "activeRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "format": "int64"
+          }
+        }
+      },
+      "Revision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "backendId",
+          "provider",
+          "revision",
+          "status",
+          "validated"
+        ],
+        "properties": {
+          "backendId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "S3",
+              "OSS"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "ACTIVE",
+              "DRAINING",
+              "RETIRED"
+            ]
+          },
+          "validated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Changed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "format": "int64"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "correlationId",
+          "requestId"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "INVALID",
+              "AUTHENTICATION_FAILED",
+              "ACCESS_DENIED",
+              "DENIED",
+              "NOT_FOUND",
+              "CONFLICT",
+              "IN_PROGRESS",
+              "NO_PLACEMENT",
+              "UNAVAILABLE",
+              "PAYLOAD_TOO_LARGE",
+              "UNSUPPORTED_MEDIA",
+              "NOT_ACCEPTABLE",
+              "METHOD_NOT_ALLOWED"
+            ]
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Neutral 400/401/403/404/405/406/409/413/415/503; no private provider details.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

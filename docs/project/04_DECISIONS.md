@@ -72,3 +72,5 @@ Alternatives reviewed: in-process streaming (combined profile only), direct prov
 2026-11-15: Owner accepted current foundation, requested cleaner structure later (#65), then authorized continuation. PR #64 merged 6ed88c1. Isolated runtime uses 16 KiB metadata admission ceiling and role-specific explicit HTTP wiring; not production transfer limits or ADR approval. Preserve v1 response shape and security boundaries.
 
 2026-11-15: Owner accepted PR #66 and authorized next #30 slice. Merged 1518986. Separate administrative binding and action permission from consumer grants; require existing location authority as well. Draft policy admin HTTP contract only, no production role/policy approval or exposure.
+
+2026-11-15: Owner accepted PR #67 and authorized next #30 slice; merged c08dd44. Backend admin proposed explicit tenantless platform permissions, exact backend action scope and global LIST/REGISTER; tenant policy admin is not platform admin. Exact server-approved targets and trusted validator required; no production role or provider policy approval inferred.

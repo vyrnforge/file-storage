@@ -24,3 +24,5 @@ Concrete provider validation, approved network/credential authority (#16), actua
 
 ## Verification
 Prior drain slice CI 43681632900 succeeded. Added six PostgreSQL tests for approved endpoint/exact complete validation report, concurrent location change and stale evidence, retirement success and active policy blocker, file/session/claimed job blocker after policy switch, repeatable-read stale initiation fencing, and required retirement intent rollback. Updated migration re-run assertion to include V4. New exact-head CI required; local Java 21 available but Maven/Docker/PostgreSQL client unavailable. Synthetic validation is not provider compatibility or production proof.
+
+[FS-300A isolated backend HTTP](18_BACKEND_ADMIN_HTTP.md) composes lifecycle commands with trusted server target policy/validator and platform action checks. Synthetic HTTP+DB tests only; #28 concrete evidence/lifetime and superseded draft semantics remain review gates.

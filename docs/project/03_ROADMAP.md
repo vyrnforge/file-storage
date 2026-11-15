@@ -93,3 +93,5 @@ FS-220 #29 internal policy accepted and merged PR #63 (1d05534), 121 tests. #30 
 FS-300A foundation accepted/merged PR #64 (6ed88c1), 125 verified tests. Owner authorized isolated HTTP boundary refinement under #30; #65 engineering quality tracks incremental cleanup and proposed dedicated review before console expansion. #57 and production gates remain separate.
 
 FS-300A HTTP refinement accepted/merged PR #66 (1518986), 129 verified tests. Owner authorized #30 isolated policy administration HTTP slice; #65 incremental cleanup remains active, actual IAM and #57 separately gated.
+
+FS-300A policy administration accepted/merged PR #67 (c08dd44), 133 verified tests. Owner authorized #30 backend admin HTTP slice; server-owned target policy/validator and explicit platform permission, isolated tests only. #57 and deployment separately gated.
