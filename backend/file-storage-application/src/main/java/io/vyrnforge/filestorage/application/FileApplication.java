@@ -202,6 +202,22 @@ public final class FileApplication {
         });
     }
 
+    /** Start or replay completion while the exact initiating session is open. */
+    public void authorizeCompletion(Caller caller, SessionId session) {
+        if (caller == null) throw new Failure(Code.DENIED);
+        Objects.requireNonNull(session);
+        transactions.execute(unit -> {
+            Entry e = unit.bySession(caller.tenant(), session).orElseThrow(() -> new Failure(Code.DENIED));
+            boolean pending = e.version().state() == VersionState.PENDING && e.session().state() == UploadState.INITIATED;
+            boolean verifying = e.version().state() == VersionState.VERIFYING && e.session().state() == UploadState.VERIFYING;
+            if (!session.equals(e.session().id()) || !caller.equals(e.request().caller())
+                    || e.file().state() != FileState.ACTIVE || !(pending || verifying)
+                    || !clock.instant().isBefore(e.session().expires())) throw new Failure(Code.DENIED);
+            requireAccess(caller, e, Action.UPLOAD_TRANSFER);
+            return null;
+        });
+    }
+
     private void requireAccess(Caller caller,Entry e,Action action) {
         if(!e.file().tenant().equals(caller.tenant()) || !authorization.mayAccess(caller,action,e.resource()))
             throw new Failure(Code.NOT_FOUND);

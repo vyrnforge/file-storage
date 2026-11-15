@@ -108,6 +108,12 @@ public final class SecuredFiles {
             return caller;
         });
     }
+    public Result<Caller> authorizeCompletion(String bearer, TenantId tenant, UUID correlationId, SessionId session) {
+        return execute(bearer, tenant, correlationId, Action.UPLOAD_TRANSFER, null, (app, caller, correlation) -> {
+            app.authorizeCompletion(caller, session);
+            return caller;
+        });
+    }
     private VerifiedAccess authenticate(String bearer) {
         return AccessAuthentication.verify(trust, verifier, clock, bearer);
     }

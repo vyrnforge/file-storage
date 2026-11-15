@@ -201,13 +201,15 @@ public final class JdbcTransactions implements Transactions {
                        v.version_id, v.location_id, v.object_key, v.state AS version_state,
                        s.session_id, s.policy_revision, s.config_revision, s.consumer, s.purpose,
                        s.expires_at, s.expires_nano_remainder, s.state AS session_state,
-                       r.actor, r.request_key, r.expected_size, r.declared_mime_type
+                       r.actor, r.request_key, r.expected_size, r.declared_mime_type,
+                       scan.observed_size, scan.observed_sha256, scan.detected_mime_type
                 FROM fs.file f
                 JOIN fs.file_version v ON v.tenant_id = f.tenant_id AND v.file_id = f.file_id
                 JOIN fs.upload_session s ON s.tenant_id = v.tenant_id AND s.file_id = v.file_id
                     AND s.version_id = v.version_id
                 JOIN fs.initiation_request r ON r.tenant_id = s.tenant_id AND r.session_id = s.session_id
                     AND r.consumer = s.consumer
+                LEFT JOIN fs.upload_scan_evidence scan ON scan.session_id=s.session_id
                 """;
 
         @Override
@@ -250,9 +252,7 @@ public final class JdbcTransactions implements Transactions {
         }
 
         private static Entry readEntry(ResultSet rs) throws SQLException {
-            if (!"ACTIVE".equals(rs.getString("file_state"))
-                    || !"PENDING".equals(rs.getString("version_state"))
-                    || !"INITIATED".equals(rs.getString("session_state"))) {
+            if (!"ACTIVE".equals(rs.getString("file_state"))) {
                 throw new PersistenceFailure();
             }
             TenantId tenant = new TenantId(rs.getObject("tenant_id", UUID.class));
@@ -260,16 +260,28 @@ public final class JdbcTransactions implements Transactions {
             VersionId versionId = new VersionId(rs.getObject("version_id", UUID.class));
             LocationId location = new LocationId(rs.getObject("location_id", UUID.class));
             Locator locator = new Locator(location, rs.getString("object_key"), null);
-            Version version = Version.pending(file, versionId, locator);
+            VersionState versionState = VersionState.valueOf(rs.getString("version_state"));
+            UploadState uploadState = UploadState.valueOf(rs.getString("session_state"));
+            boolean valid = switch (versionState) {
+                case PENDING -> uploadState == UploadState.INITIATED;
+                case VERIFYING -> uploadState == UploadState.VERIFYING;
+                case AVAILABLE -> uploadState == UploadState.COMPLETED;
+                case QUARANTINED -> uploadState == UploadState.FAILED;
+                case FAILED -> uploadState == UploadState.FAILED || uploadState == UploadState.EXPIRED;
+            };
+            if (!valid) throw new PersistenceFailure();
+            String digest = rs.getString("observed_sha256");
+            Content content = digest == null ? null : new Content(rs.getLong("observed_size"), digest, rs.getString("detected_mime_type"));
+            Version version = Version.restore(file, versionId, locator, versionState, content);
             Scope scope = new Scope(tenant, rs.getString("consumer"), rs.getString("purpose"));
             Placement placement = new Placement(scope, location, rs.getLong("policy_revision"),
                     rs.getLong("config_revision"));
             Instant expiry = rs.getObject("expires_at", OffsetDateTime.class).toInstant()
                     .plusNanos(rs.getInt("expires_nano_remainder"));
-            // Rehydrate original initiated state, not an implicit expiry transition.
-            UploadSession session = UploadSession.restoreInitiated(
+            // Rehydrate the persisted state; expiry projection is separate.
+            UploadSession session = UploadSession.restore(
                     new SessionId(rs.getObject("session_id", UUID.class)), file, versionId,
-                    scope, placement, locator, expiry);
+                    scope, placement, locator, expiry, uploadState);
             Caller caller = new Caller(tenant, rs.getString("actor"), scope.consumer());
             String key = rs.getString("request_key");
             Initiate command = new Initiate(scope.purpose(), file.name(), rs.getLong("expected_size"),

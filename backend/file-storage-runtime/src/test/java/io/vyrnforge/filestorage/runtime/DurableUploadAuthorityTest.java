@@ -299,6 +299,11 @@ class DurableUploadAuthorityTest {
                     assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
                     assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session WHERE state='INITIATED'"));
                     try(var files=Files.list(spool)){assertEquals(0,files.count());}
+                    var scans=scans(CLOCK,3);
+                    new UploadCompletion(secured(CLOCK),scans).begin("user",TENANT,view.session(),null);
+                    assertEquals(UploadScanWorker.Outcome.COMPLETED,worker(scans,resolver,scanner(Scan.CLEAN,"text/plain"),CLOCK).runOne());
+                    assertEquals(VersionState.AVAILABLE,secured(CLOCK).session("user",TENANT,null,view.session()).value().versionState());
+                    assertEquals(3,credentialCloses.get());assertEquals(3,adapterCloses.get());
                 }
             }
         }
@@ -442,6 +447,13 @@ class DurableUploadAuthorityTest {
                 var adminResult=http.send(admin,HttpResponse.BodyHandlers.ofString());assertEquals(200,adminResult.statusCode());OpenApiContract.assertResponse(adminResult);
                 assertEquals(503,http.send(HttpRequest.newBuilder(URI.create(base+"/health/ready")).GET().build(),HttpResponse.BodyHandlers.ofString()).statusCode());
                 assertEquals(2,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
+                var scans=scans(CLOCK,3);
+                new UploadCompletion(ctx.getBean(SecuredFiles.class),scans).begin("user",TENANT,session,null);
+                assertEquals(UploadScanWorker.Outcome.COMPLETED,worker(scans,resolver,scanner(Scan.CLEAN,"application/octet-stream"),CLOCK).runOne());
+                var available=http.send(metadata,HttpResponse.BodyHandlers.ofString());
+                assertEquals(200,available.statusCode());OpenApiContract.assertResponse(available);
+                assertEquals("AVAILABLE",tools.jackson.databind.json.JsonMapper.builder().build().readTree(available.body()).get("versionState").asText());
+                assertEquals(3,closed.get());assertEquals(3,adapterCloses.get());
                 assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
             }
         }
@@ -538,5 +550,154 @@ class DurableUploadAuthorityTest {
         } finally {sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_integrity_test");}
         assertTrue(verifier.verify("user",TENANT,view.session(),digest,null).integrityMatched());
         assertEquals(6,fixture.opens.get());assertEquals(6,fixture.closes.get());assertEquals(6,fixture.streams.get());
+    }
+
+    private JdbcUploadScan scans(Clock clock,int attempts) {
+        return new JdbcUploadScan(new JdbcUploadTransfers(source,clock,Duration.ofMinutes(1),5),
+                new JdbcOperations(source,clock,Duration.ofSeconds(10),Duration.ZERO,4),ADMIN,attempts);
+    }
+
+    private UploadScanWorker worker(JdbcUploadScan scans,TransferProviderResolver resolver,ContentScanner scanner,Clock clock){
+        return new UploadScanWorker(scans,resolver,scanner,new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(5)),clock);
+    }
+
+    private static ContentScanner scanner(Scan verdict,String mime) {
+        return (stream,size,deadline)->{
+            try {
+                byte[] buffer=new byte[1024];
+                while(stream.read(buffer)!=-1) {}
+                return new ContentScanner.Verdict(verdict,mime);
+            } catch(java.io.IOException ex){throw new IllegalStateException("fixture scanner");}
+        };
+    }
+
+    private IntegrityFixture matched() throws Exception {
+        allow();var issued=issue();authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        var fixture=new IntegrityFixture();fixture.bytes="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(verification(fixture).verify("user",TENANT,view.session(),sha256(fixture.bytes),null).integrityMatched());
+        return fixture;
+    }
+
+    @Test void scanQueueAndCleanCommitAreAtomicAndRehydrateCurrentState() throws Exception {
+        var scans=scans(CLOCK,3);var completion=new UploadCompletion(secured,scans);
+        assertThrows(RuntimeException.class,()->completion.begin("user",TENANT,view.session(),null));
+        var fixture=matched();
+        assertThrows(SQLException.class,()->sql("UPDATE fs.file_version SET state='AVAILABLE'"));
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_scan_queue CHECK (event_type <> 'file-storage.transfer.upload.scan-queued') NOT VALID");
+        try {
+            assertThrows(RuntimeException.class,()->completion.begin("user",TENANT,view.session(),null));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='SCAN_UPLOAD'"));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
+        } finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_scan_queue");}
+        UUID job=completion.begin("user",TENANT,view.session(),null);
+        assertEquals(job,completion.begin("user",TENANT,view.session(),null));
+        assertThrows(RuntimeException.class,()->completion.begin("other",TENANT,view.session(),null));
+        assertEquals(VersionState.VERIFYING,secured.session("user",TENANT,null,view.session()).value().versionState());
+        assertThrows(SQLException.class,()->sql("UPDATE fs.file_version SET state='AVAILABLE'"));
+        var claimed=scans.claim(1).claims().getFirst();
+        var snapshot=scans.load(claimed);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_scan_finish CHECK (event_type <> 'file-storage.upload.completed') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->scans.finish(snapshot,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='VERIFYING'"));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='SCAN_UPLOAD' AND status='PENDING'"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_scan_finish");}
+        assertTrue(scans.retry(claimed));
+        assertEquals(UploadScanWorker.Outcome.COMPLETED,worker(scans,fixture,scanner(Scan.CLEAN,"text/plain"),CLOCK).runOne());
+        var result=secured.session("user",TENANT,null,view.session()).value();
+        assertEquals(VersionState.AVAILABLE,result.versionState());assertEquals(UploadState.COMPLETED,result.uploadState());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_scan_evidence WHERE verdict='CLEAN'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.completed'"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.upload_scan_evidence SET verdict='MALICIOUS'"));
+        assertThrows(RuntimeException.class,()->scans.finish(snapshot,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN));
+        assertEquals(UploadScanWorker.Outcome.IDLE,worker(scans,fixture,scanner(Scan.CLEAN,"text/plain"),CLOCK).runOne());
+    }
+
+    @Test void maliciousScanQuarantinesAndNeverAvailable() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        assertEquals(UploadScanWorker.Outcome.QUARANTINED,worker(scans,fixture,scanner(Scan.MALICIOUS,"application/octet-stream"),CLOCK).runOne());
+        var result=secured.session("user",TENANT,null,view.session()).value();
+        assertEquals(VersionState.QUARANTINED,result.versionState());assertEquals(UploadState.FAILED,result.uploadState());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_scan_evidence WHERE verdict='MALICIOUS'"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.file_version SET state='AVAILABLE'"));
+    }
+
+    @Test void scanOutageRetryAndExpiredClaimCannotCommit() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        assertEquals(UploadScanWorker.Outcome.RETRY,worker(scans,fixture,(stream,size,deadline)->new ContentScanner.Verdict(Scan.UNAVAILABLE,null),CLOCK).runOne());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+        var stale=scans.claim(1).claims().getFirst();var old=scans.load(stale);
+        Clock later=Clock.fixed(NOW.plusSeconds(11),ZoneOffset.UTC);var replacement=scans(later,3);
+        var current=replacement.claim(1).claims().getFirst();
+        assertNotEquals(stale.token(),current.token());
+        assertThrows(RuntimeException.class,()->replacement.finish(old,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+        // Last attempt crashes. Expired claim is dead-lettered and explicitly reconciled.
+        Clock after=Clock.fixed(NOW.plusSeconds(22),ZoneOffset.UTC);var recovery=scans(after,3);
+        assertEquals(1,recovery.claim(1).exhausted());
+        assertTrue(recovery.reconcileDead(TENANT,view.session()));
+        assertFalse(recovery.reconcileDead(TENANT,view.session()));
+        assertEquals(VersionState.FAILED,secured.session("user",TENANT,null,view.session()).value().versionState());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+    }
+
+    @Test void changedBytesAndPrematureCleanCannotPassScanGate() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        fixture.bytes="wrong".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(UploadScanWorker.Outcome.FAILED,worker(scans,fixture,scanner(Scan.CLEAN,"text/plain"),CLOCK).runOne());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+        assertEquals(VersionState.FAILED,secured.session("user",TENANT,null,view.session()).value().versionState());
+    }
+
+    @Test void cleanWithoutFullConsumptionFailsClosed() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        assertEquals(UploadScanWorker.Outcome.FAILED,worker(scans,fixture,(stream,size,deadline)->new ContentScanner.Verdict(Scan.CLEAN,"text/plain"),CLOCK).runOne());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+        assertEquals(VersionState.FAILED,secured.session("user",TENANT,null,view.session()).value().versionState());
+    }
+
+    @Test void expiredSessionNeverScansOrBecomesAvailable() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        Clock expired=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);
+        var recovery=scans(expired,3);
+        assertEquals(UploadScanWorker.Outcome.FAILED,worker(recovery,fixture,scanner(Scan.CLEAN,"text/plain"),expired).runOne());
+        assertEquals(1,fixture.opens.get(),"only original integrity read");
+        var result=secured(expired).session("user",TENANT,null,view.session()).value();
+        assertEquals(VersionState.FAILED,result.versionState());assertEquals(UploadState.EXPIRED,result.uploadState());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+    }
+
+    @Test void cleanMimeMismatchFailsAndRevokedGrantCannotCommit() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        var claim=scans.claim(1).claims().getFirst();var snapshot=scans.load(claim);
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='UPLOAD_TRANSFER'");
+        assertThrows(Failure.class,()->scans.finish(snapshot,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+        sql("UPDATE fs.file_grant SET revoked=false WHERE action='UPLOAD_TRANSFER'");
+        assertTrue(scans.retry(claim));
+        assertEquals(UploadScanWorker.Outcome.FAILED,worker(scans,fixture,scanner(Scan.CLEAN,"application/octet-stream"),CLOCK).runOne());
+        assertEquals(VersionState.FAILED,secured.session("user",TENANT,null,view.session()).value().versionState());
+    }
+
+    @Test void scanCannotFollowDriftedPhysicalPin() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        String original=objectKey();
+        sql("UPDATE fs.file_version SET object_key='private-prefix/drifted'");
+        assertThrows(Failure.class,()->new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null));
+        sql("UPDATE fs.file_version SET object_key=?",original);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        sql("UPDATE fs.file_version SET object_key='private-prefix/drifted'");
+        var claim=scans.claim(1).claims().getFirst();
+        assertThrows(Failure.class,()->scans.load(claim));
+        assertEquals(1,fixture.opens.get());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
     }
 }
