@@ -1,6 +1,8 @@
 package io.vyrnforge.filestorage.runtime;
 
 import io.vyrnforge.filestorage.persistence.JdbcTransactions;
+import io.vyrnforge.filestorage.persistence.JdbcPolicyControl;
+import io.vyrnforge.filestorage.application.PolicyAuthority;
 import io.vyrnforge.filestorage.persistence.StorageMigrations;
 import io.vyrnforge.filestorage.security.SecuredFiles;
 import io.vyrnforge.platform.kernel.ports.TenantMembershipPort;
@@ -15,6 +17,10 @@ public final class RuntimeComposition {
 
     /** Separate explicit operator action; never invoked by HTTP startup. */
     public static void migrate(DataSource source) { StorageMigrations.migrate(source); }
+
+    public static JdbcPolicyControl policyControl(DataSource source, Clock clock, PolicyAuthority authority) {
+        return new JdbcPolicyControl(source, clock, authority);
+    }
 
     public static SecuredFiles secured(DataSource source, SecuredFiles.Trust trust,
             SecuredFiles.Verifier verifier, SecuredFiles.Bindings bindings,
