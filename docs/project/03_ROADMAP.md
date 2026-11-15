@@ -119,3 +119,6 @@ PR #77 accepted/merged 4f65a0d (168 tests). #31 next terminal replay and logical
 PR #78 accepted/merged edb185c (173 tests); #31 logical recovery accepted, physical cleanup/reissue gated. #35 next exact clean-version download through private gateway; pagination/usage and deleted-state lifecycle separate.
 
 PR #79 accepted/merged b8450b3 (177 tests). #35 next scoped catalog/usage; #36 logical deletion/retention follows, quota/physical purge/cleanup gated.
+
+
+2026-11-15: PR #81 accepted/squash merged `660f14b84c3a6f2bbf15b7d2157189cf5d865fb4`; exact-head CI 43710854973 passed 183 tests. Owner authorized #36 FS-310A2 independent safety/recovery and conservative retention assessment only. V12 candidate; [contract](../architecture/31_LIFECYCLE_SAFETY.md). No production policy, physical purge, quota or deployment.
