@@ -3,6 +3,9 @@ package io.vyrnforge.filestorage.runtime;
 import io.vyrnforge.filestorage.application.FileApplication.*;
 import io.vyrnforge.filestorage.domain.StorageModel.*;
 import io.vyrnforge.filestorage.security.SecuredFiles;
+import io.vyrnforge.filestorage.runtime.http.ApiHttpConfiguration;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import io.vyrnforge.filestorage.security.SecuredFiles.*;
 import io.vyrnforge.platform.kernel.context.*;
 import org.junit.jupiter.api.Test;
@@ -55,7 +58,7 @@ class RuntimeContractTest {
     }
 
     @Configuration(proxyBeanMethods=false)
-    @Import(FileRoutes.class)
+    @Import(ApiHttpConfiguration.class)
     static class TestRoutes {
         @Bean Memory memory() { return new Memory(); }
         @Bean SecuredFiles secured(Memory db) {
@@ -141,6 +144,103 @@ class RuntimeContractTest {
             assertEquals(404,call(ctx,"GET","/v1/files/unknown","fixture-access",A,null,null,null).statusCode());
             assertEquals(400,call(ctx,"GET","/v1/uploads/not-a-uuid","fixture-access",A,null,null,null).statusCode());
             assertTrue(ctx.getBean(Memory.class).rows.isEmpty());
+        }
+    }
+
+    @Test
+    void apiCompositionOnlyAllowsApiAndCombinedRoles() throws Exception {
+        for (String role : List.of("TRANSFER", "WORKER")) {
+            assertThrows(RuntimeException.class, () -> {
+                try (var ignored = RuntimeApplication.application(TestRoutes.class)
+                        .run("--server.port=0", "--fs.role=" + role)) {
+                    fail("metadata routes registered in " + role);
+                }
+            });
+        }
+        try (var ctx = RuntimeApplication.application(TestRoutes.class)
+                .run("--server.port=0", "--fs.role=COMBINED")) {
+            assertEquals(200, call(ctx, "POST", "/v1/uploads", "fixture-access", A, "key", BODY, null).statusCode());
+            assertEquals(503, call(ctx, "GET", "/health/ready", null, null, null, null, null).statusCode());
+        }
+    }
+
+    @Test
+    void metadataAdmissionRejectsOversizeFixedAndChunkedBodiesBeforeWrites() throws Exception {
+        try (var ctx = RuntimeApplication.application(TestRoutes.class).run("--server.port=0")) {
+            String oversized = BODY + " ".repeat(16384);
+            var fixed = call(ctx, "POST", "/v1/uploads", "fixture-access", A, "key", oversized, id(10));
+            assertEquals(413, fixed.statusCode(), fixed.body());
+            assertEquals("PAYLOAD_TOO_LARGE", field(fixed.body(), "code"));
+            assertEquals(id(10).toString(), fixed.headers().firstValue("X-Correlation-Id").orElseThrow());
+            var req = request(ctx, "/v1/uploads").header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofInputStream(() ->
+                            new ByteArrayInputStream(oversized.getBytes(StandardCharsets.UTF_8))));
+            var chunked = send(req);
+            assertEquals(413, chunked.statusCode(), chunked.body());
+            assertEquals("PAYLOAD_TOO_LARGE", field(chunked.body(), "code"));
+            assertTrue(ctx.getBean(Memory.class).rows.isEmpty());
+            assertEquals(200, call(ctx, "POST", "/v1/uploads", "fixture-access", A, "key", BODY, null).statusCode());
+        }
+    }
+
+    @Test
+    void metadataAdmissionRejectsAmbiguousHeadersAndUnsupportedEncoding() throws Exception {
+        try (var ctx = RuntimeApplication.application(TestRoutes.class).run("--server.port=0")) {
+            var duplicate = send(request(ctx, "/v1/uploads").header("X-Tenant-Id", B.value().toString())
+                    .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(BODY)));
+            assertEquals(400, duplicate.statusCode(), duplicate.body());
+            var auth = send(request(ctx, "/v1/uploads").header("Authorization", "Bearer other")
+                    .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(BODY)));
+            assertEquals(401, auth.statusCode(), auth.body());
+            assertEquals("Bearer", auth.headers().firstValue("WWW-Authenticate").orElseThrow());
+            var encoding = send(request(ctx, "/v1/uploads").header("Content-Encoding", "gzip")
+                    .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(BODY)));
+            assertEquals(415, encoding.statusCode(), encoding.body());
+            assertEquals("UNSUPPORTED_MEDIA", field(encoding.body(), "code"));
+            assertTrue(ctx.getBean(Memory.class).rows.isEmpty());
+        }
+    }
+
+    @Test
+    void transportErrorsAreNeutralAndConsistent() throws Exception {
+        try (var ctx = RuntimeApplication.application(TestRoutes.class).run("--server.port=0")) {
+            var media = send(request(ctx, "/v1/uploads").header("Content-Type", "text/plain")
+                    .POST(HttpRequest.BodyPublishers.ofString(BODY)));
+            assertEquals(415, media.statusCode(), media.body());
+            assertEquals("UNSUPPORTED_MEDIA", field(media.body(), "code"));
+            var method = send(request(ctx, "/v1/uploads").DELETE());
+            assertEquals(405, method.statusCode(), method.body());
+            assertEquals("METHOD_NOT_ALLOWED", field(method.body(), "code"));
+            assertTrue(method.headers().firstValue("Allow").orElseThrow().contains("POST"));
+            var unknown = call(ctx, "GET", "/v1/nonexistent", "fixture-access", A, null, null, null);
+            assertEquals(404, unknown.statusCode(), unknown.body());
+            assertEquals("NOT_FOUND", field(unknown.body(), "code"));
+            var notAcceptable = send(request(ctx, "/v1/uploads").header("Accept", "text/html")
+                    .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(BODY)));
+            assertEquals(406, notAcceptable.statusCode(), notAcceptable.body());
+            assertEquals("NOT_ACCEPTABLE", field(notAcceptable.body(), "code"));
+            var unknownField = call(ctx, "POST", "/v1/uploads", "fixture-access", A, "key",
+                    BODY.replace("\"purpose\"", "\"unexpected\":true,\"purpose\""), null);
+            assertEquals(400, unknownField.statusCode(), unknownField.body());
+            for (var result : List.of(media, method, unknown, notAcceptable, unknownField)) {
+                assertEquals("no-store", result.headers().firstValue("Cache-Control").orElseThrow());
+                assertEquals(field(result.body(), "requestId"), result.headers().firstValue("X-Request-Id").orElseThrow());
+                assertFalse(result.body().contains("sample.txt"));
+            }
+            assertTrue(ctx.getBean(Memory.class).rows.isEmpty());
+        }
+    }
+
+    private static HttpRequest.Builder request(ConfigurableApplicationContext ctx, String path) {
+        return HttpRequest.newBuilder(URI.create("http://127.0.0.1:" +
+                ctx.getEnvironment().getProperty("local.server.port") + path))
+                .timeout(Duration.ofSeconds(10)).header("Authorization", "Bearer fixture-access")
+                .header("X-Tenant-Id", A.value().toString()).header("Idempotency-Key", "key");
+    }
+
+    private static HttpResponse<String> send(HttpRequest.Builder request) throws Exception {
+        try (var client = HttpClient.newHttpClient()) {
+            return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
         }
     }
 }

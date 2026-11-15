@@ -5,6 +5,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.UUID;
+import java.util.Collections;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 /** Common response envelope for MVC and admission-filter rejections. */
@@ -17,7 +19,7 @@ final class ApiResponses {
 
     static ResponseEntity<FileDtos.ErrorResponse> error(HttpServletRequest request, int status, String code) {
         var context = errorContext(request);
-        return headers(ResponseEntity.status(status), context).body(errorBody(context, code));
+        return headers(ResponseEntity.status(status), context).contentType(MediaType.APPLICATION_JSON).body(errorBody(context, code));
     }
 
     static void reject(HttpServletRequest request, HttpServletResponse response, int status, String code)
@@ -38,7 +40,8 @@ final class ApiResponses {
 
     private static CorrelationContext errorContext(HttpServletRequest request) {
         UUID supplied;
-        try { supplied = ApiRequest.correlation(request); }
+        try { supplied = Collections.list(request.getHeaders("X-Correlation-Id")).size() == 1
+                ? ApiRequest.correlation(request) : null; }
         catch (RuntimeException ignored) { supplied = null; }
         return supplied == null ? CorrelationContext.create() : CorrelationContext.create(supplied);
     }
