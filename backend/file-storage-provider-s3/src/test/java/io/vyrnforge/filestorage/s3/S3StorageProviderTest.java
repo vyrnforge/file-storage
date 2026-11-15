@@ -133,6 +133,22 @@ class S3StorageProviderTest extends ProviderContract {
     }
 
     @Test
+    void mixedBackendAndOverlappingLocationsRejectedBeforeIo() {
+        LocationId left = new LocationId(UUID.randomUUID());
+        LocationId right = new LocationId(UUID.randomUUID());
+        try (S3Client sdk = client(USER, PASSWORD)) {
+            fails(ErrorCode.INVALID, () -> new S3StorageProvider(sdk, Map.of(
+                    left, new Location(left, BACKEND, "contract-a", "area"),
+                    right, new Location(right, BACKEND, "contract-a", "area/nested")), spool,
+                    1024, 1, Duration.ofSeconds(15), 8, Duration.ofMinutes(1)));
+            fails(ErrorCode.INVALID, () -> new S3StorageProvider(sdk, Map.of(
+                    left, new Location(left, BACKEND, "contract-a", "area"),
+                    right, new Location(right, new BackendId(UUID.randomUUID()), "contract-b", "other")), spool,
+                    1024, 1, Duration.ofSeconds(15), 8, Duration.ofMinutes(1)));
+        }
+    }
+
+    @Test
     void permissionFailureAndVersioningAreRejected() {
         try (var denied = new S3StorageProvider(client("invalid-" + UUID.randomUUID(), PASSWORD),
                 LOCATIONS, spool, 1024, 1, Duration.ofSeconds(15), 8, Duration.ofMinutes(1))) {

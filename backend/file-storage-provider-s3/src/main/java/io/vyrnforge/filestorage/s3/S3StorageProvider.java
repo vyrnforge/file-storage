@@ -71,8 +71,25 @@ public final class S3StorageProvider implements StorageProvider, AutoCloseable {
                 || cursorTtl.compareTo(Duration.ofHours(1)) > 0) {
             throw failure(ErrorCode.INVALID);
         }
+        // A client/credential revision belongs to exactly one logical backend.
+        // A wider namespace must not accidentally list or write another
+        // configured location in the same bucket.
+        var backend = this.locations.values().iterator().next().backend();
+        List<Location> configured = new ArrayList<>(this.locations.values());
         for (var entry : this.locations.entrySet()) {
-            if (!entry.getKey().equals(entry.getValue().id())) throw failure(ErrorCode.INVALID);
+            if (!entry.getKey().equals(entry.getValue().id())
+                    || !backend.equals(entry.getValue().backend())) throw failure(ErrorCode.INVALID);
+        }
+        for (int i = 0; i < configured.size(); i++) {
+            Location left = configured.get(i);
+            for (int j = i + 1; j < configured.size(); j++) {
+                Location right = configured.get(j);
+                if (left.bucket().equals(right.bucket())
+                        && (namespace(left).startsWith(namespace(right))
+                        || namespace(right).startsWith(namespace(left)))) {
+                    throw failure(ErrorCode.INVALID);
+                }
+            }
         }
         this.maxBytes = maxBytes;
         this.maxCursors = maxCursors;
