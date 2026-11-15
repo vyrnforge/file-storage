@@ -85,3 +85,5 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 2026-11-15: #26 implementation merged at 972e091004725f1d3eef11d550fa773e4897545e; actual OSS staging and #14 parity remain open. #27 internal registry/reference port authorized, #16 secret manager/workload identity decision and #28 provider validation still gates. No later implementation or deployment approved.
 
 FS-210A #27 internal implementation accepted and merged PR #61 (`224eada`); live credential evidence remains open. Owner authorized next #28; internal validation boundary, drain and guarded retirement (V4) in review; concrete provider validation/authority and late location admission pending. See [backend lifecycle](../architecture/14_BACKEND_LIFECYCLE.md).
+
+FS-210B internal lifecycle accepted and merged PR #62 (a4d9e19), 117 tests verified; actual provider evidence and later location admission remain open. Owner authorized #29 FS-220 bounded internal policy management (also called FS-210C); live authority and #30 remain gated. See [policy control](../architecture/15_POLICY_CONTROL_PLANE.md).

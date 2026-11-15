@@ -13,3 +13,5 @@ Keep Maven POMs readable: four-space indentation, one element per line, no compa
 FS-210A: internal trusted commands only; #16 actual secret manager/identity selection pending. No provider calls, admin HTTP, validation or activation in registry commands. See docs/architecture/13_BACKEND_REGISTRY.md.
 
 2026-11-15: PR #61 merged at `224eada` after owner acceptance, 108 tests at verified head. #27 live credential evidence still open; #28 authorized bounded lifecycle work (internal validation boundary, drain and V4 retirement in review). #16 actual credential/network authority, #26 OSS staging, #14 legacy parity and #28 concrete provider validation, late location admission and verification remain gates. No #29 or production authorization.
+
+2026-11-15: PR #62 merged at a4d9e19 (117 verified tests); #28 internal lifecycle accepted, live provider/credential/late-location gates open. Owner authorized #29 FS-220 internal policy control; no #30, public routes or production authority/deployment.
