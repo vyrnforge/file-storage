@@ -39,8 +39,14 @@
                 <executions>
                     <execution>
                         <id>oss-wire-fixture</id>
-                        <goals><goal>test-jar</goal></goals>
-                        <configuration><includes><include>**/OssWireFixture*.class</include></includes></configuration>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>**/OssWireFixture*.class</include>
+                            </includes>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
