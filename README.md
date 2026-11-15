@@ -74,3 +74,5 @@ PR #68 accepted/merged (137 tests). Dependency-first delivery: independent lifec
 PR #70 accepted/merged a062618 (143 tests); isolated #30 complete, live exposure gates deferred. [FS-300G private transfer gateway](docs/architecture/20_PRIVATE_TRANSFER_GATEWAY.md) — first bounded streaming/authority/provider-neutral foundation in review.
 
 PR #71 accepted/merged 270fd09 (148 tests). [Durable upload transfer authorization](docs/architecture/21_DURABLE_UPLOAD_TRANSFER.md) — V5 digest-only handle and explicit upload grant in review.
+
+PR #72 accepted/merged 4880a42 (152 tests). [Registry-pinned provider transfer](docs/architecture/22_REGISTRY_PROVIDER_TRANSFER.md) — real PostgreSQL/MinIO gateway upload in review; no verified completion or live exposure.

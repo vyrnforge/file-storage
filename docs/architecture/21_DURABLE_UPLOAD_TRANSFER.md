@@ -10,3 +10,5 @@ Owner reviewed PR #71 and authorized next isolated increment. Baseline 270fd099f
 
 ## Verification
 Four focused runtime tests against disposable PostgreSQL: explicit transfer grant separate from read/initiate; wrong actor/tenant/application/action and unknown token denied; exact pin and digest-only persistence, replay rejection across instances, one winner under concurrent claims, current revoked grant/expiry denial without consuming, repository-level denial after a previously authorized caller's local grant is revoked, immutable binding, required audit/event failure rollback and retry. V5 repeatable migration assertion updated. Exact-head CI required. Next isolated #57: registry-pinned provider lease resolution and actual MinIO gateway transfer, OSS SDK loopback; #31/#35 lifecycle and external dependencies remain gated.
+
+Owner approved PR #72; squash merged 4880a42b941c0d3dfb1979ad34f8a00220bfa953; final CI 43699722472 at 843efc7 passed 152 tests. V5 isolated migration and current local grant locking verified; no production application. [Registry-pinned adapter integration](22_REGISTRY_PROVIDER_TRANSFER.md) next.
