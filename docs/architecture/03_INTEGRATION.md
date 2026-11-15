@@ -33,3 +33,5 @@ See [identity authorization contract](../security/FS110_IDENTITY_AUTHORIZATION.m
 
 ## FS-300A isolated runtime
 [Runtime foundation](16_RUNTIME_FOUNDATION.md): Spring Boot health-only loopback shell, explicit migration/composition entrypoints and draft v1 metadata/session HTTP adapters tested in isolation. Public exposure and actual IAM/worker/gateway wiring remain gated.
+
+[FS-300A policy admin contract](17_POLICY_ADMIN_HTTP.md): distinct action and location authorization, versioned logical policy views and CAS mutation, isolated HTTP/DB tests. Backend/lifecycle admin and live identity remain gated.

@@ -19,3 +19,5 @@ FS-210A: internal trusted commands only; #16 actual secret manager/identity sele
 2026-11-15: PR #63 merged at 1d05534, 121 verified tests. #29 internal policy accepted; owner authorized #30 isolated runtime shell and contracts only. #17–#19 live IAM, #16, #26–#28, #57 gateway and production gates remain open. No #31 or public exposure.
 
 2026-11-15: PR #64 merged at 6ed88c1 (125 tests); owner authorized #30 continuation and requested cleaner code/structure. HTTP boundary refinement only; #65 dedicated maintainability review tracked, no broad rewrite, #57 or production authorization.
+
+2026-11-15: PR #66 merged 1518986 (129 tests); owner authorized #30 continuation. Policy admin HTTP isolated slice, distinct action and all-location authority, real disposable DB tests. #65 remains open; no live IAM, #57 or production authorization.

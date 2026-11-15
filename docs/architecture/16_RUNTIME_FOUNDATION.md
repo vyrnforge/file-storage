@@ -23,3 +23,5 @@ PR #64 accepted and squash merged at 6ed88c1e5cc4a551f39103a491e1472514e4d666; C
 - Existing v1 success shape and FileReference unchanged; no new schema or dependency. Four additional embedded HTTP tests target role gating, fixed/chunked oversized bodies, ambiguous headers/encoding, malformed/unsupported/unknown HTTP errors and no writes. Exact-head CI required; no public exposure or production DB migration.
 
 Outstanding #30: control-plane DTOs/authorized administrative routes, actual authority and DB readiness composition, full OpenAPI conformance and deployment transport security. #17–#19, #16, #26–#28, #57 and #43 remain open. No #31/#57 implementation authorization. Dedicated broader #65 review remains planned, not completed.
+
+PR #66 accepted/merged 1518986; CI 43692244128 passed 129 tests. [Policy administration HTTP](17_POLICY_ADMIN_HTTP.md) is the next isolated slice, sharing transport admission with consumer routes but requiring distinct action and location authority. Default runtime remains health-only.
