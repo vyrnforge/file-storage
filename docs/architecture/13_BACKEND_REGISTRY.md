@@ -21,3 +21,5 @@ R02 normalize known endpoint, deny overlap/invalid namespace and late location a
 R03 append revision CAS, fresh active/history across registry instances, original pin and old reference retained after simulated activation, exact resolution and lease close, draft/mismatch denial and synthetic revocation without fallback; rollback is new draft.
 R04 competing credential revisions one winner; forced outbox failure rolls back registry and audit. Existing regression suite and dependency boundaries.
 R05 actual secret manager and workload identity decision, concrete resolution and real rotation/revocation/provider reads remain #16/#28/#43; no closure on internal tests alone unless owner explicitly accepts bounded scope and tracks deferred evidence. No public admin runtime, actual credentials, network calls or deployment.
+
+[FS-300A isolated backend HTTP](18_BACKEND_ADMIN_HTTP.md) reuses registry via explicit tenantless platform action permissions and logical DTOs. No production authority or secret manager selected.

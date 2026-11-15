@@ -12,18 +12,23 @@ import java.util.UUID;
 /** Request-derived values are untrusted until SecuredFiles verifies the bearer and scope. */
 record ApiRequest(String bearer, TenantId tenant, UUID correlationId) {
     static ApiRequest from(HttpServletRequest request) {
-        String header = request.getHeader("Authorization");
-        if (header == null || !header.startsWith("Bearer ") || header.length() > 16384
-                || header.substring(7).isBlank() || header.substring(7).chars().anyMatch(Character::isWhitespace)) {
-            throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);
-        }
+        String bearer = bearer(request);
         TenantId tenant;
         try {
             tenant = new TenantId(uuid(request.getHeader("X-Tenant-Id")));
         } catch (IllegalArgumentException ex) {
             throw new Failure(Code.INVALID);
         }
-        return new ApiRequest(header.substring(7), tenant, correlation(request));
+        return new ApiRequest(bearer, tenant, correlation(request));
+    }
+
+    static String bearer(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+        if (header == null || !header.startsWith("Bearer ") || header.length() > 16384
+                || header.substring(7).isBlank() || header.substring(7).chars().anyMatch(Character::isWhitespace)) {
+            throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);
+        }
+        return header.substring(7);
     }
 
     static Initiate initiation(HttpServletRequest request, FileDtos.Initiation body) {
@@ -55,6 +60,22 @@ record ApiRequest(String bearer, TenantId tenant, UUID correlationId) {
             throw new Failure(Code.INVALID);
         }
         return value;
+    }
+
+    static String query(HttpServletRequest request, String name, String fallback) {
+        var values = request.getParameterValues(name);
+        if (values == null) return fallback;
+        if (values.length != 1) throw new Failure(Code.INVALID);
+        return values[0];
+    }
+
+    static long number(String value, long min, long max) {
+        try {
+            if (value == null || !value.matches("[0-9]{1,19}")) throw new Failure(Code.INVALID);
+            long parsed = Long.parseLong(value);
+            if (parsed < min || parsed > max) throw new Failure(Code.INVALID);
+            return parsed;
+        } catch (NumberFormatException ex) { throw new Failure(Code.INVALID); }
     }
 
     @Override public String toString() { return "ApiRequest[redacted]"; }
