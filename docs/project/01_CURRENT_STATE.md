@@ -48,3 +48,5 @@ PR #8 merged at 43f1c5552a3202ad0724e516fe51c03886373591. PR #9 conflict resolut
 FS-120A code commit 7d64bf3868ea80bbccd4fb76c955968e7513b071 hosted CI 43667089332 passed 40 tests (9 on disposable PostgreSQL 17.12); migration V1 applied only to test database. PR #11 merged; local build unavailable, no production application or later increment authorization.
 
 2026-11-15: PR #11 merged at b4a421dde33fc712a884f83b515719ef62d1c5be; final CI 43667199550 passed 40 tests, including 9 PostgreSQL. Owner reported merge in continuation of approved roadmap; next bounded FS-120B1 implements Kernel JDBC lease/atomic initiation/replay. FS-120B2 (configuration CAS and durable grants), FS-120C (audit/outbox/recovery) and live IAM remain open. No production migration. See [transactional initiation](../architecture/06_TRANSACTIONAL_INITIATION.md).
+
+FS-120B1 hosted CI 43667699481 passed 46 tests, 15 on PostgreSQL 17.12. Kernel V1–V3 applied in disposable fs_kernel schema only. PR #12 open; local verification and owner review pending. B2/C, actual IAM and production gates remain open.

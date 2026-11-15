@@ -44,3 +44,5 @@ PR #8 Kernel 0.3.2 maintenance merged; PR #9 synchronized with main. Combined CI
 FS-120A code CI 43667089332: 40 tests passed, 9 real PostgreSQL tests, five modules and six readable POMs. PR #11 merged; local verification outstanding. FS-120B1 in review; B2/C not started.
 
 FS-120B split into B1 (Kernel lease, atomic initiation and replay, concurrency/failure tests) and B2 (activation CAS, durable grant retrieval). B1 is the next bounded increment after PR #11 merge. FS-120C audit/outbox integration remains separate; no external I/O or public API.
+
+FS-120B1: PR #12 implementation verified by hosted CI 43667699481 (46 tests, zero failures); local verification and owner review/merge pending. B2/C not started.

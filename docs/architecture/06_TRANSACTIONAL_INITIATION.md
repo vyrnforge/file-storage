@@ -14,3 +14,6 @@ R01 Kernel migration V1–V3 and existing service V1 on real PostgreSQL. R02 rea
 
 ## Remaining
 FS-120B2 configuration activation compare-and-set, immutable policy revision publication and durable grant read adapter with authority/revocation semantics. FS-120C atomic audit/event intents, durable jobs and recovery, crash injection. Live Wyrmgate integration remains release-blocking. No production schema application, release, or merge authorization.
+
+## Hosted verification
+[CI 43667699481](https://github.com/vyrnforge/file-storage/actions/runs/43667699481) at fd18a55445edf53582d5ded7b61f903ab49048a3 completed SUCCESS. Logs: PostgreSQL 17.12 disposable instance, fs V1 and fs_kernel V1–V3 applied, repeat migration succeeded; 15 persistence tests + 31 prior tests = 46 total, zero failures/errors/skips; all five modules BUILD SUCCESS, six POMs and dependency boundaries passed. R01–R07 verified at current initiation scope, including forced expiry after insertion rolling back all metadata. PR #12 clean at evidence capture. Local Java 21 present; Maven and Docker unavailable, GitHub DNS unresolved; local acceptance outstanding. No production database or live authority proof. Final evidence-only commit requires CI. B2/C remain unimplemented.
