@@ -276,9 +276,9 @@ class JdbcTransactionsTest {
         StorageMigrations.migrate(dataSource);
         try (var connection = dataSource.getConnection();
              var statement = connection.createStatement();
-             var rs = statement.executeQuery("SELECT count(*) FROM fs.flyway_schema_history WHERE version IN ('1', '2', '3') AND success")) {
+             var rs = statement.executeQuery("SELECT count(*) FROM fs.flyway_schema_history WHERE version IN ('1', '2', '3', '4') AND success")) {
             rs.next();
-            assertEquals(3, rs.getLong(1));
+            assertEquals(4, rs.getLong(1));
         }
         assertEquals(2, count("backend"));
     }
@@ -1312,6 +1312,135 @@ class JdbcTransactionsTest {
             sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_test_drain");
         }
         assertEquals(1, configuration().drainBackend(ADMIN, CorrelationContext.create(), backend, 1));
+    }
+
+
+    private static io.vyrnforge.filestorage.application.BackendValidator.Report validReport(
+            io.vyrnforge.filestorage.application.BackendValidator.Candidate candidate) {
+        var checks = new HashMap<LocationId, Set<io.vyrnforge.filestorage.application.BackendValidator.Check>>();
+        for (var location : candidate.locations()) {
+            checks.put(location.id(), EnumSet.allOf(io.vyrnforge.filestorage.application.BackendValidator.Check.class));
+        }
+        return new io.vyrnforge.filestorage.application.BackendValidator.Report(
+                candidate.backend(), candidate.revision(), checks);
+    }
+
+    @Test
+    void trustedValidationRequiresApprovedTargetAndCompleteExactReport() throws SQLException {
+        var registry = registry();
+        var ctx = CorrelationContext.create();
+        var target = registryTarget(Provider.S3, "https://validation.example.test");
+        var backend = registry.registerBackend(ADMIN, ctx, target, new CredentialRef("ref:synthetic/validation:v1"));
+        registry.registerLocation(ADMIN, ctx, backend, "validation-bucket", "one");
+        registry.registerLocation(ADMIN, ctx, backend, "validation-bucket", "two");
+        assertEquals(Code.DENIED, assertThrows(Failure.class, () ->
+                registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(), c -> {
+                    throw new AssertionError("unapproved endpoint was contacted");
+                })).code());
+        assertEquals(Code.DENIED, assertThrows(Failure.class, () ->
+                registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(target), c ->
+                        new io.vyrnforge.filestorage.application.BackendValidator.Report(backend, 1, Map.of()))).code());
+        assertEquals(Code.DENIED, assertThrows(Failure.class, () ->
+                registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(target), c ->
+                        new io.vyrnforge.filestorage.application.BackendValidator.Report(backend, 2, validReport(c).checks()))).code());
+        assertFalse(registry.history(backend, 0, 1).getFirst().validated());
+        assertEquals(1, registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(target), c -> {
+            assertEquals("Candidate[redacted]", c.toString());
+            assertEquals(2, c.locations().size());
+            return validReport(c);
+        }));
+        assertTrue(registry.history(backend, 0, 1).getFirst().validated());
+        assertEquals(1, configuration().activateBackend(ADMIN, ctx, backend, 0, 1));
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.backend.validated"));
+        assertEquals(1, intents("platform_audit_event", "action", "file-storage.backend.validated"));
+        var unsafe = registryTarget(Provider.S3, "https://169.254.169.254");
+        var bad = registry.registerBackend(ADMIN, ctx, unsafe, new CredentialRef("ref:synthetic/unsafe:v1"));
+        registry.registerLocation(ADMIN, ctx, bad, "validation-bucket", "one");
+        assertEquals(Code.DENIED, assertThrows(Failure.class, () ->
+                registry.validateDraft(ADMIN, ctx, bad, 1, Set.of(unsafe), c -> {
+                    throw new AssertionError("literal endpoint was contacted");
+                })).code());
+    }
+
+    @Test
+    void draftValidationRejectsLocationSetChangedDuringExternalCheck() throws SQLException {
+        var registry = registry();
+        var ctx = CorrelationContext.create();
+        var target = registryTarget(Provider.S3, "https://stale-validation.example.test");
+        var backend = registry.registerBackend(ADMIN, ctx, target, new CredentialRef("ref:synthetic/stale:v1"));
+        registry.registerLocation(ADMIN, ctx, backend, "validation-bucket", "one");
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(target), c -> {
+                    registry().registerLocation(ADMIN, ctx, backend, "validation-bucket", "two");
+                    return validReport(c);
+                })).code());
+        assertFalse(registry.history(backend, 0, 1).getFirst().validated());
+        assertEquals(Code.INVALID, assertThrows(Failure.class, () ->
+                configuration().activateBackend(ADMIN, ctx, backend, 0, 1)).code());
+        assertEquals(0, intents("platform_event_outbox", "event_type", "file-storage.backend.validated"));
+        assertEquals(1, registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(target), JdbcTransactionsTest::validReport));
+    }
+
+    @Test
+    void guardedRetirementPreservesHistoryAndRejectsExistingReferences() throws SQLException {
+        var config = configuration();
+        var ctx = CorrelationContext.create();
+        var oss = new BackendId(OSS);
+        var s3 = new BackendId(S3);
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> config.retireBackend(ADMIN, ctx, s3, 1)).code());
+        config.drainBackend(ADMIN, ctx, s3, 1);
+        assertEquals(1, config.retireBackend(ADMIN, ctx, s3, 1));
+        assertEquals(BackendStatus.RETIRED, registry().history(s3, 0, 1).getFirst().status());
+        assertEquals(Code.NOT_FOUND, assertThrows(Failure.class, () ->
+                registry().resolveExisting(s3, 1, new LocationId(SL), ref -> new SyntheticCredential(ref.value()))).code());
+        assertEquals(1, registry().locations(s3, null, 10).size());
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> config.retireBackend(ADMIN, ctx, s3, 1)).code());
+        application().initiate(ALICE, command("retirement-reference"));
+        config.drainBackend(ADMIN, ctx, oss, 1);
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> config.retireBackend(ADMIN, ctx, oss, 1)).code());
+        assertEquals("23514", assertThrows(SQLException.class, () ->
+                sql("UPDATE fs.backend_revision SET status='RETIRED' WHERE backend_id=?", OSS)).getSQLState());
+        assertEquals(1, count("file_version"));
+        assertEquals(1, count("upload_session"));
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.backend.retired"));
+    }
+
+    @Test
+    void retirementFencesRepeatableReadInitiationWithOldPlacement() throws SQLException {
+        var jdbc = new JdbcTransactions(dataSource, Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMinutes(10));
+        var config = configuration();
+        var ctx = CorrelationContext.create();
+        var oss = new BackendId(OSS);
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> jdbc.execute(u -> {
+            var pending = entry(u, "stale-retirement", 999);
+            config.publishPolicy(ADMIN, ctx, SCOPE, 1, List.of(rule(SL, 0, true)));
+            config.drainBackend(ADMIN, ctx, oss, 1);
+            config.retireBackend(ADMIN, ctx, oss, 1);
+            u.insert(pending);
+            return null;
+        })).code());
+        assertEquals(0, count("file"));
+        assertEquals(0, count("file_version"));
+        assertEquals(0, count("upload_session"));
+        assertEquals(BackendStatus.RETIRED, registry().history(oss, 0, 1).getFirst().status());
+        assertNotNull(application().initiate(ALICE, command("fresh-after-retirement")));
+    }
+
+    @Test
+    void retirementIntentFailureRollsBackFenceAndRevision() throws SQLException {
+        var s3 = new BackendId(S3);
+        var ctx = CorrelationContext.create();
+        var config = configuration();
+        config.drainBackend(ADMIN, ctx, s3, 1);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_test_retirement CHECK (event_type <> 'file-storage.backend.retired') NOT VALID");
+        try {
+            assertThrows(RuntimeException.class, () -> config.retireBackend(ADMIN, ctx, s3, 1));
+            assertEquals(BackendStatus.DRAINING, registry().history(s3, 0, 1).getFirst().status());
+            assertEquals(0, intents("platform_audit_event", "action", "file-storage.backend.retired"));
+        } finally {
+            sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_test_retirement");
+        }
+        assertEquals(1, config.retireBackend(ADMIN, ctx, s3, 1));
     }
 
 }
