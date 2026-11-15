@@ -2,7 +2,7 @@
 
 Independent, multi-tenant, multi-provider enterprise file storage service for Asset Management, ITSM and other applications.
 
-**Status: Phase 1 — FS-100A merged; FS-100B application foundation in review.** No deployed service or released version.
+**Status: Phase 1 — FS-100A and FS-100B foundations merged.** No deployed service or released version.
 
 ## Start here
 - [Project constitution](docs/project/00_CONSTITUTION.md)

@@ -1,6 +1,6 @@
 # Current state and legacy capability baseline
 
-Date: 2026-11-14. Phase 1 FS-100A merged; FS-100B application foundation on review branch. Java/Maven domain, provider SPI and application; no service runtime, database, deployment or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
+Date: 2026-11-14. Phase 1 FS-100A merged; FS-100B application foundation merged. Java/Maven domain, provider SPI and application; no service runtime, database, deployment or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
 
 ## Legacy inventory (sanitized)
 | Capability | Legacy evidence | Proposed treatment |
@@ -28,4 +28,7 @@ DEC-FS001–010, roadmap, Java 21/Maven/Spring Boot/PostgreSQL/Flyway, public vi
 
 FS-100A hosted verification: run 43609642326, ten tests passed, zero failures/errors/skips, dependency boundaries and Kernel checksum verified. Local verification remains open; PR #5 merged at 2effe678943242260c64ef252bae7378aa61434a; final head CI 43609728550 succeeded.
 
-FS-100B: product outcome, decision rules, acceptance scenarios, application use cases and transaction/authorization ports in review. No live bytes, grants, database, IAM or public API. Local full build remains unavailable (Maven absent, GitHub DNS failed); no waiver implied. See [FS-100B acceptance](10_FS100B_ACCEPTANCE.md).
+FS-100B: product outcome, decision rules, acceptance scenarios, application use cases and transaction/authorization ports merged. No live bytes, grants, database, IAM or public API. Local full build remains unavailable (Maven absent, GitHub DNS failed); no waiver implied. See [FS-100B acceptance](10_FS100B_ACCEPTANCE.md).
+
+
+2026-11-15: Kernel 0.3.2 dependency maintenance approved by owner. Public Central resolution verified in File Storage PR #8 CI run 43664121720: 18 tests passed (8 domain, 2 SPI, 8 application), no failures/errors/skips. No service runtime or production readiness claim. FS-110/FS-120 remain future increments.
