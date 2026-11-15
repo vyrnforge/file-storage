@@ -1,6 +1,6 @@
 # Current state and legacy capability baseline
 
-Date: 2026-11-15. Phase 1 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier on review branch. Java/Maven domain, provider SPI, application and security; no service runtime, database, deployment or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
+Date: 2026-11-15. Phase 1 FS-100A merged; FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A persistence in review. Java/Maven domain, provider SPI, application, security and persistence; no deployed service, production database, or released product. Legacy evidence: user-provided private src.zip (77 files; 13 Java test files), not a full Git checkout. Archive inspected statically; no build or tests executed. Do not publish the archive or private configuration.
 
 ## Legacy inventory (sanitized)
 | Capability | Legacy evidence | Proposed treatment |
@@ -36,9 +36,13 @@ FS-110A hosted CI 43611269131 passed 25 tests, four-module Maven reactor, checks
 
 2026-11-15: PR #7 merged at 69d0ef978a5f04c283331851c00368632639de5c; final CI 43611373559 successful. Owner directed next. FS-110B verifier slice uses Nimbus JOSE+JWT and explicit trusted JWKS snapshots, tests real signed synthetic access tokens. Live IAM registration/key transport/authority store remain unconfigured. See [FS-110B](../security/FS110B_JWT_VERIFIER.md). FS-120 not started.
 
-FS-110B verifier implementation hosted CI 43665624103 passed 31 tests (including 6 real-signature test methods), no failures/errors/skips. PR #9 review pending; no live Wyrmgate registration, retrieval, binding or HTTP runtime. Local toolchain/DNS gap reconfirmed.
+FS-110B verifier implementation hosted CI 43665624103 passed 31 tests (including 6 real-signature test methods), no failures/errors/skips. PR #9 merged; no live Wyrmgate registration, retrieval, binding or HTTP runtime. Local toolchain/DNS gap reconfirmed.
 
 2026-11-15: Owner approved Kernel v0.3.2 dependency maintenance. PR #8 initially passed 18 tests against Central on the FS-100B baseline; rebased/merged with current FS-110A to preserve all security work. Fresh CI required on combined revision. No live verifier, DB or deployment claim.
-PR #8 merged at 43f1c5552a3202ad0724e516fe51c03886373591. PR #9 conflict resolution preserves Kernel 0.3.2 Central resolution, FileReference length enforcement and JWT verifier. Previous FS-110B CI used Kernel 0.3.0; combined head requires fresh CI.
+PR #8 merged at 43f1c5552a3202ad0724e516fe51c03886373591. PR #9 conflict resolution preserves Kernel 0.3.2 Central resolution, FileReference length enforcement and JWT verifier. Previous FS-110B CI used Kernel 0.3.0; combined CI 43666318429 passed 31 tests.
 
 2026-11-15: Owner requested Maven POM readability maintenance before the next implementation. Reformat all five POMs without changing XML values, element order, dependencies or build plugins; add lightweight formatting guard to make ci and editor guidance. No FS-120 authorization or runtime changes.
+
+2026-11-15: PR #9 merged at 1ecf31bb4ebebbc3f89c90712a7de0ab53beb159; PR #10 merged at 37a49f3c2488d919ebfeb7f53933c552e499d91b with POM readability guard and 31 passing tests (43666571277). Owner directed next implementation: FS-120A only. Service-owned PostgreSQL schema and JDBC transaction adapter in review; no production migration or live IAM. See [persistence contract](../architecture/05_POSTGRESQL_PERSISTENCE.md). Kernel 0.3.2 remains baseline; FS-120B/C and live IAM remain open.
+
+FS-120A code commit 7d64bf3868ea80bbccd4fb76c955968e7513b071 hosted CI 43667089332 passed 40 tests (9 on disposable PostgreSQL 17.12); migration V1 applied only to test database. PR #11 review pending; local build unavailable, no production application or later increment authorization.
