@@ -112,6 +112,35 @@ public final class JdbcConfiguration {
     }
 
     /**
+     * Stop new placements on the exact active revision. Existing pins remain
+     * readable through the trusted registry; no provider or credential revocation.
+     * This is a deliberate one-way transition under the current activation contract.
+     * Callers must arrange replacement policy routing before draining if continuity
+     * of new writes is required.
+     */
+    public long drainBackend(ActorReference actor, CorrelationContext correlation,
+                             BackendId backend, long expected) {
+        Objects.requireNonNull(actor);
+        Objects.requireNonNull(correlation);
+        Objects.requireNonNull(backend);
+        if (expected < 1) throw new Failure(Code.INVALID);
+        return execute((connection, events, audits) -> {
+            try (var ps = statement(connection, "SELECT backend_id FROM fs.backend WHERE backend_id=? FOR UPDATE",
+                    backend.value()); var rs = ps.executeQuery()) {
+                if (!rs.next()) throw new Failure(Code.NOT_FOUND);
+            }
+            requireOne(update(connection, """
+                    UPDATE fs.backend_revision SET status='DRAINING'
+                    WHERE backend_id=? AND config_revision=? AND status='ACTIVE'
+                    """, backend.value(), expected));
+            MutationIntents.record(events, audits, clock, correlation, actor, null,
+                    "file-storage.backend.drained", "file-storage.backend", backend.value().toString(),
+                    Map.of("revision", expected));
+            return expected;
+        });
+    }
+
+    /**
      * Publish a new revision (expected + 1). Zero denotes initial publication.
      * Rollback of routing is a new revision with the historical rule content.
      * The caller supplies already-authorized eligible locations; this is not a grant API.
