@@ -271,7 +271,7 @@ class DurableUploadAuthorityTest {
                                 @Override public void close(){try{adapter.close();}finally{adapterCloses.incrementAndGet();}}
                             };
                         }));
-                var gateway = new PrivateTransferGateway(authority(),resolver,
+                var gateway = new PrivateTransferGateway(DurableDownloadAuthority.combine(authority(),downloads(CLOCK)),resolver,
                         new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(15)),CLOCK);
                 var app = RuntimeApplication.application(TransferHttpConfiguration.class);
                 app.addInitializers(ctx -> ctx.getBeanFactory().registerSingleton("privateTransferGateway",gateway));
@@ -304,6 +304,13 @@ class DurableUploadAuthorityTest {
                     assertEquals(UploadScanWorker.Outcome.COMPLETED,worker(scans,resolver,scanner(Scan.CLEAN,"text/plain"),CLOCK).runOne());
                     assertEquals(VersionState.AVAILABLE,secured(CLOCK).session("user",TENANT,null,view.session()).value().versionState());
                     assertEquals(3,credentialCloses.get());assertEquals(3,adapterCloses.get());
+                    grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);
+                    var download=downloads(CLOCK).issue("user",TENANT,new FileId(view.file().fileId()),view.version(),null).value();
+                    var requestDownload=downloadRequest(uri.resolve("/transfer/v1/download").toString(),"user",download.handle());
+                    var resultDownload=http.send(requestDownload,HttpResponse.BodyHandlers.ofByteArray());
+                    assertEquals(200,resultDownload.statusCode());assertArrayEquals(content,resultDownload.body());
+                    assertEquals(403,http.send(requestDownload,HttpResponse.BodyHandlers.ofString()).statusCode());
+                    assertEquals(4,credentialCloses.get());assertEquals(4,adapterCloses.get());
                 }
             }
         }
@@ -398,16 +405,19 @@ class DurableUploadAuthorityTest {
             var scanRepo=scans(CLOCK,3);
             var work=completionWork(CLOCK,scanRepo);
             var app=RuntimeApplication.application(ApiRuntimeConfiguration.class,TransferHttpConfiguration.class,
-                io.vyrnforge.filestorage.runtime.http.UploadCommandHttpConfiguration.class);
+                io.vyrnforge.filestorage.runtime.http.UploadCommandHttpConfiguration.class,
+                io.vyrnforge.filestorage.runtime.http.DownloadCommandHttpConfiguration.class);
             // Both route groups use the same secured facade; no separate metadata authority.
             app.addInitializers(ctx->{
                 ctx.getBeanFactory().registerSingleton("apiRuntimeDependencies",dependencies);
+                ((org.springframework.context.support.GenericApplicationContext)ctx).registerBean("downloadAuthority",DurableDownloadAuthority.class,()->new DurableDownloadAuthority(
+                    ctx.getBean(SecuredFiles.class),new JdbcDownloadTransfers(source,CLOCK,Duration.ofMinutes(1),5)));
                 ((org.springframework.context.support.GenericApplicationContext)ctx).registerBean("completionCommands",CompletionCommands.class,()->new CompletionCommands(
                     ctx.getBean(SecuredFiles.class),new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5),work));
                 ((org.springframework.context.support.GenericApplicationContext)ctx).registerBean("durableUploadAuthority",DurableUploadAuthority.class,()->new DurableUploadAuthority(
                     ctx.getBean(SecuredFiles.class),new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5)));
                 ((org.springframework.context.support.GenericApplicationContext)ctx).registerBean("privateTransferGateway",PrivateTransferGateway.class,()->new PrivateTransferGateway(
-                    ctx.getBean(DurableUploadAuthority.class),resolver,new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(15)),CLOCK));
+                    DurableDownloadAuthority.combine(ctx.getBean(DurableUploadAuthority.class),ctx.getBean(DurableDownloadAuthority.class)),resolver,new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(15)),CLOCK));
             });
             try(var ctx=app.run("--server.port=0","--fs.role=COMBINED");var http=HttpClient.newHttpClient()){
                 String base="http://127.0.0.1:"+ctx.getEnvironment().getProperty("local.server.port");
@@ -472,8 +482,20 @@ class DurableUploadAuthorityTest {
                 assertEquals("COMPLETED",terminalJson.get("uploadState").asText());
                 assertEquals("AVAILABLE",terminalJson.get("versionState").asText());
                 assertEquals("SUCCEEDED",terminalJson.get("status").asText());
+                String downloadCommand=base+"/v1/files/"+file+"/versions/"+json.get("versionId").asText()+"/download-handle";
+                assertEquals(404,http.send(command(downloadCommand,"user","{}"),HttpResponse.BodyHandlers.ofString()).statusCode());
+                grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);
+                var issuedDownload=http.send(command(downloadCommand,"user","{}"),HttpResponse.BodyHandlers.ofString());
+                assertEquals(200,issuedDownload.statusCode(),issuedDownload.body());OpenApiContract.assertResponse(issuedDownload);
+                String downloadHandle=tools.jackson.databind.json.JsonMapper.builder().build().readTree(issuedDownload.body()).get("handle").asText();
+                var downloadRequest=downloadRequest(base+"/transfer/v1/download","user",downloadHandle);
+                var downloaded=http.send(downloadRequest,HttpResponse.BodyHandlers.ofByteArray());
+                assertEquals(200,downloaded.statusCode());assertArrayEquals(payload,downloaded.body());
+                assertEquals("no-store",downloaded.headers().firstValue("Cache-Control").orElseThrow());
+                assertTrue(downloaded.headers().firstValue("Location").isEmpty());
+                assertEquals(403,http.send(downloadRequest,HttpResponse.BodyHandlers.ofString()).statusCode());
                 assertEquals(409,http.send(command(commandBase+"/complete","user","{\"sha256\":\""+"0".repeat(64)+"\"}"),HttpResponse.BodyHandlers.ofString()).statusCode());
-                assertEquals(3,closed.get());assertEquals(3,adapterCloses.get());
+                assertEquals(4,closed.get());assertEquals(4,adapterCloses.get());
                 assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
             }
         }
@@ -915,5 +937,83 @@ class DurableUploadAuthorityTest {
         assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
         assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='CLEANUP_UPLOAD'"));
         assertEquals(1,fixture.opens.get());
+    }
+
+    private DurableDownloadAuthority downloads(Clock clock){
+        return new DurableDownloadAuthority(secured(clock),new JdbcDownloadTransfers(source,clock,Duration.ofMinutes(1),5));
+    }
+    private static HttpRequest downloadRequest(String uri,String proof,String handle){
+        return HttpRequest.newBuilder(URI.create(uri)).header("Authorization","Bearer "+proof)
+            .header("X-Transfer-Handle",handle).GET().build();
+    }
+    private FileId fileId(){return new FileId(view.file().fileId());}
+    private IntegrityFixture available() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        assertEquals(UploadScanWorker.Outcome.COMPLETED,worker(scans,fixture,scanner(Scan.CLEAN,"text/plain"),CLOCK).runOne());
+        return fixture;
+    }
+
+    @Test void downloadRequiresExplicitGrantAndExactAvailableVersion() throws Exception {
+        grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);
+        assertThrows(RuntimeException.class,()->downloads(CLOCK).issue("user",TENANT,fileId(),view.version(),null));
+        var fixture=available();
+        assertThrows(RuntimeException.class,()->downloads(CLOCK).issue("user",TENANT,fileId(),new VersionId(UUID.randomUUID()),null));
+        assertThrows(RuntimeException.class,()->downloads(CLOCK).issue("other",TENANT,fileId(),view.version(),null));
+        grant("fixture-other","asset","DOWNLOAD_TRANSFER","EXACT_FILE",fileId().value());
+        var issued=downloads(CLOCK).issue("other",TENANT,fileId(),view.version(),null).value();
+        assertThrows(TransferFailure.class,()->downloads(CLOCK).claim("user",issued.handle(),TransferInstruction.Action.DOWNLOAD));
+        var pin=downloads(CLOCK).claim("other",issued.handle(),TransferInstruction.Action.DOWNLOAD);
+        assertEquals(view.version(),pin.version());assertEquals(sha256(fixture.bytes),pin.sha256());
+        assertThrows(TransferFailure.class,()->downloads(CLOCK).claim("other",issued.handle(),TransferInstruction.Action.DOWNLOAD));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.download_transfer_handle WHERE claimed_at IS NOT NULL"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE payload_json::text LIKE ?","%"+issued.handle()+"%"));
+    }
+
+    @Test void downloadClaimFencesRevocationExpiryAndConcurrentReplay() throws Exception {
+        available();grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);
+        var d=downloads(CLOCK);var issued=d.issue("user",TENANT,fileId(),view.version(),null).value();
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='DOWNLOAD_TRANSFER'");
+        assertThrows(TransferFailure.class,()->d.claim("user",issued.handle(),TransferInstruction.Action.DOWNLOAD));
+        sql("UPDATE fs.file_grant SET revoked=false WHERE action='DOWNLOAD_TRANSFER'");
+        assertThrows(TransferFailure.class,()->downloads(Clock.fixed(NOW.plusSeconds(60),ZoneOffset.UTC)).claim("user",issued.handle(),TransferInstruction.Action.DOWNLOAD));
+        var start=new CountDownLatch(1);
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+            Callable<Boolean> claim=()->{start.await();try{d.claim("user",issued.handle(),TransferInstruction.Action.DOWNLOAD);return true;}catch(TransferFailure ex){return false;}};
+            var a=executor.submit(claim);var b=executor.submit(claim);start.countDown();
+            assertNotEquals(a.get(10,TimeUnit.SECONDS),b.get(10,TimeUnit.SECONDS));
+        }
+        assertEquals(1,scalar("SELECT count(*) FROM fs.download_transfer_handle WHERE claimed_at IS NOT NULL"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.transfer.download.claimed'"));
+    }
+
+    @Test void downloadDeniesQuarantineAndPinDrift() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);
+        assertThrows(RuntimeException.class,()->downloads(CLOCK).issue("user",TENANT,fileId(),view.version(),null));
+        assertEquals(UploadScanWorker.Outcome.QUARANTINED,worker(scans,fixture,scanner(Scan.MALICIOUS,"text/plain"),CLOCK).runOne());
+        assertThrows(RuntimeException.class,()->downloads(CLOCK).issue("user",TENANT,fileId(),view.version(),null));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.download_transfer_handle"));
+    }
+
+    @Test void downloadDriftAndIntentFailureNeverConsumeHandle() throws Exception {
+        var fixture=available();grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);
+        var d=downloads(CLOCK);var issued=d.issue("user",TENANT,fileId(),view.version(),null).value();
+        String key=objectKey();
+        sql("UPDATE fs.file_version SET object_key='private-prefix/drifted'");
+        assertThrows(TransferFailure.class,()->d.claim("user",issued.handle(),TransferInstruction.Action.DOWNLOAD));
+        sql("UPDATE fs.file_version SET object_key=?",key);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_download CHECK (event_type <> 'file-storage.transfer.download.claimed') NOT VALID");
+        try{
+            assertThrows(TransferFailure.class,()->d.claim("user",issued.handle(),TransferInstruction.Action.DOWNLOAD));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.download_transfer_handle WHERE claimed_at IS NOT NULL"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_download");}
+        var gateway=new PrivateTransferGateway(d,fixture,new TransferLimits(1024,1,1024,Duration.ofSeconds(5)),CLOCK);
+        fixture.bytes="wrong".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var output=new java.io.ByteArrayOutputStream();
+        assertThrows(TransferFailure.class,()->gateway.download("user",issued.handle(),output));
+        assertEquals(0,output.size(),"final chunk withheld on checksum mismatch");
+        assertEquals(1,scalar("SELECT count(*) FROM fs.download_transfer_handle WHERE claimed_at IS NOT NULL"));
     }
 }
