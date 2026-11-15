@@ -305,6 +305,20 @@ class DurableUploadAuthorityTest {
                     assertEquals(VersionState.AVAILABLE,secured(CLOCK).session("user",TENANT,null,view.session()).value().versionState());
                     assertEquals(3,credentialCloses.get());assertEquals(3,adapterCloses.get());
                     grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);
+                    // Change the policy to another registered location; historical placement must survive.
+                    var registry=new JdbcRegistry(source,CLOCK);
+                    var configuration=new JdbcConfiguration(source,CLOCK);
+                    var correlation=CorrelationContext.create();
+                    var replacementTarget=new Target(Provider.S3,URI.create("https://replacement.example.test"),"test",Addressing.PATH);
+                    var replacement=registry.registerBackend(ADMIN,correlation,replacementTarget,new CredentialRef("ref:replacement/v1"));
+                    var newLocation=registry.registerLocation(ADMIN,correlation,replacement,"replacement-bucket","new-prefix");
+                    registry.validateDraft(ADMIN,correlation,replacement,1,Set.of(replacementTarget),candidate->{
+                        Map<LocationId,Set<BackendValidator.Check>> checks=new HashMap<>();
+                        for(var item:candidate.locations())checks.put(item.id(),EnumSet.allOf(BackendValidator.Check.class));
+                        return new BackendValidator.Report(candidate.backend(),candidate.revision(),checks);
+                    });
+                    configuration.activateBackend(ADMIN,correlation,replacement,0,1);
+                    configuration.publishPolicy(ADMIN,correlation,SCOPE,1,List.of(new JdbcConfiguration.PolicyRule(newLocation,0,true)));
                     var download=downloads(CLOCK).issue("user",TENANT,new FileId(view.file().fileId()),view.version(),null).value();
                     var requestDownload=downloadRequest(uri.resolve("/transfer/v1/download").toString(),"user",download.handle());
                     var resultDownload=http.send(requestDownload,HttpResponse.BodyHandlers.ofByteArray());
@@ -963,6 +977,9 @@ class DurableUploadAuthorityTest {
         grant("fixture-other","asset","DOWNLOAD_TRANSFER","EXACT_FILE",fileId().value());
         var issued=downloads(CLOCK).issue("other",TENANT,fileId(),view.version(),null).value();
         assertThrows(TransferFailure.class,()->downloads(CLOCK).claim("user",issued.handle(),TransferInstruction.Action.DOWNLOAD));
+        for(String proof:List.of("other-app","other-tenant","wrong"))
+            assertThrows(TransferFailure.class,()->downloads(CLOCK).claim(proof,issued.handle(),TransferInstruction.Action.DOWNLOAD));
+        assertThrows(TransferFailure.class,()->downloads(CLOCK).claim("other",issued.handle(),TransferInstruction.Action.UPLOAD));
         var pin=downloads(CLOCK).claim("other",issued.handle(),TransferInstruction.Action.DOWNLOAD);
         assertEquals(view.version(),pin.version());assertEquals(sha256(fixture.bytes),pin.sha256());
         assertThrows(TransferFailure.class,()->downloads(CLOCK).claim("other",issued.handle(),TransferInstruction.Action.DOWNLOAD));
@@ -987,7 +1004,7 @@ class DurableUploadAuthorityTest {
         assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.transfer.download.claimed'"));
     }
 
-    @Test void downloadDeniesQuarantineAndPinDrift() throws Exception {
+    @Test void downloadDeniesVerifyingAndQuarantine() throws Exception {
         var fixture=matched();var scans=scans(CLOCK,3);
         new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
         grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);

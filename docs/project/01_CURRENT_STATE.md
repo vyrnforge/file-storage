@@ -106,3 +106,5 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 2026-11-15: PR #76 approved/merged 05b6b8d87b69c2af37ff4ec6492d2ae34f44fac9; CI 43704441936 passed 165 tests. #31 V7 scan lifecycle accepted; isolated completion commands and V3 durable verification worker in review. [Completion API/worker](../architecture/26_COMPLETION_API_WORKER.md). No production availability claim.
 
 2026-11-15: PR #77 approved/merged 4f65a0d812a95990c668cedcf5f195f34a7acd59; CI 43706027945 passed 168 tests. #31 isolated completion HTTP/worker accepted. V8 terminal replay and logical recovery in review; physical cleanup HOLD pending quiescence evidence. [Recovery](../architecture/27_TERMINAL_UPLOAD_RECOVERY.md).
+
+2026-11-15: PR #78 approved/merged edb185caa07332de52e84daabba2e201e41b998a; CI 43707217512 passed 173 tests. #31 terminal recovery accepted, cleanup HOLD remains. #35 V9 authorized download in review. [Download](../architecture/28_AUTHORIZED_DOWNLOAD.md).
