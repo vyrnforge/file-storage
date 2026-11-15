@@ -126,7 +126,7 @@ public final class JdbcConfiguration {
             throw new Failure(Code.INVALID);
         }
         long revision = expected + 1;
-        return execute(connection -> {
+        return execute((connection, events, audits) -> {
             // Stable backend locks prevent concurrent activation from changing the
             // selected configuration during validation/publication.
             for (PolicyRule rule : rules.stream()
