@@ -38,7 +38,12 @@ public final class JdbcUploadScan {
 
     /** After fresh secured completion authorization, enqueue and move both states atomically. */
     public UUID begin(Caller caller, SessionId session, CorrelationContext correlation) {
-        return transfers.execute((c, events, audits) -> {
+        return transfers.execute((c, events, audits) -> begin(c, events, audits, caller, session, correlation));
+    }
+
+    UUID begin(Connection c, io.vyrnforge.platform.kernel.event.EventIntentPort events,
+               io.vyrnforge.platform.kernel.audit.AuditIntentPort audits, Caller caller, SessionId session,
+               CorrelationContext correlation) throws SQLException {
             boolean verifying;
             try (var ps = transfers.statement(c, "SELECT state FROM fs.upload_session WHERE tenant_id=? AND session_id=? FOR UPDATE",
                     caller.tenant().value(), session.value()); var rows = ps.executeQuery()) {
@@ -67,7 +72,6 @@ public final class JdbcUploadScan {
                 transfers.record(events, audits, correlation, pin, "scan-queued");
             }
             return id;
-        });
     }
 
     public JdbcOperations.Batch claim(int limit) { return operations.claim(JdbcOperations.Kind.SCAN_UPLOAD, limit); }

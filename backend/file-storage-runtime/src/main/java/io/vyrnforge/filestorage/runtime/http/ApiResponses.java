@@ -17,6 +17,10 @@ final class ApiResponses {
         return headers(ResponseEntity.ok(), context).body(body);
     }
 
+    static <T> ResponseEntity<T> accepted(CorrelationContext context,T body) {
+        return headers(ResponseEntity.accepted(),context).body(body);
+    }
+
     static ResponseEntity<FileDtos.ErrorResponse> error(HttpServletRequest request, int status, String code) {
         var context = errorContext(request);
         return headers(ResponseEntity.status(status), context).contentType(MediaType.APPLICATION_JSON).body(errorBody(context, code));

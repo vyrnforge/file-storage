@@ -395,10 +395,15 @@ class DurableUploadAuthorityTest {
                         for(var item:candidate.locations())checks.put(item.id(),EnumSet.allOf(BackendValidator.Check.class));
                         return new BackendValidator.Report(candidate.backend(),candidate.revision(),checks);
                     }),()->true);
-            var app=RuntimeApplication.application(ApiRuntimeConfiguration.class,TransferHttpConfiguration.class);
+            var scanRepo=scans(CLOCK,3);
+            var work=completionWork(CLOCK,scanRepo);
+            var app=RuntimeApplication.application(ApiRuntimeConfiguration.class,TransferHttpConfiguration.class,
+                io.vyrnforge.filestorage.runtime.http.UploadCommandHttpConfiguration.class);
             // Both route groups use the same secured facade; no separate metadata authority.
             app.addInitializers(ctx->{
                 ctx.getBeanFactory().registerSingleton("apiRuntimeDependencies",dependencies);
+                ((org.springframework.context.support.GenericApplicationContext)ctx).registerBean("completionCommands",CompletionCommands.class,()->new CompletionCommands(
+                    ctx.getBean(SecuredFiles.class),new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5),work));
                 ((org.springframework.context.support.GenericApplicationContext)ctx).registerBean("durableUploadAuthority",DurableUploadAuthority.class,()->new DurableUploadAuthority(
                     ctx.getBean(SecuredFiles.class),new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5)));
                 ((org.springframework.context.support.GenericApplicationContext)ctx).registerBean("privateTransferGateway",PrivateTransferGateway.class,()->new PrivateTransferGateway(
@@ -416,9 +421,15 @@ class DurableUploadAuthorityTest {
                 var json=tools.jackson.databind.json.JsonMapper.builder().build().readTree(result.body());
                 var session=new SessionId(UUID.fromString(json.get("sessionId").asText()));
                 var file=json.get("file").get("fileId").asText();
-                var handle=ctx.getBean(DurableUploadAuthority.class).issue("user",TENANT,session,null);
+                String commandBase=base+"/v1/uploads/"+session.value();
+                var issued=http.send(command(commandBase+"/transfer-handle","user","{}"),HttpResponse.BodyHandlers.ofString());
+                assertEquals(200,issued.statusCode(),issued.body());OpenApiContract.assertResponse(issued);
+                var handle=tools.jackson.databind.json.JsonMapper.builder().build().readTree(issued.body()).get("handle").asText();
+                assertEquals(409,http.send(command(commandBase+"/transfer-handle","user","{}"),HttpResponse.BodyHandlers.ofString()).statusCode());
+                String completionBody="{\"sha256\":\""+sha256(payload)+"\"}";
+                assertEquals(403,http.send(command(commandBase+"/complete","user",completionBody),HttpResponse.BodyHandlers.ofString()).statusCode());
                 var upload=HttpRequest.newBuilder(URI.create(base+"/transfer/v1/upload")).header("Authorization","Bearer user")
-                    .header("X-Transfer-Handle",handle.handle()).header("Content-Type","application/octet-stream")
+                    .header("X-Transfer-Handle",handle).header("Content-Type","application/octet-stream")
                     .PUT(HttpRequest.BodyPublishers.ofByteArray(payload)).build();
                 var response=http.send(upload,HttpResponse.BodyHandlers.ofString());
                 assertEquals(204,response.statusCode(),response.body());assertTrue(response.headers().firstValue("Location").isEmpty());
@@ -429,27 +440,29 @@ class DurableUploadAuthorityTest {
                 }
                 assertArrayEquals(payload,fixture.bytes("fixture-oss",key));
                 assertEquals(1,opened.get());assertEquals(1,closed.get());assertEquals(1,adapterCloses.get());
-                var verifier=new UploadIntegrityVerification(ctx.getBean(SecuredFiles.class),
-                    new JdbcUploadVerification(new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5)),
-                    resolver,new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(15)),CLOCK);
-                assertTrue(verifier.verify("user",TENANT,session,sha256(payload),null).integrityMatched());
-                assertEquals(2,opened.get());assertEquals(2,closed.get());assertEquals(2,adapterCloses.get());
-                assertEquals(1,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL AND observed_size=32768"));
+                var accepted=http.send(command(commandBase+"/complete","user",completionBody),HttpResponse.BodyHandlers.ofString());
+                assertEquals(202,accepted.statusCode(),accepted.body());OpenApiContract.assertResponse(accepted);
+                assertEquals(accepted.body(),http.send(command(commandBase+"/complete","user",completionBody),HttpResponse.BodyHandlers.ofString()).body());
+                assertEquals(409,http.send(command(commandBase+"/complete","user","{\"sha256\":\""+"0".repeat(64)+"\"}"),HttpResponse.BodyHandlers.ofString()).statusCode());
+                assertEquals(1,opened.get(),"HTTP completion must not read bytes");
+                assertEquals(0,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL"));
                 try(var files=Files.list(spool)){assertEquals(0,files.count());}
                 var metadata=HttpRequest.newBuilder(URI.create(base+"/v1/files/"+file)).header("Authorization","Bearer user")
                     .header("X-Tenant-Id",TENANT.value().toString()).GET().build();
                 var read=http.send(metadata,HttpResponse.BodyHandlers.ofString());assertEquals(200,read.statusCode(),read.body());
-                OpenApiContract.assertResponse(read);assertFalse(read.body().contains("private-oss"));assertFalse(read.body().contains(handle.handle()));
+                OpenApiContract.assertResponse(read);assertFalse(read.body().contains("private-oss"));assertFalse(read.body().contains(handle));
                 var download=HttpRequest.newBuilder(URI.create(base+"/transfer/v1/download")).header("Authorization","Bearer user")
-                    .header("X-Transfer-Handle",handle.handle()).GET().build();
+                    .header("X-Transfer-Handle",handle).GET().build();
                 assertEquals(403,http.send(download,HttpResponse.BodyHandlers.ofString()).statusCode());
                 var admin=HttpRequest.newBuilder(URI.create(base+"/v1/admin/backends")).header("Authorization","Bearer admin").GET().build();
                 var adminResult=http.send(admin,HttpResponse.BodyHandlers.ofString());assertEquals(200,adminResult.statusCode());OpenApiContract.assertResponse(adminResult);
                 assertEquals(503,http.send(HttpRequest.newBuilder(URI.create(base+"/health/ready")).GET().build(),HttpResponse.BodyHandlers.ofString()).statusCode());
                 assertEquals(2,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
-                var scans=scans(CLOCK,3);
-                new UploadCompletion(ctx.getBean(SecuredFiles.class),scans).begin("user",TENANT,session,null);
-                assertEquals(UploadScanWorker.Outcome.COMPLETED,worker(scans,resolver,scanner(Scan.CLEAN,"application/octet-stream"),CLOCK).runOne());
+                var verifyWorker=new UploadVerificationWorker(work,resolver,new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(5)),CLOCK);
+                assertEquals(UploadVerificationWorker.Outcome.SCAN_QUEUED,verifyWorker.runOne());
+                assertEquals(1,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL AND observed_size=32768"));
+                assertEquals(2,opened.get());
+                assertEquals(UploadScanWorker.Outcome.COMPLETED,worker(scanRepo,resolver,scanner(Scan.CLEAN,"application/octet-stream"),CLOCK).runOne());
                 var available=http.send(metadata,HttpResponse.BodyHandlers.ofString());
                 assertEquals(200,available.statusCode());OpenApiContract.assertResponse(available);
                 assertEquals("AVAILABLE",tools.jackson.databind.json.JsonMapper.builder().build().readTree(available.body()).get("versionState").asText());
@@ -699,5 +712,97 @@ class DurableUploadAuthorityTest {
         assertThrows(Failure.class,()->scans.load(claim));
         assertEquals(1,fixture.opens.get());
         assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+    }
+
+    private static HttpRequest command(String uri,String proof,String body){
+        return HttpRequest.newBuilder(URI.create(uri)).header("Authorization","Bearer "+proof)
+            .header("X-Tenant-Id",TENANT.value().toString()).header("Content-Type","application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body)).build();
+    }
+
+    private JdbcCompletionWork completionWork(Clock clock,JdbcUploadScan scans){
+        return new JdbcCompletionWork(new JdbcUploadTransfers(source,clock,Duration.ofMinutes(1),5),
+            new JdbcOperations(source,clock,Duration.ofSeconds(10),Duration.ZERO,4),scans,3);
+    }
+
+    @Test void verificationQueueRollbackAndStaleLeaseCannotHandoff() throws Exception {
+        allow();var issued=issue();authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        var scans=scans(CLOCK,3);var work=completionWork(CLOCK,scans);
+        var commands=new CompletionCommands(secured,new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5),work);
+        byte[] bytes="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);String digest=sha256(bytes);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_verify_request CHECK (event_type <> 'file-storage.transfer.upload.verification-requested') NOT VALID");
+        try {
+            assertThrows(RuntimeException.class,()->commands.complete("user",TENANT,view.session(),digest,null));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.upload_integrity_verification"));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_verify_request");}
+        var accepted=commands.complete("user",TENANT,view.session(),digest,null).value();
+        assertEquals(accepted,commands.complete("user",TENANT,view.session(),digest,null).value());
+        assertThrows(RuntimeException.class,()->commands.complete("other",TENANT,view.session(),digest,null));
+        var stale=work.claim().claims().getFirst();var old=work.load(stale);
+        Clock later=Clock.fixed(NOW.plusSeconds(11),ZoneOffset.UTC);var replacement=completionWork(later,scans(later,3));
+        var claim=replacement.claim().claims().getFirst();assertNotEquals(stale.token(),claim.token());
+        assertThrows(RuntimeException.class,()->replacement.finish(old,digest));
+        var current=replacement.load(claim);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_verify_handoff CHECK (event_type <> 'file-storage.transfer.upload.scan-queued') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->replacement.finish(current,digest));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL"));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='SCAN_UPLOAD'"));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='PENDING'"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_verify_handoff");}
+        replacement.finish(current,digest);
+        assertEquals(1,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='VERIFY_UPLOAD' AND status='SUCCEEDED'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='SCAN_UPLOAD' AND status='PENDING'"));
+        assertEquals(VersionState.VERIFYING,secured.session("user",TENANT,null,view.session()).value().versionState());
+    }
+
+    @Test void verificationWorkerRetriesMissingBytesAndNeverStoresProof() throws Exception {
+        allow();var issued=issue();authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        var scans=scans(CLOCK,3);var work=completionWork(CLOCK,scans);
+        byte[] bytes="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);String digest=sha256(bytes);
+        var commands=new CompletionCommands(secured,new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5),work);
+        commands.complete("user",TENANT,view.session(),digest,null);
+        var fixture=new IntegrityFixture();
+        var worker=new UploadVerificationWorker(work,fixture,new TransferLimits(1024,1,1024,Duration.ofSeconds(5)),CLOCK);
+        assertEquals(UploadVerificationWorker.Outcome.RETRY,worker.runOne());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL"));
+        fixture.bytes=bytes;
+        assertEquals(UploadVerificationWorker.Outcome.SCAN_QUEUED,worker.runOne());
+        assertEquals("SUCCEEDED",commands.complete("user",TENANT,view.session(),digest,null).value().status());
+        assertEquals(UploadScanWorker.Outcome.COMPLETED,worker(scans,fixture,scanner(Scan.CLEAN,"text/plain"),CLOCK).runOne());
+        assertEquals(VersionState.AVAILABLE,secured.session("user",TENANT,null,view.session()).value().versionState());
+        assertEquals(3,fixture.opens.get());assertEquals(3,fixture.closes.get());
+    }
+
+    @Test void explicitWorkerRuntimeSchedulesDurableVerificationAndScan() throws Exception {
+        allow();var issued=issue();authority().claim("user",issued.handle(),TransferInstruction.Action.UPLOAD);
+        var scans=scans(CLOCK,3);var work=completionWork(CLOCK,scans);
+        var fixture=new IntegrityFixture();fixture.bytes="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var commands=new CompletionCommands(secured,new JdbcUploadTransfers(source,CLOCK,Duration.ofMinutes(1),5),work);
+        commands.complete("user",TENANT,view.session(),sha256(fixture.bytes),null);
+        var verify=new UploadVerificationWorker(work,fixture,new TransferLimits(1024,1,1024,Duration.ofSeconds(5)),CLOCK);
+        var scan=worker(scans,fixture,scanner(Scan.CLEAN,"text/plain"),CLOCK);
+        var app=RuntimeApplication.application(UploadWorkerConfiguration.class);
+        app.addInitializers(ctx->{
+            ctx.getBeanFactory().registerSingleton("uploadVerificationWorker",verify);
+            ctx.getBeanFactory().registerSingleton("uploadScanWorker",scan);
+        });
+        try(var ctx=app.run("--server.port=0","--fs.role=WORKER","--fs.upload-worker.delay-ms=25")){
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(8);
+            while(scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'")==0&&System.nanoTime()<deadline)
+                Thread.sleep(25);
+            assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'"));
+            assertEquals(2,scalar("SELECT count(*) FROM fs.storage_operation WHERE status='SUCCEEDED'"));
+            assertEquals(2,fixture.opens.get());assertEquals(2,fixture.closes.get());
+        }
+        var wrong=RuntimeApplication.application(UploadWorkerConfiguration.class);
+        wrong.addInitializers(ctx->{
+            ctx.getBeanFactory().registerSingleton("uploadVerificationWorker",verify);
+            ctx.getBeanFactory().registerSingleton("uploadScanWorker",scan);
+        });
+        assertThrows(RuntimeException.class,()->{try(var ctx=wrong.run("--server.port=0","--fs.role=API","--fs.upload-worker.delay-ms=25")){
+            fail("API must not run upload workers");
+        }});
     }
 }

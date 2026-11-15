@@ -5,6 +5,8 @@ import io.vyrnforge.filestorage.application.FileApplication.Code;
 import io.vyrnforge.filestorage.application.FileApplication.Failure;
 import io.vyrnforge.filestorage.domain.StorageModel.SessionId;
 import io.vyrnforge.platform.kernel.context.CorrelationContext;
+import io.vyrnforge.platform.kernel.event.EventIntentPort;
+import io.vyrnforge.platform.kernel.audit.AuditIntentPort;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -29,8 +31,12 @@ public final class JdbcUploadVerification {
 
     /** Trusted caller after fresh SecuredFiles authorization. Replays preserve the first expected digest. */
     public Job request(Caller caller, SessionId session, String expectedSha256, CorrelationContext correlation) {
-        requireHash(expectedSha256);
-        return transfers.execute((c, events, audits) -> {
+        return transfers.execute((c, events, audits) -> request(c, events, audits, caller, session, expectedSha256, correlation));
+    }
+
+    Job request(Connection c, EventIntentPort events, AuditIntentPort audits, Caller caller, SessionId session,
+                String expectedSha256, CorrelationContext correlation) throws SQLException {
+            requireHash(expectedSha256);
             var resource = transfers.resource(c, caller, session);
             transfers.lockCurrentGrant(c, resource);
             var pin = resource.pin();
@@ -47,16 +53,19 @@ public final class JdbcUploadVerification {
             var job = read(c, pin);
             if (!job.expectedSha256().equals(expectedSha256)) throw new Failure(Code.CONFLICT);
             return job;
-        });
     }
 
     /** Only a trusted verifier supplies independently measured bytes. No provider I/O in this transaction. */
     public Job matched(Job candidate, long measuredSize, String measuredSha256, CorrelationContext correlation) {
+        return transfers.execute((c, events, audits) -> matched(c, events, audits, candidate, measuredSize, measuredSha256, correlation));
+    }
+
+    Job matched(Connection c, EventIntentPort events, AuditIntentPort audits, Job candidate, long measuredSize,
+                String measuredSha256, CorrelationContext correlation) throws SQLException {
         Objects.requireNonNull(candidate);
         requireHash(measuredSha256);
         if (measuredSize != candidate.pin().size() || !candidate.expectedSha256().equals(measuredSha256))
             throw new Failure(Code.INVALID);
-        return transfers.execute((c, events, audits) -> {
             var resource = transfers.resource(c, candidate.pin().caller(), candidate.pin().session());
             transfers.lockCurrentGrant(c, resource);
             var pin = resource.pin();
@@ -75,10 +84,9 @@ public final class JdbcUploadVerification {
             }
             transfers.record(events, audits, correlation, pin, "integrity-matched");
             return read(c, pin);
-        });
     }
 
-    private void requireClaim(Connection c, JdbcUploadTransfers.Pin pin) throws SQLException {
+    void requireClaim(Connection c, JdbcUploadTransfers.Pin pin) throws SQLException {
         try (var ps = transfers.statement(c, """
                 SELECT 1 FROM fs.upload_transfer_handle
                 WHERE tenant_id=? AND session_id=? AND actor=? AND consumer=? AND file_id=? AND version_id=?
@@ -91,7 +99,7 @@ public final class JdbcUploadVerification {
         }
     }
 
-    private Job read(Connection c, JdbcUploadTransfers.Pin pin) throws SQLException {
+    Job read(Connection c, JdbcUploadTransfers.Pin pin) throws SQLException {
         try (var ps = transfers.statement(c, """
                 SELECT expected_sha256,verified_at FROM fs.upload_integrity_verification WHERE session_id=?
                 """, pin.session().value()); var rows = ps.executeQuery()) {
