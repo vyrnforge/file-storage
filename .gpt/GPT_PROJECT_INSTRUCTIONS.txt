@@ -13,3 +13,5 @@ Current increment: FS-120C2 merged (#55); FS-200A #24 authorized for contract/te
 
 Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separate API/worker runtime roles, optional private CDN acceleration. One product, repository, domain and authoritative metadata store; combined local/small deployment permitted. API authorizes/orchestrates, never carries consumer file bodies in separated profile. Gateway streams to private providers, workers verify/scan/reconcile. No direct provider URL, locator, signature or credential exposure. CDN conditional, no shared confidential caching by default. No production deployment or limits approved.
 Current next: FS-200B #25 conditional on reviewed isolated test profile and accepted contract baseline. #57 gateway and #58 CDN tracked; no later implementation or deployment authorized.
+
+Current increment: #24 accepted and PR #56 merged at c2c3c9a8a5f18a6d66f859097ae3031ec73bb508. #25 S3 profile implemented, owner reviewed, CI 43675256063 passed 91 tests (13 MinIO, 38 PostgreSQL); final reconciliation and merge required. #26 native OSS requires separate authorization. No production deployment.
