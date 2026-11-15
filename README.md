@@ -80,3 +80,5 @@ PR #72 accepted/merged 4880a42 (152 tests). [Registry-pinned provider transfer](
 PR #73 accepted/merged 771ed70 (154 tests). [Native OSS and combined gateway](docs/architecture/23_OSS_COMBINED_GATEWAY.md) — isolated integration in review.
 
 PR #74 accepted/merged cbc61ef (155 tests). [Upload integrity verification](docs/architecture/24_UPLOAD_INTEGRITY.md) — #31 V6 durable matching evidence in review; no available state or scan verdict.
+
+PR #75 accepted/merged 15015ec (157 tests). [Durable scan lifecycle](docs/architecture/25_UPLOAD_SCAN_LIFECYCLE.md) — #31 isolated scan work and guarded availability in review; no real scanner/deployment.
