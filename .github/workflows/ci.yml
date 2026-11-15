@@ -26,9 +26,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Pull pinned S3 compatibility fixture
+      - name: Prepare checksum-pinned S3 compatibility fixture
         if: ${{ hashFiles('backend/file-storage-provider-s3/pom.xml') != '' }}
-        timeout-minutes: 3
-        run: docker pull docker.io/minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+        timeout-minutes: 5
+        run: make prepare-s3-fixture
       - name: Verify foundation, hygiene and domain build
         run: make ci

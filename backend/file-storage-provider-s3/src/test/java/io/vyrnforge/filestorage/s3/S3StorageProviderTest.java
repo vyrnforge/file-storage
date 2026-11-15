@@ -39,11 +39,13 @@ class S3StorageProviderTest extends ProviderContract {
     private static final String USER = "test-" + UUID.randomUUID();
     private static final String PASSWORD = UUID.randomUUID().toString();
     private static final GenericContainer<?> SERVER = new GenericContainer<>(
-            DockerImageName.parse("docker.io/minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e"))
+            DockerImageName.parse("file-storage-test/minio:2025-04-22-verified"))
+            .withImagePullPolicy(image -> false) // local fixture only; never fetch an external image
             .withEnv("MINIO_ROOT_USER", USER)
             .withEnv("MINIO_ROOT_PASSWORD", PASSWORD)
             .withCommand("server", "/data")
             .withExposedPorts(9000)
+            .withStartupAttempts(1)
             .waitingFor(Wait.forHttp("/minio/health/ready").forPort(9000).withStartupTimeout(Duration.ofMinutes(2)));
     private static final LocationId A = new LocationId(UUID.randomUUID());
     private static final LocationId B = new LocationId(UUID.randomUUID());
