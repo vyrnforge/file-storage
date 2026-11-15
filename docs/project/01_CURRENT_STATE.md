@@ -84,3 +84,5 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 2026-11-15: Owner accepted and merged PR #66 at 151898682db583317718a080415deff74992e4b7; CI 43692244128 passed 129 tests. #30 continuation: isolated policy admin HTTP, separate action authority and shared metadata admission, real PostgreSQL contract tests in review. See [policy administration](../architecture/17_POLICY_ADMIN_HTTP.md). No live authority or deployment.
 
 2026-11-15: PR #67 accepted/merged c08dd44250e0253f0b9a83a81bd679986473159e; CI 43693427687 passed 133 tests. #30 continuation: isolated backend administration HTTP and real DB contracts in review. See [backend administration](../architecture/18_BACKEND_ADMIN_HTTP.md). No live platform authority or provider validation evidence; #16 #17–#19 #26–#28 remain open.
+
+2026-11-15: PR #68 owner approved and merged 4c61e167f007e0ba14bff25ab71e037df2e9a221; CI 43694052093 passed 137 tests. Owner requested dependency-first delivery; skip externally blocked work, fix independent software gaps. #28 latest-only draft safety in review; #30 isolated runtime composition/readiness next. Actual IAM/provider evidence remains blocked.

@@ -489,6 +489,7 @@ class JdbcTransactionsTest {
         assertEquals(1, results.stream().filter(r -> r instanceof Long).count());
         assertEquals(1, results.stream().filter(r -> r == Code.CONFLICT).count());
         long winner = (Long) results.stream().filter(r -> r instanceof Long).findFirst().orElseThrow();
+        assertEquals(3L, winner, "only the latest candidate may win");
         assertEquals(winner, scalar("SELECT config_revision FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='ACTIVE'"));
         assertEquals(1, scalar("SELECT count(*) FROM fs.backend_revision WHERE backend_id='" + OSS + "' AND status='DRAFT'"));
     }
@@ -1557,5 +1558,54 @@ class JdbcTransactionsTest {
         assertEquals(Code.INVALID, assertThrows(Failure.class, () -> policy.history(ADMIN, SCOPE, 0, 101)).code());
         assertEquals(1L, policy.active(ADMIN, SCOPE).orElseThrow().revision());
         assertEquals(1, count("policy_revision"));
+    }
+
+    @Test
+    void supersededValidatedDraftCannotActivateOrBeRevalidated() throws SQLException {
+        var registry = registry();
+        var ctx = CorrelationContext.create();
+        var target = registryTarget(Provider.S3, "https://superseded.example.test");
+        var backend = registry.registerBackend(ADMIN, ctx, target, new CredentialRef("ref:synthetic/superseded:v1"));
+        registry.registerLocation(ADMIN, ctx, backend, "validation-bucket", "one");
+        assertEquals(1, registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(target), JdbcTransactionsTest::validReport));
+        assertEquals(2, registry.reviseCredential(ADMIN, ctx, backend, 1, new CredentialRef("ref:synthetic/superseded:v2")));
+        long activationEvents = intents("platform_event_outbox", "event_type", "file-storage.backend.activated");
+        long activationAudits = intents("platform_audit_event", "action", "file-storage.backend.activated");
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                configuration().activateBackend(ADMIN, ctx, backend, 0, 1)).code());
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(target), c -> {
+                    throw new AssertionError("superseded candidate must not reach validator");
+                })).code());
+        assertTrue(registry.active(backend).isEmpty());
+        assertEquals(activationEvents, intents("platform_event_outbox", "event_type", "file-storage.backend.activated"));
+        assertEquals(activationAudits, intents("platform_audit_event", "action", "file-storage.backend.activated"));
+        assertEquals(2, registry.validateDraft(ADMIN, ctx, backend, 2, Set.of(target), JdbcTransactionsTest::validReport));
+        assertEquals(2, configuration().activateBackend(ADMIN, ctx, backend, 0, 2));
+        assertEquals(2, registry.active(backend).orElseThrow().revision());
+        assertEquals(activationEvents + 1, intents("platform_event_outbox", "event_type", "file-storage.backend.activated"));
+        assertEquals(activationAudits + 1, intents("platform_audit_event", "action", "file-storage.backend.activated"));
+    }
+
+    @Test
+    void draftValidationRejectsCredentialRevisionAppendedDuringExternalCheck() throws SQLException {
+        var registry = registry();
+        var ctx = CorrelationContext.create();
+        var target = registryTarget(Provider.S3, "https://revision-race.example.test");
+        var backend = registry.registerBackend(ADMIN, ctx, target, new CredentialRef("ref:synthetic/race:v1"));
+        registry.registerLocation(ADMIN, ctx, backend, "validation-bucket", "one");
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                registry.validateDraft(ADMIN, ctx, backend, 1, Set.of(target), candidate -> {
+                    assertEquals(2, registry().reviseCredential(ADMIN, ctx, backend, 1,
+                            new CredentialRef("ref:synthetic/race:v2")));
+                    return validReport(candidate);
+                })).code());
+        assertTrue(registry.history(backend, 0, 100).stream().noneMatch(JdbcRegistry.RevisionView::validated));
+        assertEquals(0, intents("platform_event_outbox", "event_type", "file-storage.backend.validated"));
+        assertEquals(0, intents("platform_audit_event", "action", "file-storage.backend.validated"));
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () ->
+                configuration().activateBackend(ADMIN, ctx, backend, 0, 1)).code());
+        assertEquals(2, registry.validateDraft(ADMIN, ctx, backend, 2, Set.of(target), JdbcTransactionsTest::validReport));
+        assertEquals(2, configuration().activateBackend(ADMIN, ctx, backend, 0, 2));
     }
 }
