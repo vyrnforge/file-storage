@@ -51,6 +51,16 @@ class StorageProviderTest extends ProviderContract {
         void version(Locator l){if(l.providerVersion()!=null)throw new StorageFailure(ErrorCode.UNSUPPORTED);}
         byte[] require(Locator l){version(l);byte[] b=objects.get(l);if(b==null)throw new StorageFailure(ErrorCode.NOT_FOUND);return b;}
     }
+    @Test
+    void metadataRejectsNonSha256DigestAndInvalidSize() {
+        assertThrows(IllegalArgumentException.class, () -> new Metadata(1, "etag-1", "text/plain"));
+        assertThrows(IllegalArgumentException.class, () -> new Metadata(-1, null, "text/plain"));
+        assertThrows(IllegalArgumentException.class, () -> new Metadata(1, null, " "));
+        assertNull(new Metadata(0, null, "application/octet-stream").sha256());
+        String digest = "a".repeat(64);
+        assertEquals(digest, new Metadata(1, digest, "text/plain").sha256());
+    }
+
     @Test void optionalSigningAndMultipartFailExplicitly(){
         StorageProvider p=new Memory();var a=new Locator(new LocationId(new UUID(0,1)),"a",null);
         var call=new Call(Duration.ofSeconds(1));var expiry=Instant.parse("2026-01-01T00:01:00Z");

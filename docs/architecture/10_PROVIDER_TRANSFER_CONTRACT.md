@@ -29,10 +29,10 @@ Tradeoff: service-controlled streaming consumes service bandwidth and connection
 ProviderContract in SPI test sources is packaged as a test-only tests classifier by existing Maven jar plugin. Adapter modules extend it with stable isolated fixture provider, two test locations, unique synthetic prefixes, deterministic cleanup and profile-specific tests. Use Maven verify (package needed for classifier), explicit test-scope JUnit. No new dependency version.
 P01 exact bytes/zero size, HEAD digest if present, caller input ownership and early get close.
 P02 wrong-size rejection and no overwrite; concurrent writers one winner.
-P03 bounded location/prefix listing with continuation and termination.
+P03 bounded location/prefix listing with continuation and termination; invalid/mismatched cursor fails INVALID.
 P04 missing get/head, idempotent deletion, absent version never falls back.
 P05 absent optional methods explicitly unsupported; neutral failure messages.
-P06 original regressions, POM readability and dependency boundaries; synthetic fixture only.
+P06 SHA-256 metadata validation rejects ETag-shaped digests, invalid size and blank MIME; original regressions, POM readability and dependency boundaries; synthetic fixture only.
 P07 owner accepts private transfer decision and relevant #16 limits/profile choices before #24 closure/adapter authorization; actual SDK profile proof in #25/#26.
 
 ## Handoff

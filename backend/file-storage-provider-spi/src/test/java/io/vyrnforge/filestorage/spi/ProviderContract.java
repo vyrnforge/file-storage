@@ -164,6 +164,17 @@ public abstract class ProviderContract {
     }
 
     @Test
+    public void continuationCannotBeReusedOutsideItsScope() {
+        put(object(location(), "cursor/a"), new byte[]{1});
+        put(object(location(), "cursor/b"), new byte[]{2});
+        String cursor = provider().list(location(), prefix + "cursor/", null, 1, call()).nextCursor();
+        assertNotNull(cursor);
+        fails(ErrorCode.INVALID, () -> provider().list(otherLocation(), prefix + "cursor/", cursor, 1, call()));
+        fails(ErrorCode.INVALID, () -> provider().list(location(), prefix + "different/", cursor, 1, call()));
+        fails(ErrorCode.INVALID, () -> provider().list(location(), prefix + "cursor/", "invalid-cursor", 1, call()));
+    }
+
+    @Test
     public void deletionAndMissingReadAreExplicit() {
         Locator locator = object(location(), "delete");
         fails(ErrorCode.NOT_FOUND, () -> provider().get(locator, call()));
