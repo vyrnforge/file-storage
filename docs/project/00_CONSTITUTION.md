@@ -1,6 +1,6 @@
 # Project constitution
 
-Status: architecture direction approved 2026-11-14; FS-110A/B verifier merged; FS-120A persistence authorized. Later work requires review.
+Status: architecture direction approved 2026-11-14; Phase 1 through FS-120B1 merged (PR #12); later work requires owner authorization.
 
 ## Mission
 Provide a standalone enterprise storage service that abstracts storage-provider details for authorized applications and administrators without losing durable file identity or operational control.
@@ -21,3 +21,5 @@ Characterize legacy behavior; identify evidence; propose decisions; implement bo
 Owner approves ADRs, scope expansion, technology selection, production releases and migration/cutover. Track Specified / Implemented / Applied / Verified separately. Changes to shared ecosystem repos require separate approval. Repository PR approval does not automatically approve every proposed architecture decision.
 
 2026-11-15: FS-120A merged; FS-120B1 transactional initiation in scope. FS-120B2/C and production work require review.
+
+2026-11-15: Master delivery tracker [#13](https://github.com/vyrnforge/file-storage/issues/13) created with 37 work packages. FS-120B2A (#20) is the next candidate, not authorization. Planning preserves approved scope and production gates.

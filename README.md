@@ -2,7 +2,7 @@
 
 Independent, multi-tenant, multi-provider enterprise file storage service for Asset Management, ITSM and other applications.
 
-**Status: Phase 1 — FS-100A and FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 idempotency in review.** No deployed service or released version.
+**Status: Phase 1 — FS-100A and FS-100B merged; FS-110A merged; FS-110B verifier merged; FS-120A merged; FS-120B1 idempotency merged; next increment awaits owner authorization.** No deployed service or released version.
 
 ## Start here
 - [Project constitution](docs/project/00_CONSTITUTION.md)
@@ -12,7 +12,7 @@ Independent, multi-tenant, multi-provider enterprise file storage service for As
 - [Storage control plane](docs/architecture/02_STORAGE_CONTROL_PLANE.md)
 - [API and integration](docs/architecture/03_INTEGRATION.md)
 - [Threat model](docs/security/THREAT_MODEL.md)
-- [Delivery roadmap](docs/project/03_ROADMAP.md) and [decision register](docs/project/04_DECISIONS.md)
+- [Delivery roadmap](docs/project/03_ROADMAP.md), [master delivery backlog (#13)](https://github.com/vyrnforge/file-storage/issues/13) and [decision register](docs/project/04_DECISIONS.md)
 - [Project context for AI agents](AGENTS.md) and [.gpt instructions](.gpt/GPT_PROJECT_INSTRUCTIONS.txt)
 
 - [Phase 0 architecture review](docs/project/06_PHASE_0_ARCHITECTURE_REVIEW.md)
