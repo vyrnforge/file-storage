@@ -68,3 +68,5 @@ FS-300A foundation merged (PR #64, 125 verified tests). HTTP boundary refinement
 - [FS-300A isolated backend administration](docs/architecture/18_BACKEND_ADMIN_HTTP.md) — platform-level registry/lifecycle contracts; no public exposure.
 
 PR #68 accepted/merged (137 tests). Dependency-first delivery: independent lifecycle safety in review, isolated runtime composition next; actual IAM/provider and deployment gates remain open.
+
+- [FS-300A runtime composition](docs/architecture/19_RUNTIME_COMPOSITION.md) — explicit isolated API wiring, schema/authority readiness; no live exposure.

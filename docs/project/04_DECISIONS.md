@@ -76,3 +76,5 @@ Alternatives reviewed: in-process streaming (combined profile only), direct prov
 2026-11-15: Owner accepted PR #67 and authorized next #30 slice; merged c08dd44. Backend admin proposed explicit tenantless platform permissions, exact backend action scope and global LIST/REGISTER; tenant policy admin is not platform admin. Exact server-approved targets and trusted validator required; no production role or provider policy approval inferred.
 
 2026-11-15: Owner approved PR #68, merged 4c61e16; dependency-first instruction: skip genuinely blocked issues, fix independent engineering gaps. Proposed latest-only draft guard under #28, retain old pins and rollback via new revisions; subject to review. No live authority or deployment approval.
+
+2026-11-15: Owner approved latest-only candidate revision guard, PR #69 merged 28f66a0 (139 tests). Continue #30 isolated API composition: explicit dependency bundle, both Flyway histories validated without migration, trusted authority readiness probe; combined stays unready pending transfer/worker. No production readiness claim.

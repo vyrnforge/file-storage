@@ -27,3 +27,5 @@ Outstanding #30: control-plane DTOs/authorized administrative routes, actual aut
 PR #66 accepted/merged 1518986; CI 43692244128 passed 129 tests. [Policy administration HTTP](17_POLICY_ADMIN_HTTP.md) is the next isolated slice, sharing transport admission with consumer routes but requiring distinct action and location authority. Default runtime remains health-only.
 
 PR #67 accepted/merged c08dd44, CI 43693427687 passed 133 tests. [Backend administration HTTP](18_BACKEND_ADMIN_HTTP.md) continues isolated #30; readiness and live IAM/provider validation remain gated.
+
+[Explicit runtime composition and readiness](19_RUNTIME_COMPOSITION.md) continues #30 after PR #69 merged 28f66a0 (139 tests). Default health-only unchanged; explicitly composed API checks schema and trusted authority, COMBINED remains unready pending transfer/worker. No live IAM or deployment.
