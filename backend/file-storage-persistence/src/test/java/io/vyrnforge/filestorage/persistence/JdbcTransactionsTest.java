@@ -1172,6 +1172,37 @@ class JdbcTransactionsTest {
                 .execute(u -> u.bySession(A, initial.session()).orElseThrow());
         assertEquals(1, persisted.session().placement().configRevision());
         assertEquals(OL, persisted.session().placement().location().value());
+        // Simulate authority restoring the exact prior version before rollback validation.
+        // A revoked version may never be used merely because it was valid historically.
+        refs.add("ref:synthetic/oss");
+        sql("UPDATE fs.backend_revision SET validated_revision=config_revision WHERE backend_id=? AND config_revision=3", OSS);
+        configuration().activateBackend(ADMIN, correlation, backend, 2, 3);
+        assertEquals(3, registry().active(backend).orElseThrow().revision());
+        try (var resolved = registry.resolveExisting(backend, 3, location, resolver)) {
+            assertEquals("ref:synthetic/oss", resolved.credential().reference);
+            assertEquals(3, resolved.revision());
+        }
+        assertEquals(BackendStatus.DRAINING, registry.history(backend, 3, 1).getFirst().status());
+        assertEquals(Code.DENIED, assertThrows(Failure.class,
+                () -> registry.resolveExisting(backend, 3, location,
+                        (io.vyrnforge.filestorage.application.CredentialResolver<SyntheticCredential>) ref -> null)).code());
+    }
+
+    @Test
+    void registryConcurrentOverlappingLocationsHaveOneWinner() throws Exception {
+        var registry = registry();
+        var ctx = CorrelationContext.create();
+        var one = registry.registerBackend(ADMIN, ctx, registryTarget(Provider.S3, "https://concurrent.example.test"),
+                new CredentialRef("ref:synthetic/concurrent:v1"));
+        var two = registry.registerBackend(ADMIN, ctx, registryTarget(Provider.S3, "https://CONCURRENT.example.test:443/"),
+                new CredentialRef("ref:synthetic/concurrent:v2"));
+        var results = competing(() -> registry.registerLocation(ADMIN, ctx, one, "concurrent-bucket", "area"),
+                () -> registry.registerLocation(ADMIN, ctx, two, "concurrent-bucket", "area/nested"));
+        assertEquals(1, results.stream().filter(v -> v instanceof LocationId).count());
+        assertEquals(1, results.stream().filter(v -> v == Code.CONFLICT).count());
+        assertEquals(1, scalar("SELECT count(*) FROM fs.storage_location WHERE bucket='concurrent-bucket'"));
+        assertEquals(1, intents("platform_audit_event", "action", "file-storage.location.registered"));
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.location.registered"));
     }
 
     @Test
