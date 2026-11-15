@@ -49,7 +49,8 @@ public final class JdbcConfiguration {
     }
 
     /**
-     * Zero means first activation only. Replacing an active credential revision
+     * Zero means first activation only. Only the latest candidate may activate.
+     * Replacing an active credential revision
      * drains the previous revision but never rewrites a session's pinned identity.
      */
     public long activateBackend(ActorReference actor, CorrelationContext correlation, BackendId backend, long expected, long candidate) {
@@ -66,6 +67,7 @@ public final class JdbcConfiguration {
                     throw new Failure(Code.NOT_FOUND);
                 }
             }
+            BackendRevisionGuard.rejectSuperseded(connection, backend, candidate);
             long current = 0;
             long historical = 0;
             try (var ps = statement(connection, """

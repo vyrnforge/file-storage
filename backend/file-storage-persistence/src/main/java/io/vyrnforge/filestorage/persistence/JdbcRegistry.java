@@ -271,6 +271,7 @@ public final class JdbcRegistry {
     private static BackendValidator.Candidate draftCandidate(Connection c, BackendId backend, long revision)
             throws SQLException {
         Target target = lockBackend(c, backend);
+        BackendRevisionGuard.rejectSuperseded(c, backend, revision);
         CredentialRef credential;
         try (var ps = statement(c, """
                 SELECT credential_ref FROM fs.backend_revision

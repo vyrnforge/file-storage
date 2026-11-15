@@ -13,3 +13,5 @@ Owner accepted PR #67 and authorized continuation. Baseline c08dd44250e0253f0b9a
 
 ## Evidence
 Four additional embedded HTTP + disposable PostgreSQL tests: full register/location/validate/activate/rotate/drain/retire path and privacy-safe audit; global vs exact resource permission and tenant header rejection; server-only validator report/allowlist and raw secret rejection; retirement blocker and role isolation. Synthetic validator and authority, no real provider checks. Exact-head CI required. #16 #17–#19 #26–#28 #43 remain gates; readiness and #57 transfer foundation separately authorized. #65 broader code quality remains open.
+
+Latest-only draft guard proposed under #28: superseded validation/activation returns CONFLICT; exact current candidate required. See 14_BACKEND_LIFECYCLE.md. No production evidence claim.
