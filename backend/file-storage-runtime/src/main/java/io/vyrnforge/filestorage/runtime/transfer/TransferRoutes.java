@@ -30,6 +30,7 @@ public final class TransferRoutes {
     public void download(HttpServletRequest request, HttpServletResponse response) throws IOException {
         response.setHeader("Cache-Control", "no-store");
         try {
+            if (!"GET".equals(request.getMethod())) throw new TransferFailure(Code.INVALID);
             var proof = proof(request);
             response.setContentType("application/octet-stream");
             response.setHeader("X-Content-Type-Options", "nosniff");
@@ -76,6 +77,6 @@ public final class TransferRoutes {
             case TIMEOUT -> 504;
             case UNAVAILABLE -> 503;
         });
-        response.getWriter().write("{\"code\":\""+failure.code().name()+"\"}");
+        response.getOutputStream().write(("{\"code\":\""+failure.code().name()+"\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }
