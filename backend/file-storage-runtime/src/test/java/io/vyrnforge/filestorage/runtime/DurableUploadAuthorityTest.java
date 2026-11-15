@@ -902,4 +902,18 @@ class DurableUploadAuthorityTest {
         assertEquals(1,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='SCAN_UPLOAD' AND status='DEAD'"));
         assertEquals(1,scalar("SELECT count(*) FROM fs.upload_terminal_recovery WHERE cleanup_disposition='HOLD'"));
     }
+
+    @Test void abandonedScanLastLeaseIsReconciledWithoutPhysicalCleanup() throws Exception {
+        var fixture=matched();var scans=scans(CLOCK,1);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        var claim=scans.claim(1).claims().getFirst();
+        Clock later=Clock.fixed(NOW.plusSeconds(11),ZoneOffset.UTC);var replacement=scans(later,1);
+        assertEquals(1,replacement.claim(1).exhausted());
+        assertTrue(recovery(later).runOne());assertFalse(recovery(later).runOne());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_terminal_recovery WHERE reason='SCAN_DEAD' AND cleanup_disposition='HOLD'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='FAILED'"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='CLEANUP_UPLOAD'"));
+        assertEquals(1,fixture.opens.get());
+    }
 }

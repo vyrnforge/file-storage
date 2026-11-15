@@ -10,3 +10,5 @@ JdbcCompletionWork uses existing V3 ledger and V6 evidence, no new migration. Wo
 
 ## Verification
 Extend combined PostgreSQL/native OSS test to initiate, issue handle via HTTP, transfer, reject unclaimed/duplicate/different hash, 202 before provider read, explicit verification/scan worker and metadata AVAILABLE. Three additional PostgreSQL tests: atomic queue and handoff rollback + expired lease, missing-object retry and same job, actual opt-in scheduled WORKER runtime with API-role rejection. Expected 168 tests. No schema change; no production deployment. Next #31 terminal status/replay, expiry/dead reconciliation/reissue/cleanup and public workflow hardening; #35 authorized download afterwards.
+
+Owner approved PR #77; squash merged 4f65a0d812a95990c668cedcf5f195f34a7acd59. Final CI 43706027945 at f95423a passed 168 tests. [Terminal recovery](27_TERMINAL_UPLOAD_RECOVERY.md) next.
