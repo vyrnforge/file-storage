@@ -1395,14 +1395,35 @@ class JdbcTransactionsTest {
                 registry().resolveExisting(s3, 1, new LocationId(SL), ref -> new SyntheticCredential(ref.value()))).code());
         assertEquals(1, registry().locations(s3, null, 10).size());
         assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> config.retireBackend(ADMIN, ctx, s3, 1)).code());
-        application().initiate(ALICE, command("retirement-reference"));
+        // Active policy alone blocks retirement, even with no uploaded file.
         config.drainBackend(ADMIN, ctx, oss, 1);
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> config.retireBackend(ADMIN, ctx, oss, 1)).code());
+        // The separate test below covers actual references and jobs after routing moves.
         assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> config.retireBackend(ADMIN, ctx, oss, 1)).code());
         assertEquals("23514", assertThrows(SQLException.class, () ->
                 sql("UPDATE fs.backend_revision SET status='RETIRED' WHERE backend_id=?", OSS)).getSQLState());
+        assertEquals(0, count("file_version"));
+        assertEquals(0, count("upload_session"));
+        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.backend.retired"));
+    }
+
+    @Test
+    void retirementBlocksExistingVersionSessionAndRecoverableJobAfterPolicySwitch() throws SQLException {
+        var config = configuration();
+        var ctx = CorrelationContext.create();
+        var oss = new BackendId(OSS);
+        var ops = operations(new WorkerClock());
+        var request = operation("retirement-job", 3);
+        var job = enqueue(ops, request);
+        assertEquals(job, ops.claim(request.kind(), 1).claims().getFirst().operation());
+        config.publishPolicy(ADMIN, ctx, SCOPE, 1, List.of(rule(SL, 0, true)));
+        config.drainBackend(ADMIN, ctx, oss, 1);
+        assertEquals(Code.CONFLICT, assertThrows(Failure.class, () -> config.retireBackend(ADMIN, ctx, oss, 1)).code());
         assertEquals(1, count("file_version"));
         assertEquals(1, count("upload_session"));
-        assertEquals(1, intents("platform_event_outbox", "event_type", "file-storage.backend.retired"));
+        assertEquals(1, count("storage_operation"));
+        assertEquals(BackendStatus.DRAINING, registry().history(oss, 0, 1).getFirst().status());
+        assertEquals(0, intents("platform_event_outbox", "event_type", "file-storage.backend.retired"));
     }
 
     @Test
