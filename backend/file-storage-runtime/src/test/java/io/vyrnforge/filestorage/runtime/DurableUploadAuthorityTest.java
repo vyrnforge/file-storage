@@ -1033,4 +1033,95 @@ class DurableUploadAuthorityTest {
         assertEquals(0,output.size(),"final chunk withheld on checksum mismatch");
         assertEquals(1,scalar("SELECT count(*) FROM fs.download_transfer_handle WHERE claimed_at IS NOT NULL"));
     }
+
+    @Test void catalogPagesOnlyAuthorizedFilesAndUsesSameScopeForUsage() throws Exception {
+        assertThrows(RuntimeException.class,()->secured.catalog("user",TENANT,null,null,10));
+        grant("fixture-user","asset","READ_METADATA","OWNED_FILE",null);
+        assertThrows(RuntimeException.class,()->secured.catalog("user",TENANT,null,null,10));
+        grant("fixture-user","asset","LIST_METADATA","OWNED_FILE",null);
+        grant("fixture-user","asset","LIST_METADATA","EXACT_FILE",fileId().value());
+        grant("fixture-other","asset","INITIATE","INITIATE_PURPOSE",null);
+        var hidden=secured.initiate("other",TENANT,null,new Initiate("attachment","hidden.txt",77,"text/plain","hidden-key")).value();
+        var second=secured.initiate("user",TENANT,null,new Initiate("attachment","second.txt",Long.MAX_VALUE,"text/plain","second-key")).value();
+        var third=secured.initiate("user",TENANT,null,new Initiate("attachment","third.txt",Long.MAX_VALUE,"text/plain","third-key")).value();
+        var first=secured.catalog("user",TENANT,null,null,1).value();
+        assertEquals(1,first.items().size());assertNotNull(first.nextAfter());
+        var middle=secured.catalog("user",TENANT,null,first.nextAfter(),1).value();
+        assertEquals(1,middle.items().size());assertNotNull(middle.nextAfter());
+        var last=secured.catalog("user",TENANT,null,middle.nextAfter(),1).value();
+        assertEquals(1,last.items().size());assertNull(last.nextAfter());
+        var actual=List.of(first.items().getFirst().file().fileId(),middle.items().getFirst().file().fileId(),last.items().getFirst().file().fileId());
+        var expected=new ArrayList<>(List.of(view.file().fileId(),second.file().fileId(),third.file().fileId()));
+        Collections.sort(expected);assertEquals(expected,actual);assertFalse(actual.contains(hidden.file().fileId()));
+        var usage=secured.usage("user",TENANT,null).value();
+        assertEquals(5,usage.states().size());
+        var pending=usage.states().stream().filter(x->x.state()==VersionState.PENDING).findFirst().orElseThrow();
+        assertEquals(3,pending.fileCount());assertEquals("18446744073709551619",pending.declaredBytes());assertEquals("0",pending.availableBytes());
+        assertThrows(RuntimeException.class,()->secured.catalog("other-app",TENANT,null,null,10));
+        assertThrows(RuntimeException.class,()->secured.catalog("other-tenant",TENANT,null,null,10));
+        grant("fixture-other","asset","LIST_METADATA","EXACT_FILE",view.file().fileId());
+        assertEquals(List.of(view.file().fileId()),secured.catalog("other",TENANT,null,null,100).value().items().stream().map(x->x.file().fileId()).toList());
+        assertEquals(1,secured.usage("other",TENANT,null).value().states().stream().mapToLong(UsageBucket::fileCount).sum());
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='LIST_METADATA' AND actor='fixture-user' AND scope='OWNED_FILE'");
+        assertEquals(1,secured.catalog("user",TENANT,null,null,100).value().items().size());
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='LIST_METADATA' AND actor='fixture-user'");
+        assertThrows(RuntimeException.class,()->secured.catalog("user",TENANT,null,first.nextAfter(),1));
+        assertThrows(RuntimeException.class,()->secured.usage("user",TENANT,null));
+    }
+
+    @Test void catalogRequiresExternalAndLocalScopeIntersection() throws Exception {
+        grant("fixture-user","asset","LIST_METADATA","OWNED_FILE",null);
+        var second=secured.initiate("user",TENANT,null,new Initiate("attachment","second.txt",7,"text/plain","second-key")).value();
+        var external=RuntimeComposition.secured(source,new Trust(ISS,AUD),proof->new VerifiedAccess(ISS,"user",Set.of(AUD),TokenKind.ACCESS,NOW,NOW.plusSeconds(300),NOW),
+            (issuer,subject,audience)->Optional.of(new Binding(USER,TENANT,"asset",Set.of(Action.LIST_METADATA))),
+            (actor,tenant)->true,(tenant,module)->new ModuleEntitlement(TENANT.value(),"file-storage",true,NOW),
+            caller->List.of(new Grant(TENANT,USER.actorId(),"asset",Action.LIST_METADATA,"attachment",GrantScope.EXACT_FILE,
+                fileId(),NOW,NOW.plusSeconds(300),false)),CLOCK,Duration.ofMinutes(5),Duration.ofSeconds(30));
+        assertEquals(List.of(view.file().fileId()),external.catalog("user",TENANT,null,null,100).value().items().stream().map(x->x.file().fileId()).toList());
+        assertEquals(1,external.usage("user",TENANT,null).value().states().stream().mapToLong(UsageBucket::fileCount).sum());
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='LIST_METADATA'");
+        grant("fixture-user","asset","LIST_METADATA","EXACT_FILE",second.file().fileId());
+        assertTrue(external.catalog("user",TENANT,null,null,100).value().items().isEmpty());
+        assertEquals(0,external.usage("user",TENANT,null).value().states().stream().mapToLong(UsageBucket::fileCount).sum());
+    }
+
+    @Test void catalogHttpBoundsRedactionAndAvailableUsage() throws Exception {
+        available();
+        grant("fixture-user","asset","LIST_METADATA","OWNED_FILE",null);
+        var pending=secured.initiate("user",TENANT,null,new Initiate("attachment","pending.txt",8,"text/plain","pending-key")).value();
+        var app=RuntimeApplication.application(io.vyrnforge.filestorage.runtime.http.ApiHttpConfiguration.class);
+        app.addInitializers(ctx->ctx.getBeanFactory().registerSingleton("securedFiles",secured));
+        try(var ctx=app.run("--server.port=0","--fs.role=API");var http=HttpClient.newHttpClient()){
+            String base="http://127.0.0.1:"+ctx.getEnvironment().getProperty("local.server.port");
+            var mapper=tools.jackson.databind.json.JsonMapper.builder().build();
+            var first=catalogGet(http,base,"/v1/files?limit=1","user",TENANT);
+            assertEquals(200,first.statusCode(),first.body());OpenApiContract.assertResponse(first);
+            var json=mapper.readTree(first.body());assertEquals(1,json.get("items").size());
+            String cursor=json.get("nextAfterFileId").asText();
+            var last=catalogGet(http,base,"/v1/files?limit=1&afterFileId="+cursor,"user",TENANT);
+            assertEquals(200,last.statusCode(),last.body());OpenApiContract.assertResponse(last);
+            assertTrue(mapper.readTree(last.body()).get("nextAfterFileId").isNull());
+            for(String path:List.of("/v1/files?limit=0","/v1/files?limit=101","/v1/files?limit=1&limit=2","/v1/files?afterFileId=","/v1/files?tenant=other","/v1/usage?limit=1")){
+                var bad=catalogGet(http,base,path,"user",TENANT);assertEquals(400,bad.statusCode(),bad.body());OpenApiContract.assertResponse(bad);
+            }
+            var usage=catalogGet(http,base,"/v1/usage","user",TENANT);
+            assertEquals(200,usage.statusCode(),usage.body());OpenApiContract.assertResponse(usage);
+            var states=mapper.readTree(usage.body()).get("states");
+            assertEquals(5,states.size());assertEquals("PENDING",states.get(0).get("state").asText());
+            assertEquals("8",states.get(0).get("declaredBytes").asText());
+            assertEquals("AVAILABLE",states.get(2).get("state").asText());assertEquals("5",states.get(2).get("availableBytes").asText());
+            for(var response:List.of(first,last,usage)){
+                assertEquals("no-store",response.headers().firstValue("Cache-Control").orElseThrow());
+                for(String secret:List.of("fixture-bucket","private-prefix","ref:fixture","objectKey","sessionId","backendId","locationId"))
+                    assertFalse(response.body().contains(secret));
+            }
+            assertEquals(403,catalogGet(http,base,"/v1/files","other",TENANT).statusCode());
+            assertEquals(403,catalogGet(http,base,"/v1/usage","user",OTHER).statusCode());
+            assertEquals(401,catalogGet(http,base,"/v1/files","wrong",TENANT).statusCode());
+        }
+    }
+    private static HttpResponse<String> catalogGet(HttpClient http,String base,String path,String proof,TenantId tenant)throws Exception{
+        return http.send(HttpRequest.newBuilder(URI.create(base+path)).header("Authorization","Bearer "+proof)
+            .header("X-Tenant-Id",tenant.value().toString()).GET().build(),HttpResponse.BodyHandlers.ofString());
+    }
 }
