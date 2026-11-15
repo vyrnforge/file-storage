@@ -58,3 +58,5 @@ Public repository: never commit secrets, private legacy source, real file conten
 - [FS-210B backend lifecycle](docs/architecture/14_BACKEND_LIFECYCLE.md) — internal validation, drain and guarded retirement in review; concrete provider/authority gates pending.
 
 - [FS-220 policy control plane](docs/architecture/15_POLICY_CONTROL_PLANE.md) — bounded internal policy management in review.
+
+- [FS-300A runtime foundation](docs/architecture/16_RUNTIME_FOUNDATION.md) — isolated executable and proposed v1 API; public exposure blocked.

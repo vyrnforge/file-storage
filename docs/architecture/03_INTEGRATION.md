@@ -30,3 +30,6 @@ See [identity authorization contract](../security/FS110_IDENTITY_AUTHORIZATION.m
 
 ## FS-200A privacy gate
 [Provider transfer contract](10_PROVIDER_TRANSFER_CONTRACT.md) clarifies earlier direct-grant language: no raw provider URL, signature, bucket/key or provider credential in consumer contracts. Approved DEC-FS012 uses independent transfer gateway and separate API/worker roles with opaque service handles; optional private CDN only after policy/evidence; no redirect to private provider URL. Any exception requires explicit architecture/security approval and proof of the existing privacy invariant. No exception currently approved.
+
+## FS-300A isolated runtime
+[Runtime foundation](16_RUNTIME_FOUNDATION.md): Spring Boot health-only loopback shell, explicit migration/composition entrypoints and draft v1 metadata/session HTTP adapters tested in isolation. Public exposure and actual IAM/worker/gateway wiring remain gated.
