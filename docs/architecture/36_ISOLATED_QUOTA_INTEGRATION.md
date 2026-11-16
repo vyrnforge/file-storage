@@ -1,6 +1,6 @@
 # FS-310A7 — Isolated transactional quota integration
 
-Status: owner-authorized candidate, CI pending. PR #86 accepted/merged 4af51dd; #13/#16/#33/#35/#36. No production activation or deployment.
+Status: owner-authorized candidate, implementation CI verified; owner review pending. PR #86 accepted/merged 4af51dd; #13/#16/#33/#35/#36. No production activation or deployment.
 
 V17 enables automatic accounting only via constructor-bound isolated tenant and distinct trusted enable action, current reviewed activation, empty tenant (files, sessions, ledger). No runtime activation endpoint, backfill, disable or implicit defaults. Historical discrepancies remain report-only. Separate production authority/limits and independent review of quota limit/TTL remain open.
 
@@ -8,4 +8,7 @@ Existing Kernel initiation transaction inserts file/version/session/request; V17
 
 Reconciliation: authorized tenant-bound single-statement counts for missing reservations, mismatches, untracked versions and uncertain terminal reservations. No repairs, backfill, consumer API or production access. SQL privileges and performance/load evidence remain production decisions; privileged schema owners can bypass triggers, not a substitute for role isolation. Current policy replacement remains governed; old reservations retain pinned revision.
 
-Verification: V17 repeatability, concurrent initiation and idempotent replay, failed initiation/scan/recovery outbox rollback, terminal uncertainty, cross-tenant denial and immutable integration. Full CI pending.
+Verification: V17 repeatability, concurrent initiation and idempotent replay, failed initiation/scan/recovery outbox rollback, terminal uncertainty, cross-tenant denial and immutable integration. Full CI evidence below.
+
+
+FS-310A7 candidate PR #88: [full CI 43801908520](https://github.com/vyrnforge/file-storage/actions/runs/43801908520) passed 199 tests (zero failures/errors/skips) at implementation head `74d22283d2254d482254b19fb68e92e3c8803dcf`; V17 repeatability and two new PostgreSQL regressions. Owner review/merge pending. Final review head verification is recorded on PR #88. Engineering choices: explicit empty isolated tenant, durable tenant fence even for non-enabled initiation (contention/load evidence deferred), transaction-triggered ledger changes and read-only reconciliation. No production activation or deployment.
