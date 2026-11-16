@@ -2141,9 +2141,15 @@ class DurableUploadAuthorityTest {
             sql("UPDATE fs.accounting_manifest_principal SET actor='capture-actor' WHERE login_role='a9_review'");
             assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),first,revision,"ACKNOWLEDGED")).getSQLState());
             sql("UPDATE fs.accounting_manifest_principal SET actor='review-actor' WHERE login_role='a9_review'");
+            // A committed change followed by a revert still invalidates exact revision evidence.
+            sql("UPDATE fs.initiation_request SET expected_size=6 WHERE session_id=?",view.session().value());
+            sql("UPDATE fs.initiation_request SET expected_size=5 WHERE session_id=?",view.session().value());
+            assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),first,revision,"ACKNOWLEDGED")).getSQLState());
+            var beforeNew=UUID.randomUUID();
+            assertEquals(beforeNew,manifestCommand(capture,create,TENANT.value(),beforeNew,revision));
             // A new session changes the snapshot; prior manifest remains immutable.
             secured.initiate("user",TENANT,null,new Initiate("attachment","a9-next.txt",5,"text/plain","a9-next"));
-            assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),first,revision,"ACKNOWLEDGED")).getSQLState());
+            assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),beforeNew,revision,"ACKNOWLEDGED")).getSQLState());
             try(var c=source.getConnection();var st=c.createStatement()){
                 c.setAutoCommit(false);
                 st.execute("LOCK TABLE fs.upload_session IN ROW EXCLUSIVE MODE");
@@ -2155,6 +2161,16 @@ class DurableUploadAuthorityTest {
             assertEquals(0,scalar("SELECT count(*) FROM fs.accounting_manifest WHERE manifest_id=?",second));
             assertEquals(second,manifestCommand(capture,create,TENANT.value(),second,revision));
             assertEquals(2,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=?",second));
+            // A concurrent source write rolls back; review times out, then retries successfully.
+            try(var c=source.getConnection();var st=c.createStatement()){
+                c.setAutoCommit(false);
+                st.execute("UPDATE fs.initiation_request SET expected_size=expected_size+1");
+                try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                    var future=executor.submit(()->assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),second,revision,"ACKNOWLEDGED")).getSQLState());
+                    assertEquals("55P03",future.get(8,TimeUnit.SECONDS));
+                }finally{c.rollback();}
+            }
+            assertEquals(0,scalar("SELECT count(*) FROM fs.accounting_manifest_review WHERE manifest_id=?",second));
             assertEquals(second,manifestCommand(review,approve,TENANT.value(),second,revision,"ACKNOWLEDGED"));
             assertEquals(second,manifestCommand(review,approve,TENANT.value(),second,revision,"ACKNOWLEDGED"));
             assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),second,revision,"NEEDS_INVESTIGATION")).getSQLState());
