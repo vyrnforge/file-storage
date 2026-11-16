@@ -2119,7 +2119,7 @@ class DurableUploadAuthorityTest {
             sql("GRANT EXECUTE ON FUNCTION fs.capture_accounting_manifest(uuid,uuid,bigint) TO a9_capture");
             sql("GRANT EXECUTE ON FUNCTION fs.review_accounting_manifest(uuid,uuid,bigint,text) TO a9_review");
             sql("GRANT EXECUTE ON FUNCTION fs.read_accounting_manifest(uuid,uuid) TO a9_capture,a9_review");
-            sql("INSERT INTO fs.accounting_manifest_principal VALUES ('a9_capture',?,'capture-actor','CAPTURE'),('a9_review',?,'review-actor','REVIEW')",TENANT.value(),TENANT.value());
+            sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability) VALUES ('a9_capture',?,'capture-actor','CAPTURE'),('a9_review',?,'review-actor','REVIEW')",TENANT.value(),TENANT.value());
             var capture=manifestLogin("a9_capture");var review=manifestLogin("a9_review");
             String create="SELECT fs.capture_accounting_manifest(?,?,?)";
             String approve="SELECT fs.review_accounting_manifest(?,?,?,?)";
@@ -2231,7 +2231,8 @@ class DurableUploadAuthorityTest {
             try(var c=login.getConnection();var st=c.createStatement()){
                 try(var rows=st.executeQuery("SELECT session_user,current_user")){assertTrue(rows.next());assertEquals("a9_initiator",rows.getString(1));assertEquals("a9_initiator",rows.getString(2));}
                 for(String denied:List.of("DELETE FROM fs.isolated_quota_reservation","UPDATE fs.isolated_policy_activation SET quota_limit=99",
-                    "UPDATE fs.isolated_quota_fence SET enabled_revision=NULL","TRUNCATE fs.upload_session","SELECT * FROM fs.accounting_manifest_principal","UPDATE fs_kernel.platform_event_outbox SET status='PUBLISHED'","UPDATE fs_kernel.platform_event_outbox SET payload_json='{}'","DELETE FROM fs_kernel.platform_event_outbox","UPDATE fs_kernel.platform_audit_event SET action='changed'")){
+                    "UPDATE fs.isolated_quota_fence SET enabled_revision=NULL","UPDATE fs.isolated_quota_fence SET epoch=epoch+1",
+                    "UPDATE fs.isolated_quota_reservation SET status='RELEASED'","SELECT fs.touch_quota_fence(tenant_id) FROM fs.isolated_quota_fence","TRUNCATE fs.upload_session","SELECT * FROM fs.accounting_manifest_principal","UPDATE fs_kernel.platform_event_outbox SET status='PUBLISHED'","UPDATE fs_kernel.platform_event_outbox SET payload_json='{}'","DELETE FROM fs_kernel.platform_event_outbox","UPDATE fs_kernel.platform_audit_event SET action='changed'")){
                     assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
                 }
                 assertEquals("23514",assertThrows(SQLException.class,()->st.execute("UPDATE fs.backend SET endpoint='https://changed.example.test'")).getSQLState());
@@ -2280,7 +2281,7 @@ class DurableUploadAuthorityTest {
                 grantKernelWriter(role);
                 sql("GRANT EXECUTE ON FUNCTION fs.audited_accounting_manifest(uuid,uuid,bigint,text,text,uuid,uuid,uuid) TO "+role);
             }
-            sql("INSERT INTO fs.accounting_manifest_principal VALUES ('a10_capture',?,'capture-a10','CAPTURE'),('a10_review',?,'review-a10','REVIEW')",TENANT.value(),TENANT.value());
+            sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability,execution_mode) VALUES ('a10_capture',?,'capture-a10','CAPTURE','AUDITED'),('a10_review',?,'review-a10','REVIEW','AUDITED')",TENANT.value(),TENANT.value());
             var captureLogin=manifestLogin("a10_capture");var reviewLogin=manifestLogin("a10_review");
             var capture=new JdbcAccountingManifest(captureLogin,CLOCK);var review=new JdbcAccountingManifest(reviewLogin,CLOCK);
             UUID id=UUID.randomUUID();
@@ -2321,6 +2322,19 @@ class DurableUploadAuthorityTest {
         }
     }
 
+    private static void grantRestrictedWorker(String role)throws Exception{
+        grantKernelWriter(role);
+        sql("GRANT SELECT ON fs.file,fs.file_version,fs.upload_session,fs.initiation_request,fs.backend,fs.backend_revision,fs.storage_location,fs.file_grant,fs.upload_transfer_handle,fs.upload_integrity_verification,fs.upload_scan_evidence,fs.upload_terminal_recovery,fs.storage_operation,fs.isolated_quota_reservation,fs.isolated_quota_fence,fs.isolated_policy_activation TO "+role);
+        sql("GRANT UPDATE(file_id) ON fs.file TO "+role);
+        sql("GRANT UPDATE(session_id) ON fs.initiation_request,fs.upload_integrity_verification,fs.upload_transfer_handle TO "+role);
+        sql("GRANT UPDATE(backend_id) ON fs.backend_revision TO "+role);
+        sql("GRANT UPDATE(grant_id) ON fs.file_grant TO "+role);
+        sql("GRANT UPDATE(endpoint) ON fs.backend TO "+role);
+        sql("GRANT UPDATE(state) ON fs.file_version,fs.upload_session TO "+role);
+        sql("GRANT INSERT ON fs.storage_operation,fs.upload_scan_evidence,fs.upload_terminal_recovery TO "+role);
+        sql("GRANT UPDATE(status,last_error_code,finished_at,available_at,claim_token,locked_until,attempts) ON fs.storage_operation TO "+role);
+    }
+
     @Test void restrictedLifecycleCompletionAndRecoveryKeepQuotaAndIntentsAtomic() throws Exception {
         long revision=enableIntegratedQuota(15);
         view=secured.initiate("user",TENANT,null,new Initiate("attachment","a10.txt",5,"text/plain","a10-clean")).value();
@@ -2328,27 +2342,7 @@ class DurableUploadAuthorityTest {
         var unclaimed=secured.initiate("user",TENANT,null,new Initiate("attachment","a10-expired.txt",5,"text/plain","a10-expired")).value();
         sql("CREATE ROLE a10_worker LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
         try{
-            grantKernelWriter("a10_worker");
-            sql("""
-                GRANT SELECT ON fs.file,fs.file_version,fs.upload_session,fs.initiation_request,fs.backend,
-                  fs.backend_revision,fs.storage_location,fs.file_grant,fs.upload_transfer_handle,
-                  fs.upload_integrity_verification,fs.upload_scan_evidence,fs.upload_terminal_recovery,
-                  fs.storage_operation,fs.isolated_quota_reservation,fs.isolated_quota_fence,fs.isolated_policy_activation
-                TO a10_worker
-                """);
-            // PostgreSQL row locks need a column UPDATE privilege even for FOR SHARE.
-            // These are isolated trusted worker grants, not general tenant/RLS privileges.
-            sql("GRANT UPDATE(file_id) ON fs.file TO a10_worker");
-            sql("GRANT UPDATE(session_id) ON fs.initiation_request,fs.upload_integrity_verification,fs.upload_transfer_handle TO a10_worker");
-            sql("GRANT UPDATE(backend_id) ON fs.backend_revision TO a10_worker");
-            sql("GRANT UPDATE(grant_id) ON fs.file_grant TO a10_worker");
-            sql("GRANT UPDATE(endpoint) ON fs.backend TO a10_worker");
-            sql("GRANT UPDATE(state) ON fs.file_version,fs.upload_session TO a10_worker");
-            sql("GRANT INSERT ON fs.storage_operation,fs.upload_scan_evidence,fs.upload_terminal_recovery TO a10_worker");
-            sql("GRANT UPDATE(status,last_error_code,finished_at,available_at,claim_token,locked_until,attempts) ON fs.storage_operation TO a10_worker");
-            sql("GRANT UPDATE(status,finished_at) ON fs.isolated_quota_reservation TO a10_worker");
-            sql("GRANT INSERT(tenant_id),UPDATE(epoch) ON fs.isolated_quota_fence TO a10_worker");
-            sql("GRANT EXECUTE ON FUNCTION fs.touch_quota_fence(uuid) TO a10_worker");
+            grantRestrictedWorker("a10_worker");
             var login=manifestLogin("a10_worker");
             try(var c=login.getConnection();var st=c.createStatement()){
                 for(String denied:List.of("DELETE FROM fs.isolated_quota_reservation","UPDATE fs.isolated_quota_fence SET enabled_revision=NULL",
@@ -2390,6 +2384,95 @@ class DurableUploadAuthorityTest {
             sql("DROP OWNED BY a10_worker");
             sql("DROP ROLE a10_worker");
         }
+    }
+
+
+    @Test void auditedModeRejectsAccidentallyGrantedRawCommandsAndRehearsalWrapper() throws Exception {
+        long revision=reviewedPolicy(CLOCK,0,10);
+        var quota=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        reviewQuotaValues(quota,0,revision,100,300);
+        quota.activateReviewed(POLICY_ACTIVATOR,TENANT,0,revision,corr);
+        sql("CREATE ROLE a11_capture LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        sql("CREATE ROLE a11_review LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try{
+            for(String role:List.of("a11_capture","a11_review")){
+                grantKernelWriter(role);
+                sql("GRANT EXECUTE ON FUNCTION fs.audited_accounting_manifest(uuid,uuid,bigint,text,text,uuid,uuid,uuid) TO "+role);
+            }
+            sql("GRANT EXECUTE ON FUNCTION fs.capture_accounting_manifest(uuid,uuid,bigint) TO a11_capture");
+            sql("GRANT EXECUTE ON FUNCTION fs.review_accounting_manifest(uuid,uuid,bigint,text) TO a11_review");
+            sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability,execution_mode) VALUES ('a11_capture',?,'capture-a11','CAPTURE','AUDITED'),('a11_review',?,'review-a11','REVIEW','AUDITED')",TENANT.value(),TENANT.value());
+            var captureLogin=manifestLogin("a11_capture");var reviewLogin=manifestLogin("a11_review");
+            var capture=new JdbcAccountingManifest(captureLogin,CLOCK);var review=new JdbcAccountingManifest(reviewLogin,CLOCK);
+            UUID id=UUID.randomUUID();
+            assertEquals("23514",assertThrows(SQLException.class,()->manifestCommand(captureLogin,"SELECT fs.capture_accounting_manifest(?,?,?)",TENANT.value(),id,revision)).getSQLState());
+            assertEquals(0,scalar("SELECT count(*) FROM fs.accounting_manifest"));
+            assertEquals(id,capture.capture(TENANT,id,revision,corr));
+            assertEquals("23514",assertThrows(SQLException.class,()->manifestCommand(reviewLogin,"SELECT fs.review_accounting_manifest(?,?,?,?)",TENANT.value(),id,revision,"ACKNOWLEDGED")).getSQLState());
+            assertEquals(0,scalar("SELECT count(*) FROM fs.accounting_manifest_review"));
+            assertEquals(id,review.review(TENANT,id,revision,JdbcAccountingManifest.Disposition.ACKNOWLEDGED,corr));
+            assertEquals(2,scalar("SELECT count(*) FROM fs.accounting_manifest_intent"));
+            sql("UPDATE fs.accounting_manifest_principal SET execution_mode='REHEARSAL' WHERE login_role='a11_capture'");
+            UUID raw=UUID.randomUUID();
+            assertEquals(Code.DENIED,assertThrows(Failure.class,()->capture.capture(TENANT,raw,revision,corr)).code());
+            assertEquals(raw,manifestCommand(captureLogin,"SELECT fs.capture_accounting_manifest(?,?,?)",TENANT.value(),raw,revision));
+            assertEquals(2,scalar("SELECT count(*) FROM fs.accounting_manifest_intent"));
+            sql("UPDATE fs.accounting_manifest_principal SET execution_mode='AUDITED' WHERE login_role='a11_capture'");
+            assertThrows(Failure.class,()->capture.capture(TENANT,raw,revision,corr));
+            assertEquals(2,scalar("SELECT count(*) FROM fs.accounting_manifest_intent"));
+        }finally{
+            sql("DELETE FROM fs.accounting_manifest_principal WHERE login_role IN ('a11_capture','a11_review')");
+            sql("DROP OWNED BY a11_capture,a11_review");sql("DROP ROLE a11_capture,a11_review");
+        }
+    }
+
+    @Test void restrictedWorkerConcurrentCompletionAndRecoveryFenceStaleClaims() throws Exception {
+        long revision=enableIntegratedQuota(15);
+        view=secured.initiate("user",TENANT,null,new Initiate("attachment","a11.txt",5,"text/plain","a11-clean")).value();
+        var fixture=matched();
+        var expired=secured.initiate("user",TENANT,null,new Initiate("attachment","a11-expired.txt",5,"text/plain","a11-expired")).value();
+        sql("CREATE ROLE a11_worker LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try{
+            grantRestrictedWorker("a11_worker");
+            var login=manifestLogin("a11_worker");
+            try(var c=login.getConnection();var st=c.createStatement()){
+                assertEquals("23514",assertThrows(SQLException.class,()->st.execute("UPDATE fs.file_grant SET grant_id='00000000-0000-0000-0000-000000000001'")).getSQLState());
+                assertEquals("23514",assertThrows(SQLException.class,()->st.execute("UPDATE fs.file SET file_id='changed'")).getSQLState());
+            }
+            var scans=new JdbcUploadScan(new JdbcUploadTransfers(login,CLOCK,Duration.ofMinutes(1),5),
+                new JdbcOperations(login,CLOCK,Duration.ofSeconds(10),Duration.ZERO,4),ADMIN,3);
+            new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+            var stale=scans.load(scans.claim(1).claims().getFirst());
+            var later=Clock.fixed(NOW.plusSeconds(11),ZoneOffset.UTC);
+            var replacement=new JdbcUploadScan(new JdbcUploadTransfers(login,later,Duration.ofMinutes(1),5),
+                new JdbcOperations(login,later,Duration.ofSeconds(10),Duration.ZERO,4),ADMIN,3);
+            var fresh=replacement.load(replacement.claim(1).claims().getFirst());
+            assertNotEquals(stale.claim().token(),fresh.claim().token());
+            var measured=new Content(5,sha256(fixture.bytes),"text/plain");
+            assertThrows(Failure.class,()->scans.finish(stale,measured,Scan.CLEAN));
+            var start=new CountDownLatch(1);
+            try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                Callable<Boolean> finish=()->{start.await();try{replacement.finish(fresh,measured,Scan.CLEAN);return true;}
+                    catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());return false;}};
+                var one=executor.submit(finish);var two=executor.submit(finish);start.countDown();
+                assertNotEquals(one.get(10,TimeUnit.SECONDS),two.get(10,TimeUnit.SECONDS));
+            }
+            assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE session_id=? AND policy_revision=? AND status='CHARGED'",view.session().value(),revision));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.upload_scan_evidence"));
+            var future=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);
+            var recovery=new JdbcUploadRecovery(new JdbcUploadTransfers(login,future,Duration.ofMinutes(1),5),ADMIN);
+            var startRecovery=new CountDownLatch(1);
+            try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                Callable<Boolean> run=()->{startRecovery.await();return recovery.runOne();};
+                var one=executor.submit(run);var two=executor.submit(run);startRecovery.countDown();
+                assertNotEquals(one.get(10,TimeUnit.SECONDS),two.get(10,TimeUnit.SECONDS));
+            }
+            assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE session_id=? AND status='RELEASED'",expired.session().value()));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.upload_terminal_recovery"));
+            assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.completed'"));
+            assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.recovered'"));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+        }finally{sql("DROP OWNED BY a11_worker");sql("DROP ROLE a11_worker");}
     }
 
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
