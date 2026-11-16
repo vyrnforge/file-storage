@@ -442,7 +442,8 @@ class ApiRuntimeCompositionTest {
                         .header("X-Transfer-Handle",field(download.body(),"handle")).GET().build();
                     var response=http.send(request,HttpResponse.BodyHandlers.ofByteArray());assertEquals(200,response.statusCode());assertArrayEquals(bytes,response.body());
                 }
-                assertEquals(1,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL"));
+                // HTTP client can receive the final byte before the server closes its lease and commits drain evidence.
+                awaitCount("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL",1);
                 assertEquals(0,fixture.delivered.size());
                 assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PUBLISHED'"));
             }
