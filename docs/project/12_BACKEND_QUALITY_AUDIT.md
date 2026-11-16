@@ -43,3 +43,8 @@ Domain: immutable domain/value types and lifecycle invariants; split broad model
 ## Audit execution
 
 See `.github/workflows/backend-quality-audit.yml` and `scripts/backend-quality-inventory.py`. JaCoCo 0.8.13 collects all eight reactor test execution files and reports aggregated production classes; SpotBugs Maven 4.10.5.0 runs in report mode (not a pass/fail findings gate). Retain exact checkout, source inventory, coverage XML/HTML and analyzer XML. No source/coverage data sent to external analysis SaaS. Tool dependencies are build-only; never packaged or released. Results pending until exact-head audit run completes and findings are reviewed. Local checkout unavailable in current tool environment due GitHub DNS; connector source review and hosted CI are distinct evidence.
+
+
+## Verified evidence checkpoint — 2026-11-16
+
+See [individual analyzer triage, actual XML metrics and prioritized work breakdown](13_BACKEND_AUDIT_TRIAGE.md). Audit run 43884241791 artifact 14234465439 verified SHA-256 and exact synthetic merge parents. 67 findings individually source-triaged; no security clearance. Q15/Q16 confirmed, Q17 composition suspicion reconciled. First remediation draft #109; no acceptance, merge or deployment. Full review and independent signoff remain open.
