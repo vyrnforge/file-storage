@@ -105,7 +105,7 @@ def source(pin):
     require(re.fullmatch(r"[0-9a-f]{40}", expected) and hashlib.sha1(raw).hexdigest() == expected, "published Maven checksum mismatch")
     return {**inspect_source(pin, raw), "url": url, "mavenCentralSha1": expected}
 
-def proposal(row):
+def proposal(row, source_record=None):
     kind = row["engineeringClassification"]
     status = row["evidenceStatus"]
     names = [v.get("expression") or v.get("license", {}).get("id") or v.get("license", {}).get("name")
@@ -114,6 +114,10 @@ def proposal(row):
         terms, rationale = ["Apache-2.0"], "Repository license; scope and applicable notices still require review."
     elif kind == "PERMISSIVE" and len(names) == 1 and status not in ("MISSING_EXACT_TEXT", "TAGGED_DECLARATION_REVIEW_REQUIRED"):
         terms, rationale = names, "Proposed declared terms only; verify exact text, copyright, notices and any embedded content."
+    elif (kind == "PERMISSIVE" and names == ["Apache-2.0"] and source_record
+          and source_record["javaFiles"] > 0
+          and source_record["headerCounts"] == {"APACHE_2_0_INDICATOR": source_record["javaFiles"]}):
+        terms, rationale = ["Apache-2.0"], "Proposed from declared terms and complete leading Java-header indicators in the pinned source archive; non-Java, notices, shaded content and binary correspondence remain unverified."
     elif kind == "SOURCE_CORROBORATION":
         terms, rationale = ["Apache-2.0"], "Proposed from exact source-header corroboration, not missing POM metadata; inspect non-Java and binary correspondence."
     elif row["bomRef"].startswith("pkg:maven/ch.qos.logback/logback-"):
@@ -124,6 +128,7 @@ def proposal(row):
             "declaredLicenses": row["declaredLicenses"], "engineeringClassification": kind,
             "evidenceStatus": status, "proposedLicenseSelection": terms,
             "selectionRationale": rationale, "obligations": row["obligations"],
+            "sourceCorroborationRef": row["bomRef"] if source_record else None,
             "modificationStatus": "NOT_VERIFIED", "reviewer": None, "reviewedAt": None,
             "approvalReference": None, "fulfillmentEvidenceRefs": [],
             "scopes": {"internalIsolatedStaging": "PENDING_SCOPE_REVIEW",
@@ -167,6 +172,8 @@ def build(target, catalog_path):
     require(review["artifactSha256"] == provenance["artifactSha256"], "artifact binding")
     require(review["bomSha256"] == provenance["cycloneDxSha256"] == sha(data("bom.json")), "BOM binding")
     require(review["distributionNoticeArchiveSha256"] == sha(data("staging-distribution-notices.zip")), "distribution archive binding")
+    with zipfile.ZipFile(io.BytesIO(data("staging-distribution-notices.zip"))) as notices:
+        require(read(notices.read("distribution-review.json")) == {k: v for k, v in review.items() if k != "distributionNoticeArchiveSha256"}, "distribution archive manifest binding")
     require(review["licenseEvidenceSha256"] == provenance["licenseEvidenceSha256"] == sha(data("staging-license-evidence.json")), "license evidence binding")
     rows = {row["bomRef"]: row for row in review["libraries"]}
     require(len(rows) == len(review["libraries"]), "duplicate packaged row")
@@ -205,16 +212,18 @@ def build(target, catalog_path):
         out.writestr("standard-terms-index.json", dump(terms))
     bindings = {"artifactSha256": provenance["artifactSha256"], "bomSha256": review["bomSha256"],
                 "checkoutCommit": provenance["checkoutCommit"], "workflowRun": provenance["workflowRun"],
+                "workflowAttempt": provenance["workflowAttempt"],
                 "distributionReviewSha256": sha(raw), "distributionNoticeArchiveSha256": review["distributionNoticeArchiveSha256"],
                 "sourceEvidenceArchiveSha256": sha(data("staging-license-disposition-evidence.zip"))}
     report = {"format": "file-storage-license-dispositions-v1", "decision": "NO-GO", "bindings": bindings,
-              "pinCatalogSha256": sha(catalog_path.read_bytes()), "components": [proposal(r) for r in rows.values()],
+              "pinCatalogSha256": sha(catalog_path.read_bytes()), "components": [proposal(r, source_records.get(r["bomRef"])) for r in rows.values()],
               "graphOnly": review["graphOnly"], "sourceCorroboration": source_records, "standardTerms": terms,
               "limitations": ["Proposals only, not legal approval or source-offer fulfillment.",
                               "Source-header indicators and standard text do not establish binary licensing.",
                               "Native/shaded/OS/image review and actual environment acceptance remain open."]}
-    (target / "staging-license-dispositions.json").write_bytes(dump(report))
-    (target / "staging-acceptance-preparation.json").write_bytes(dump(staging_template(bindings)))
+    disposition_bytes = dump(report)
+    (target / "staging-license-dispositions.json").write_bytes(disposition_bytes)
+    (target / "staging-acceptance-preparation.json").write_bytes(dump(staging_template({**bindings, "licenseDispositionsSha256": sha(disposition_bytes)})))
     print("A19 disposition preparation:", len(rows), "packaged;", len(source_records), "targeted source archives;", len(terms), "standard texts; NO-GO")
     for ref, record in source_records.items():
         print(ref, record["javaFiles"], record["headerCounts"])
@@ -239,11 +248,17 @@ def self_test():
     r = proposal({"bomRef": "fixture", "sha256": "a"*64, "declaredLicenses": [{"license": {"id": "MIT"}}],
                   "engineeringClassification": "PERMISSIVE", "evidenceStatus": "MISSING_EXACT_TEXT", "obligations": "review"})
     require(not r["proposedLicenseSelection"] and r["approvalReference"] is None and all("APPROVED" not in x for x in r["scopes"].values()), "missing evidence granted approval")
-    template = staging_template({"artifactSha256": "a"*64})
+    candidate = {"bomRef": "fixture", "sha256": "a"*64, "declaredLicenses": [{"license": {"id": "Apache-2.0"}}],
+                 "engineeringClassification": "PERMISSIVE", "evidenceStatus": "MISSING_EXACT_TEXT", "obligations": "review"}
+    proposed = proposal(candidate, {"javaFiles": 2, "headerCounts": {"APACHE_2_0_INDICATOR": 2}})
+    require(proposed["proposedLicenseSelection"] == ["Apache-2.0"] and proposed["sourceCorroborationRef"] == "fixture"
+            and proposed["approvalReference"] is None, "complete header proposal")
+    require(not proposal(candidate, {"javaFiles": 2, "headerCounts": {"APACHE_2_0_INDICATOR": 1, "NO_LEADING_COMMENT": 1}})["proposedLicenseSelection"], "partial header selection")
+    template = staging_template({"artifactSha256": "a"*64, "licenseDispositionsSha256": "b"*64})
     require(len(template["databaseRuntimeRoles"]) == 11 and not any(template["authorization"].values())
             and not template["dispatcherEnabled"] and not template["physicalDeleteEnabled"]
-            and template["decision"] == "NO-GO", "unsafe staging defaults")
-    print("A19 disposition/acceptance self-tests: 5 passed")
+            and template["decision"] == "NO-GO" and template["candidateEvidence"]["licenseDispositionsSha256"] == "b"*64, "unsafe staging defaults")
+    print("A19 disposition/acceptance self-tests: 7 passed")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
