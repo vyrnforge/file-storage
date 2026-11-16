@@ -66,14 +66,48 @@ def obligations(row):
         return "PERMISSIVE", name + ": retain applicable copyright, permission/conditions and disclaimer; verify exact text and non-endorsement if applicable."
     return "TERMS_UNRESOLVED", "Review exact terms, copyright, attribution and redistribution/source conditions."
 
-def is_text(entry, data):
-    if pathlib.PurePosixPath(entry).suffix.lower() in (".jar", ".class", ".zip", ".so", ".dll"):
-        return False
+def text_encoding(entry, data):
+    if pathlib.PurePosixPath(entry).suffix.lower() in (".jar", ".class", ".zip", ".so", ".dll") or b"\x00" in data:
+        return None
     try:
         data.decode("utf-8")
-        return b"\x00" not in data
+        return "UTF-8"
     except UnicodeDecodeError:
-        return False
+        # Exact reviewed Javax Activation 1.2.0 CDDL/GPL notice: original Latin-1 bytes.
+        if entry == "META-INF/LICENSE.txt" and sha(data) == "a14851d626df4d0298a117ac41788bca73a9c24c2ecc2a12fa2a1101ee9fddc8":
+            data.decode("iso-8859-1")
+            return "ISO-8859-1"
+        return None
+
+def is_text(entry, data):
+    return text_encoding(entry, data) is not None
+
+def tagged_sources():
+    catalog = pathlib.Path(__file__).with_name("staging-upstream-license-sources.json")
+    corpus = read_json(catalog.read_bytes())
+    require(corpus["format"] == "file-storage-versioned-upstream-license-sources-v1", "upstream corpus format")
+    def collect(family):
+        require(re.fullmatch(r"[a-z0-9-]+", family["id"]) and re.fullmatch(r"[0-9a-f]{40}", family["commit"]), "invalid upstream identity")
+        require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", family["repository"]), "invalid upstream repository")
+        docs = []
+        for d in family["documents"]:
+            path = pathlib.PurePosixPath(d["path"])
+            require(not path.is_absolute() and ".." not in path.parts and re.fullmatch(r"[A-Za-z0-9_.\-/]+", d["path"]), "invalid upstream path")
+            url = "https://raw.githubusercontent.com/" + family["repository"] + "/" + family["commit"] + "/" + d["path"]
+            raw = fetch(url, 2_000_000)
+            blob = hashlib.sha1(("blob %d\0" % len(raw)).encode() + raw).hexdigest()
+            require(blob == d["gitBlobSha"], "upstream Git blob mismatch")
+            encoding = text_encoding(d["path"], raw)
+            require(encoding is not None, "non-text upstream license")
+            docs.append((d, raw, encoding))
+        return family, docs
+    result = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        for family, docs in pool.map(collect, corpus["families"]):
+            for ref in family["components"]:
+                require(ref not in result, "duplicate upstream component mapping")
+                result[ref] = (family, docs)
+    return result
 
 def fetch(url, limit):
     with urllib.request.urlopen(url, timeout=12) as response:
@@ -142,6 +176,7 @@ def build(target, supplemental=False):
     todo = [r for r in m["libraries"] if r["disposition"] != "FIRST_PARTY_APACHE_2_0" and
             (not r["embeddedNotices"] or obligations(r)[0] in ("TERMS_CONFLICT", "SOURCE_OBLIGATIONS", "CUSTOM_TERMS"))]
     sources = {}
+    tagged = tagged_sources() if supplemental else {}
     if supplemental:
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
             results = pool.map(lambda r: source_terms(components[r["bomRef"]]), todo)
@@ -152,6 +187,7 @@ def build(target, supplemental=False):
         internal = read_json(archive.read("license-manifest.json"))
         require(internal == {k: v for k, v in m.items() if k != "noticeArchiveSha256"}, "embedded notice manifest mismatch")
         consumed = set()
+        retained_tags = {}
         def retain(doc, destination):
             entry = doc["archiveEntry"]
             require(entry not in consumed, "duplicate document binding")
@@ -160,7 +196,7 @@ def build(target, supplemental=False):
             require(sha(raw) == doc["sha256"] and len(raw) == doc["bytes"], "notice document digest")
             if is_text(doc["entry"], raw):
                 out.writestr(destination, raw)
-                return {**doc, "distributionEntry": destination}
+                return {**doc, "distributionEntry": destination, "encoding": text_encoding(doc["entry"], raw)}
             report["excludedBinaryOrNonUtf8Evidence"].append(doc)
             return {**doc, "distributionEntry": None}
         root = archive.read("first-party/LICENSE")
@@ -175,6 +211,20 @@ def build(target, supplemental=False):
             family, obligation = obligations(row)
             docs = [retain(d, f"libraries/{i:04d}/{j:04d}") for j, d in enumerate(
                 row["embeddedNotices"] + row.get("sourceEvidence", {}).get("notices", []))]
+            tagged_source = None
+            if row["bomRef"] in tagged:
+                family, tagged_docs = tagged[row["bomRef"]]
+                if family["id"] not in retained_tags:
+                    records = []
+                    for j, (doc, raw, encoding) in enumerate(tagged_docs):
+                        dest = f"upstream-tags/{family['id']}/{j:04d}-{pathlib.PurePosixPath(doc['path']).name}"
+                        out.writestr(dest, raw)
+                        records.append({"path": doc["path"], "gitBlobSha": doc["gitBlobSha"],
+                                        "sha256": sha(raw), "bytes": len(raw), "encoding": encoding,
+                                        "distributionEntry": dest})
+                    retained_tags[family["id"]] = records
+                tagged_source = {"repository": family["repository"], "tag": family["tag"], "commit": family["commit"],
+                                 "scope": family["scope"], "documents": retained_tags[family["id"]]}
             source = None
             if row["bomRef"] in sources:
                 source, payloads = sources[row["bomRef"]]
@@ -185,15 +235,21 @@ def build(target, supplemental=False):
             report["libraries"].append({"bomRef": row["bomRef"], "path": row["path"], "sha256": row["sha256"],
                 "declaredLicenses": row["licenses"], "engineeringClassification": family, "obligations": obligation,
                 "disposition": "REVIEW_REQUIRED", "documents": docs, "supplementalSource": source,
+                "upstreamTaggedSource": tagged_source,
                 "originalSourceEvidence": row.get("sourceEvidence"),
                 "evidenceStatus": "FIRST_PARTY_ROOT_LICENSE" if family == "FIRST_PARTY" else
                     "EMBEDDED_TEXT_PRESENT" if any(d["distributionEntry"] for d in docs) else
-                    "SOURCE_TEXT_REVIEW_REQUIRED" if source and source["documents"] else "MISSING_EXACT_TEXT"})
+                    "SOURCE_TEXT_REVIEW_REQUIRED" if source and source["documents"] else
+                    "TAGGED_SOURCE_TEXT_REVIEW_REQUIRED" if tagged_source and tagged_source["scope"].startswith("FULL_") else
+                    "TAGGED_DECLARATION_REVIEW_REQUIRED" if tagged_source else "MISSING_EXACT_TEXT"})
         require(set(archive.namelist()) == consumed | {"first-party/LICENSE", "license-manifest.json"}, "unaccounted notice entry")
         packaged = {r["bomRef"] for r in m["libraries"]}
         report["graphOnly"] = [{"bomRef": c["bom-ref"], "licenses": c.get("licenses", []),
                                "disposition": "GRAPH_ONLY_REVIEW_REQUIRED"} for c in bom["components"] if c["bom-ref"] not in packaged]
         report["counts"] = dict(collections.Counter(r["evidenceStatus"] for r in report["libraries"]))
+        report["upstreamTaggedSourceComponents"] = sum(r["upstreamTaggedSource"] is not None for r in report["libraries"])
+        if supplemental:
+            report["upstreamSourceCorpusSha256"] = sha(pathlib.Path(__file__).with_name("staging-upstream-license-sources.json").read_bytes())
         report["classifications"] = dict(collections.Counter(r["engineeringClassification"] for r in report["libraries"]))
         out.writestr("distribution-review.json", dump(report))
     report["distributionNoticeArchiveSha256"] = sha((target / "staging-distribution-notices.zip").read_bytes())
@@ -248,7 +304,8 @@ def self_test():
                 raise AssertionError("tampered evidence accepted: " + name)
             finally:
                 path.write_bytes(saved)
-    print("A18 distribution review self-tests: 8 passed")
+    require(not is_text("LICENSE.txt", b"\xa7"), "unreviewed non-UTF8 accepted")
+    print("A18 distribution review self-tests: 9 passed")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
