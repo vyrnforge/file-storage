@@ -404,7 +404,7 @@ class ApiRuntimeCompositionTest {
                 assertTrue(rs.next());location=new Location(new LocationId(rs.getObject(1,UUID.class)),new BackendId(rs.getObject(2,UUID.class)),rs.getString(3),rs.getString(4));
             }
             stagingDependencies=new StagingRuntimeDependencies("staging",new Trust(ISS,AUD),
-                Map.of(location.id(),new StagingRuntimeDependencies.Pin(TARGET,location,new CredentialRef("ref:fixture/v1"))),
+                Map.of(new StagingRuntimeDependencies.PinKey(location.backend(),1,location.id()),new StagingRuntimeDependencies.Pin(TARGET,location,new CredentialRef("ref:fixture/v1"))),
                 ref->{assertEquals(new CredentialRef("ref:fixture/v1"),ref);return ()->{};},
                 Map.of(Provider.S3,(target,loc,revision,credential)->{assertEquals(TARGET,target);assertEquals(location,loc);assertEquals(1,revision);return fixture.open();}),
                 (input,size,remaining)->{try{assertEquals(size,input.readAllBytes().length);return new io.vyrnforge.filestorage.runtime.transfer.ContentScanner.Verdict(Scan.CLEAN,"text/plain");}

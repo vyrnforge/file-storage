@@ -307,6 +307,19 @@ public final class JdbcRegistry {
     /** Gateway composition adds exact target admission before any credential lookup. */
     public <C extends AutoCloseable> Resolved<C> resolveExisting(BackendId backend, long revision,
             LocationId location, java.util.function.Predicate<Target> approved, CredentialResolver<C> resolver) {
+        Objects.requireNonNull(approved);
+        return resolveExistingAdmitted(backend, revision, location,
+                (target, persistedLocation, reference) -> approved.test(target), resolver);
+    }
+
+    /** Complete trusted pin admission, after the registry transaction and before secret acquisition. */
+    @FunctionalInterface
+    public interface PinAdmission {
+        boolean allows(Target target, Location location, CredentialRef reference);
+    }
+
+    public <C extends AutoCloseable> Resolved<C> resolveExistingAdmitted(BackendId backend, long revision,
+            LocationId location, PinAdmission approved, CredentialResolver<C> resolver) {
         Objects.requireNonNull(backend);
         Objects.requireNonNull(location);
         Objects.requireNonNull(approved);
@@ -326,7 +339,7 @@ public final class JdbcRegistry {
             }
         });
         try {
-            if (!approved.test(pin.target())) throw new Failure(Code.DENIED);
+            if (!approved.allows(pin.target(), pin.location(), pin.credential())) throw new Failure(Code.DENIED);
             C credential = Objects.requireNonNull(resolver.resolve(pin.credential()));
             return new Resolved<>(pin.target(), pin.location(), revision, credential);
         } catch (RuntimeException ex) {

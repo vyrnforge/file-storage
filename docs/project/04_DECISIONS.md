@@ -174,3 +174,8 @@ FS-310A8 candidate PR #91: [implementation CI 43803914425](https://github.com/vy
 ## FS-65 Q16 proposed implementation correction — 2026-11-16
 
 Preserve DEC-FS003/005/009/012 and the existing registry CNAME rejection. Correct inconsistent A16 staging admission/docs by rejecting OSS CNAME at properties, typed pin and factory boundaries. No new architecture decision or CNAME approval; any future support requires separately reviewed bucket binding, alias/namespace, TLS/egress and provider evidence. Candidate pending exact-head CI and owner review. #65; PR #108 audit remains open.
+
+
+## FS-65 Q16 acceptance and Q15 authorized correction
+
+Owner explicitly approved Q16 and next AQ-02. #109 merged `e16f016c20e3338d50b3e78b15512b0eab549a87` with 226 passing tests, no new findings. Q15 preserves DEC-FS003/005/009/012: require explicit positive persisted revision in trusted staging config, admit exact tuple with immutable target/location/ref, no latest fallback. DB-role/provider reference separation and cross-backend reference isolation retained; same-backend explicit tuples may reuse an immutable reference for reviewed rollback or multiple locations. Old configuration without revision fails closed and requires operator review. Proposed implementation pending verification and owner acceptance; no new production or deployment authority.
