@@ -161,6 +161,15 @@ final class IsolatedRoleProfiles {
             }catch(SQLException ex){c.rollback();throw ex;}
         }
     }
+    Set<String> stagingGrantStatements(String group){
+        var result=new HashSet<String>();
+        for(String s:schemas)result.add("GRANT USAGE ON SCHEMA "+s+" TO "+group+";");
+        for(Grant g:grants)result.add("GRANT "+g.privilege()+(g.columns().isEmpty()?"":"("+String.join(",",g.columns())+")")+" ON "+g.object()+" TO "+group+";");
+        for(String f:functions)result.add("GRANT EXECUTE ON FUNCTION "+f+" TO "+group+";");
+        if(kind==Kind.BACKEND_ONLY)result.add("GRANT EXECUTE ON FUNCTION fs.backend_retirement_blocked(uuid) TO "+group+";");
+        result.add("GRANT CONNECT ON DATABASE fs_staging TO "+group+";");
+        return Set.copyOf(result);
+    }
     private boolean allowed(String object,String privilege,String col){
         return grants.stream().anyMatch(g->g.object().equals(object)&&g.privilege().equals(privilege)
             &&(g.columns().isEmpty()||(col!=null&&g.columns().contains(col))));
