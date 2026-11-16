@@ -142,7 +142,16 @@ final class StagingBootstrapTest {
         var oldKey=new StagingRuntimeDependencies.PinKey(first.getKey().backend(),1,first.getKey().location());
         assertEquals(admitted.locations.get(oldKey).location(),first.getValue().location());
         assertNotEquals(admitted.locations.get(oldKey).credential(),first.getValue().credential());
-        for(String bad:List.of(both.replace("provider.3.revision=2","provider.3.revision=1"),
+        // A reviewed rollback may append a new revision using the previous immutable reference.
+        String reused=both.replace("provider.3.ref=ref:staging/file-storage/s3-v2","provider.3.ref=ref:staging/file-storage/s3");
+        writePrivate(config,reused);
+        var rollback=StagingBootstrapConfig.load(config);
+        assertEquals(rollback.locations.get(oldKey).credential(),rollback.locations.get(first.getKey()).credential());
+        String crossBackend=reused.replace("provider.3.backend=00000000-0000-4000-8000-000000000001",
+                "provider.3.backend=00000000-0000-4000-8000-000000000005")
+                .replace("provider.3.location=00000000-0000-4000-8000-000000000002",
+                "provider.3.location=00000000-0000-4000-8000-000000000006");
+        for(String bad:List.of(crossBackend,both.replace("provider.3.revision=2","provider.3.revision=1"),
                 both.replace("provider.3.revision=2","provider.3.revision=0"),
                 both.replace("provider.3.revision=2\n",""),
                 both.replace("provider.3.bucket=example-s3-staging","provider.3.bucket=wrong-bucket"),

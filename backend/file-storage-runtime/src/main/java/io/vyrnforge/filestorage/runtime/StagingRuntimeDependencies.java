@@ -49,17 +49,20 @@ public record StagingRuntimeDependencies(String environment,SecuredFiles.Trust t
         var locations=new HashMap<LocationId,Location>();
         var targets=new HashMap<BackendId,Target>();
         var references=new HashMap<BackendId,Map<Long,CredentialRef>>();
+        var referenceOwners=new HashMap<CredentialRef,BackendId>();
         for(var entry:pins.entrySet()){
             var key=entry.getKey();var pin=entry.getValue();
             if(!key.backend().equals(pin.location().backend())||!key.location().equals(pin.location().id()))
                 throw new IllegalArgumentException("invalid staging locations");
             var priorLocation=locations.putIfAbsent(key.location(),pin.location());
             var priorTarget=targets.putIfAbsent(key.backend(),pin.target());
+            var priorOwner=referenceOwners.putIfAbsent(pin.credential(),key.backend());
             var priorReference=references.computeIfAbsent(key.backend(),ignored->new HashMap<>())
                     .putIfAbsent(key.revision(),pin.credential());
             if((priorLocation!=null&&!priorLocation.equals(pin.location()))
                     ||(priorTarget!=null&&!priorTarget.equals(pin.target()))
-                    ||(priorReference!=null&&!priorReference.equals(pin.credential())))
+                    ||(priorReference!=null&&!priorReference.equals(pin.credential()))
+                    ||(priorOwner!=null&&!priorOwner.equals(key.backend())))
                 throw new IllegalArgumentException("invalid staging locations");
         }
     }

@@ -68,7 +68,7 @@ public final class StagingBootstrapConfig {
             long revision=Long.parseLong(revisionValue);
             String bucket=take(p,k+"bucket"),prefix=take(p,k+"prefix"),ref=reference(take(p,k+"ref"));
             if(!bucket.matches("[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]")||!prefix.matches("[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*/")
-                ||prefix.length()>512||!refs.add(ref))throw invalid();
+                ||prefix.length()>512||refs.contains(ref))throw invalid();
             if(pins.put(new StagingRuntimeDependencies.PinKey(backend,revision,id),new StagingRuntimeDependencies.Pin(target,new Location(id,backend,bucket,prefix),new CredentialRef(ref)))!=null)throw invalid();
         }
         StagingRuntimeDependencies.validatePins(pins);
