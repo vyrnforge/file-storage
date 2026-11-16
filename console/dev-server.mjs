@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { allowedPath, TENANT } from './src/api.mjs';
 const ROOT=dirname(fileURLToPath(import.meta.url));
 export const UI_REVISION='90308f0be32e8263ac829b1909190990384ec3c3';
-export const PREVIEW_TENANT='019abcdef-0000-7000-8000-000000000001'.replace('019abcdef','019abcde');
+export const PREVIEW_TENANT='019abcde-0000-7000-8000-000000000001';
 const BACKEND='019abcde-0000-7000-8000-000000000002', LOCATION='019abcde-0000-7000-8000-000000000003';
 const MAX=1024*1024;
 function json(res,status,value,headers={}) { res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}); res.end(JSON.stringify(value)); }
@@ -21,6 +21,33 @@ export function fixture(path,tenant,query) {
   if(path==='/v1/admin/policies/active' && query.get('application')==='demo' && query.get('purpose')==='attachments') return [200,{revision:1,rules:[{locationId:LOCATION,priority:0,eligible:true}]}];
   return [404,{code:'NOT_FOUND'}];
 }
+
+// Only fields used by the read-only console cross the local proxy boundary.
+function scalar(value) {
+  if (value===null || ['string','number','boolean'].includes(typeof value)) return value;
+  throw new Error('Unexpected scalar');
+}
+function pick(value, keys) {
+  if(!value || typeof value!=='object' || Array.isArray(value)) throw new Error('Invalid response');
+  return Object.fromEntries(keys.filter(key=>Object.hasOwn(value,key)).map(key=>[key,scalar(value[key])]));
+}
+function rows(value, project) {
+  if(!Array.isArray(value)||value.length>100)throw new Error('Invalid rows');
+  return value.map(project);
+}
+function metadata(row) {
+  return {...pick(row,['name','versionState','declaredSize','declaredMimeType']),file:pick(row.file,['fileId'])};
+}
+export function sanitize(path,value) {
+  if(path==='/v1/usage')return {states:rows(value.states,r=>pick(r,['state','fileCount','declaredBytes','availableBytes']))};
+  if(path==='/v1/files')return {items:rows(value.items,metadata),...pick(value,['nextAfterFileId'])};
+  if(path==='/v1/deleted-files')return {items:rows(value.items,r=>({metadata:metadata(r.metadata),...pick(r,['deletedAt'])})),...pick(value,['nextAfterFileId'])};
+  if(path==='/v1/admin/backends')return rows(value,r=>pick(r,['provider','backendId','latestRevision','activeRevision']));
+  if(path.endsWith('/locations'))return rows(value,r=>pick(r,['locationId','backendId']));
+  if(path==='/v1/admin/policies/active')return {...pick(value,['revision']),rules:rows(value.rules,r=>pick(r,['locationId','priority','eligible']))};
+  throw new Error('Unsupported response');
+}
+
 export function validateOrigin(value) {
   const u=new URL(value);
   if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||u.username||u.password||u.pathname!=='/'||u.search||u.hash||!u.port)throw new Error('API origin must be explicit http://127.0.0.1:<port>');
@@ -60,7 +87,7 @@ export async function createServer({mode='preview',apiOrigin,uiRoot}={}) {
         if(!upstream.ok){await upstream.body?.cancel();return json(res,upstream.status,{code:'REQUEST_FAILED'},responseHeaders);}
         if(!upstream.headers.get('content-type')?.includes('application/json'))return json(res,502,{code:'UNAVAILABLE'});
         const chunks=[];let size=0;for await(const chunk of upstream.body){size+=chunk.length;if(size>MAX)throw new Error('response budget');chunks.push(chunk);}
-        return json(res,200,JSON.parse(Buffer.concat(chunks).toString('utf8')),responseHeaders);
+        return json(res,200,sanitize(path,JSON.parse(Buffer.concat(chunks).toString('utf8'))),responseHeaders);
       }
       if(u.pathname==='/shared/styles.css'&&!shared){res.writeHead(200,{'Content-Type':'text/css'});return res.end('/* Local preview: shared UI build not supplied. */');}
       const rel=u.pathname==='/'?'index.html':u.pathname.slice(1);

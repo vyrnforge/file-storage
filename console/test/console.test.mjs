@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { client, allowedPath, projectFile, projectBackend, TENANT } from '../src/api.mjs';
-import { createServer, validateOrigin, PREVIEW_TENANT } from '../dev-server.mjs';
+import { createServer, validateOrigin, PREVIEW_TENANT, sanitize } from '../dev-server.mjs';
 async function listen(server){await new Promise(r=>server.listen(0,'127.0.0.1',r));return 'http://127.0.0.1:'+server.address().port;}
 test('client uses exact same-origin routes and tenant scope; no tenant header for platform backend admin',async()=>{
   const seen=[];const c=client({token:'test-access-token',tenant:PREVIEW_TENANT,fetcher:async(url,options)=>{seen.push({url,options});return new Response('{}',{headers:{'content-type':'application/json'}});}});
@@ -14,6 +14,10 @@ test('client uses exact same-origin routes and tenant scope; no tenant header fo
 test('logical projections omit credentials and private placement',()=>{
   assert.deepEqual(projectFile({name:'sample',versionState:'AVAILABLE',declaredSize:5,declaredMimeType:'text/plain',file:{fileId:'id'},bucket:'private',key:'secret'}),['sample','AVAILABLE','5','text/plain','id']);
   assert.deepEqual(projectBackend({provider:'OSS',backendId:'id',latestRevision:1,activeRevision:null,secret:'no'}),['OSS','id','1','—']);
+});
+test('proxy strips unexpected sensitive fields before browser receives response',()=>{
+  assert.deepEqual(sanitize('/v1/files',{items:[{name:'x',file:{fileId:'id',key:'secret'},credential:'secret'}],nextAfterFileId:null}),{items:[{name:'x',file:{fileId:'id'}}],nextAfterFileId:null});
+  assert.throws(()=>sanitize('/v1/uploads',{}));
 });
 test('local origin validation and tenant validation',()=>{
   assert.equal(validateOrigin('http://127.0.0.1:8080'),'http://127.0.0.1:8080');assert.throws(()=>validateOrigin('https://example.com'));assert.throws(()=>validateOrigin('http://127.0.0.1:8080/path'));assert.ok(TENANT.test(PREVIEW_TENANT));assert.throws(()=>client({token:'x',tenant:'bad'}));

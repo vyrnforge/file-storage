@@ -5,7 +5,7 @@ const btn = (text, onClick) => { const b = create('button',text); b.dataset.vfBu
 let api = null, route = 'overview', preview = false, epoch = 0, pending = null, scopes = new Set(), currentQuery = {};
 const titles = {overview:'Overview',files:'Files',deleted:'Deleted files',backends:'Storage backends',policies:'Routing policies'};
 function disconnect() {
-  epoch++; pending?.abort(); api = null; scopes = new Set(); currentQuery = {}; $('token').value = ''; $('tenant').value = '';
+  epoch++; pending?.abort(); api = null; scopes = new Set(); currentQuery = {}; $('token').value = ''; $('tenant').value = ''; $('connect-status').textContent='';
   $('content').replaceChildren(); $('status').textContent=''; $('workspace').hidden=true; $('nav').hidden=true; $('signout').hidden=true; $('connect').hidden=false;
 }
 function message(error) {
@@ -46,7 +46,7 @@ async function select(name, query={}) {
       const rows=result; $('content').append(panel('Registered backends',table(['Provider','Backend ID','Latest revision','Active revision','Locations'],rows.map(r=>[...projectBackend(r),btn('View locations',()=>showLocations(r.backendId))]))));
     }
     $('status').textContent='Loaded from '+(preview?'isolated preview fixtures.':'File Storage API.');
-  } catch(e) { if(mine===epoch && e.name!=='AbortError') { $('status').textContent=message(e); if(e.status===401) { api=null; scopes.clear(); $('content').replaceChildren(); $('nav').hidden=true; } } }
+  } catch(e) { if(mine===epoch && e.name!=='AbortError') { $('status').textContent=message(e); if(e.status===401) { disconnect(); $('connect-status').textContent='Authentication failed. Reconnect with an authorized access token.'; } } }
   finally { if(mine===epoch) $('refresh').disabled=false; }
 }
 async function showLocations(id) {
@@ -68,7 +68,7 @@ function renderPolicyForm(mine) {
   $('content').append(panel('Look up a tenant/application/purpose policy',form),result); $('status').textContent='Enter the exact policy scope. The API checks authorization.';
 }
 $('connect-form').addEventListener('submit',async e=>{
-  e.preventDefault(); const tenant=$('tenant').value.trim(); if(!TENANT.test(tenant)){ $('tenant').setCustomValidity('Enter a UUIDv7 tenant ID.');$('tenant').reportValidity();return; }
+  e.preventDefault(); $('connect-status').textContent='Checking authorized API reads…'; const tenant=$('tenant').value.trim(); if(!TENANT.test(tenant)){ $('tenant').setCustomValidity('Enter a UUIDv7 tenant ID.');$('tenant').reportValidity();return; }
   try{api=client({token:$('token').value.trim(),tenant,preview});}catch(error){$('token').setCustomValidity(error.message);$('token').reportValidity();return;}
   $('token').value=''; const mine=++epoch; pending?.abort(); pending=new AbortController();
   const submit=$('connect-form').querySelector('button');submit.disabled=true;
@@ -77,7 +77,7 @@ $('connect-form').addEventListener('submit',async e=>{
   const outcomes=await Promise.all(names.map(async name=>{try{await api.get(routes[name],{...(name==='overview'?{}:{limit:1})},pending.signal);return name;}catch{return null;}}));
   submit.disabled=false;if(mine!==epoch)return;
   scopes=new Set(outcomes.filter(Boolean)); if(scopes.has('backends')||scopes.has('overview')) scopes.add('policies'); // Scope lookup is separately server-authorized.
-  if(!scopes.size){api=null;$('token').setCustomValidity('No authorized API reads succeeded. Check identity and service readiness.');$('token').reportValidity(); if(preview) $('tenant').reportValidity();return;}
+  if(!scopes.size){api=null;$('connect-status').textContent='No authorized API reads succeeded. Check identity and service readiness.';return;}
   document.querySelectorAll('[data-route]').forEach(b=>b.hidden=!scopes.has(b.dataset.route));
   $('connect').hidden=true;$('workspace').hidden=false;$('nav').hidden=false;$('signout').hidden=false;select(scopes.has('overview')?'overview':[...scopes][0]);
 });

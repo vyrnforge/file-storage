@@ -29,8 +29,8 @@ export function client({ token, tenant, preview = false, fetcher = fetch }) {
   return { get };
 }
 export function allowedPath(path) {
-  return Object.values(routes).includes(path) || path === '/v1/admin/policies/revisions' ||
-    /^\/v1\/admin\/backends\/[0-9a-f-]{36}\/(active|locations|revisions)$/i.test(path);
+  return Object.values(routes).includes(path) ||
+    /^\/v1\/admin\/backends\/[0-9a-f-]{36}\/locations$/i.test(path);
 }
 export function projectFile(row) {
   return [String(row.name ?? ''), String(row.versionState ?? ''), String(row.declaredSize ?? ''), String(row.declaredMimeType ?? ''), String(row.file?.fileId ?? '')];
