@@ -200,6 +200,11 @@ final class JdbcPurgePreparation {
     }
 
     private Evidence evidence(Connection c,Caller caller,PurgeRequest request)throws SQLException{
+        // An isolated activated policy is never a source of purge authorization. Fence activation
+        // against preparation/simulation, including pre-existing synthetic V12 CLEAR facts.
+        JdbcIsolatedPolicyQuota.lockTenant(c,caller.tenant());
+        try(var ps=tx.statement(c,"SELECT 1 FROM fs.isolated_policy_activation WHERE tenant_id=? LIMIT 1",
+            caller.tenant().value());var rows=ps.executeQuery()){if(rows.next())throw conflict();}
         try(var ps=tx.statement(c,"""
             SELECT policy_revision,hold_state,retain_until,observed_at,valid_until FROM fs.file_retention_evidence
             WHERE tenant_id=? AND file_id=? AND lifecycle_revision=? FOR SHARE
