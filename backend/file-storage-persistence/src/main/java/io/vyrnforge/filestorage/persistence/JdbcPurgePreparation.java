@@ -40,7 +40,8 @@ final class JdbcPurgePreparation {
                 revision=rows.getLong(3);
             }
             var target=target(c,caller,file,revision);
-            lockGrant(c,caller,target,grants);
+            lockGrant(c,caller,target,grants,request.supersedes()==null?Action.PREPARE_PURGE:Action.SUPERSEDE_PURGE);
+            rejectHold(c,caller.tenant(),file.id());
             if(file.state()!=FileState.SOFT_DELETED||revision!=request.lifecycleRevision()
                     ||!target.version().equals(request.version()))throw conflict();
             var evidence=evidence(c,caller,request);
@@ -51,13 +52,21 @@ final class JdbcPurgePreparation {
             boolean priorClaim=priorClaim(c,caller,request);
             // One stable operation per deletion generation. Replays reauthorize and revalidate
             // current policy evidence and exact target; different requesters cannot adopt it.
+            boolean hasHead=false;
             try(var ps=tx.statement(c,"""
                 SELECT operation_id,version_id,location_id,backend_id,config_revision,object_key_sha256,
                        content_sha256,content_size,policy_revision,retain_until,evidence_observed_at,
-                       evidence_valid_until,actor,consumer,prior_download_claim
-                FROM fs.purge_preparation WHERE tenant_id=? AND file_id=? AND lifecycle_revision=?
+                       evidence_valid_until,actor,consumer,prior_download_claim,supersedes_operation_id
+                FROM fs.purge_preparation p WHERE tenant_id=? AND file_id=? AND lifecycle_revision=?
+                  AND NOT EXISTS (SELECT 1 FROM fs.purge_preparation n WHERE n.supersedes_operation_id=p.operation_id)
                 """,caller.tenant().value(),request.file().value(),revision);var rows=ps.executeQuery()){
                 if(rows.next()){
+                    hasHead=true;
+                    UUID head=rows.getObject(1,UUID.class);
+                    if(request.supersedes()!=null&&request.supersedes().equals(head)){
+                        // Explicit current-head CAS creates a new immutable review.
+                    }else{
+                    if(request.supersedes()!=null&&!request.supersedes().equals(rows.getObject(16,UUID.class)))throw conflict();
                     if(!target.version().value().equals(rows.getObject(2,UUID.class))
                         ||!target.location().value().equals(rows.getObject(3,UUID.class))
                         ||!target.backend().value().equals(rows.getObject(4,UUID.class))
@@ -67,23 +76,25 @@ final class JdbcPurgePreparation {
                         ||!evidence.observedAt().equals(instant(rows,11))||!evidence.validUntil().equals(instant(rows,12))
                         ||!caller.actor().equals(rows.getString(13))||!caller.consumer().equals(rows.getString(14))
                         ||priorClaim!=rows.getBoolean(15))throw conflict();
-                    return result(rows.getObject(1,UUID.class),target,evidence);
+                    return result(head,target,evidence);
+                    }
                 }
             }
+            if(request.supersedes()!=null&&!hasHead)throw conflict();
             UUID operation=UuidV7.generate();
             try(var ps=tx.statement(c,"""
                 INSERT INTO fs.purge_preparation(operation_id,tenant_id,file_id,version_id,location_id,backend_id,
                     config_revision,object_key_sha256,content_sha256,content_size,lifecycle_revision,policy_revision,
-                    retain_until,evidence_observed_at,evidence_valid_until,actor,consumer,correlation_id,created_at,prior_download_claim)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    retain_until,evidence_observed_at,evidence_valid_until,actor,consumer,correlation_id,created_at,prior_download_claim,supersedes_operation_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,operation,caller.tenant().value(),file.id().value(),target.version().value(),target.location().value(),
                 target.backend().value(),target.configRevision(),target.keyHash(),target.digest(),target.size(),revision,
                 evidence.policyRevision(),utc(evidence.retainUntil()),utc(evidence.observedAt()),utc(evidence.validUntil()),
-                caller.actor(),caller.consumer(),correlation.correlationId(),utc(now),priorClaim)){
+                caller.actor(),caller.consumer(),correlation.correlationId(),utc(now),priorClaim,request.supersedes())){
                 if(ps.executeUpdate()!=1)throw conflict();
             }
             MutationIntents.record(events,audits,clock,correlation,new ActorReference(ActorType.USER,caller.actor(),null,null),
-                caller.tenant().value(),"file-storage.file.purge-prepared","file-storage.file",file.id().value(),
+                caller.tenant().value(),request.supersedes()==null?"file-storage.file.purge-prepared":"file-storage.file.purge-superseded","file-storage.file",file.id().value(),
                 Map.of("operationId",operation.toString(),"versionId",target.version().value().toString(),
                     "lifecycleRevision",revision,"policyRevision",evidence.policyRevision(),"disposition","REVIEW_REQUIRED"));
             return result(operation,target,evidence);
@@ -103,6 +114,10 @@ final class JdbcPurgePreparation {
             var file=new File(new FileId(rows.getString(1)),tenant,rows.getString(7),FileState.valueOf(rows.getString(8)));
             long revision=rows.getLong(3);
             if(file.state()!=FileState.SOFT_DELETED||revision!=rows.getLong(9))throw conflict();
+            rejectHold(c,tenant,file.id());
+            try(var ps2=tx.statement(c,"SELECT 1 FROM fs.purge_preparation WHERE supersedes_operation_id=?",operation);var newer=ps2.executeQuery()){
+                if(newer.next())throw conflict();
+            }
             var caller=new Caller(tenant,rows.getString(5),rows.getString(6));
             var request=new PurgeRequest(file.id(),new VersionId(rows.getObject(2,UUID.class)),revision,rows.getLong(4));
             var target=target(c,caller,file,revision);
@@ -117,7 +132,9 @@ final class JdbcPurgePreparation {
             // Check all generations: a reader may outlive a delete/restore/delete cycle.
             try(var readers=tx.statement(c,"""
                 SELECT 1 FROM fs.download_transfer_handle h LEFT JOIN fs.download_reader d USING(handle_hash)
-                WHERE h.tenant_id=? AND h.file_id=? AND h.claimed_at IS NOT NULL AND d.drained_at IS NULL LIMIT 1
+                WHERE h.tenant_id=? AND h.file_id=? AND h.claimed_at IS NOT NULL AND d.drained_at IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM fs.reader_reconciliation q JOIN fs.reader_reconciliation_review a USING(request_id)
+                      WHERE q.handle_hash=h.handle_hash AND a.verdict='CONFIRMED_STOPPED') LIMIT 1
                 """,tenant.value(),file.id().value());var pending=readers.executeQuery()){
                 if(pending.next())throw conflict();
             }
@@ -159,19 +176,26 @@ final class JdbcPurgePreparation {
         }
     }
 
-    private void lockGrant(Connection c,Caller caller,Target target,List<CatalogGrant> grants)throws SQLException{
+    private void lockGrant(Connection c,Caller caller,Target target,List<CatalogGrant> grants,Action action)throws SQLException{
         var now=tx.now();var id=target.file().id();
         boolean owner=caller.actor().equals(target.ownerActor())&&caller.consumer().equals(target.ownerConsumer());
         if(grants.stream().noneMatch(g->g.purpose().equals(target.purpose())&&g.expiresAt().isAfter(now)
                 &&(id.equals(g.file())||(g.file()==null&&owner))))throw missing();
         try(var ps=tx.statement(c,"""
             SELECT expires_at FROM fs.file_grant WHERE tenant_id=? AND actor=? AND consumer=? AND purpose=?
-              AND action='PREPARE_PURGE' AND NOT revoked AND not_before<=? AND expires_at>?
+              AND action=? AND NOT revoked AND not_before<=? AND expires_at>?
               AND ((scope='OWNED_FILE' AND ?) OR (scope='EXACT_FILE' AND file_id=?))
             ORDER BY grant_id LIMIT 1 FOR SHARE
-            """,caller.tenant().value(),caller.actor(),caller.consumer(),target.purpose(),utc(now),utc(now),owner,id.value());
+            """,caller.tenant().value(),caller.actor(),caller.consumer(),target.purpose(),action.name(),utc(now),utc(now),owner,id.value());
             var rows=ps.executeQuery()){
             if(!rows.next()||!clock.instant().isBefore(instant(rows,1)))throw missing();
+        }
+    }
+
+    private void rejectHold(Connection c,TenantId tenant,FileId file)throws SQLException{
+        try(var ps=tx.statement(c,"SELECT 1 FROM fs.governed_legal_hold WHERE tenant_id=? AND file_id=? LIMIT 1",
+                tenant.value(),file.value());var rows=ps.executeQuery()){
+            if(rows.next())throw conflict();
         }
     }
 

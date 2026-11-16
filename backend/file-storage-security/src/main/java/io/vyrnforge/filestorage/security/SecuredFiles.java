@@ -134,8 +134,9 @@ public final class SecuredFiles {
     /** Internal review request only; deliberately not exposed by an HTTP route. */
     public Result<PurgePreparation> preparePurge(String bearer,TenantId tenant,UUID correlationId,PurgeRequest request){
         Objects.requireNonNull(request);
-        return execute(bearer,tenant,correlationId,Action.PREPARE_PURGE,null,
-            (app,caller,correlation)->app.preparePurge(caller,request,resourceGrants(caller,Action.PREPARE_PURGE),correlation));
+        var action=request.supersedes()==null?Action.PREPARE_PURGE:Action.SUPERSEDE_PURGE;
+        return execute(bearer,tenant,correlationId,action,null,
+            (app,caller,correlation)->app.preparePurge(caller,request,resourceGrants(caller,action),correlation));
     }
     public Result<LifecycleView> lifecycle(String bearer,TenantId tenant,UUID correlationId,FileId file,Action action,long expected){
         if(action!=Action.DELETE_FILE&&action!=Action.RESTORE_FILE)throw new Failure(Code.INVALID);
