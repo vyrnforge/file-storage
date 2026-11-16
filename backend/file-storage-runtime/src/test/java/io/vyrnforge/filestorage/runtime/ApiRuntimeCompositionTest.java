@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ApiRuntimeCompositionTest {
     private static final PostgreSQLContainer<?> DB = new PostgreSQLContainer<>("postgres:17-alpine");
     private static PGSimpleDataSource source;
+    private static RuntimeDatabaseRoles separated;
     private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
     private static final String ISS = "https://iam.example.test", AUD = "file-storage-test";
@@ -117,7 +118,7 @@ class ApiRuntimeCompositionTest {
                     (issuer, subject, audience) -> "admin".equals(subject) ? Optional.of(ADMIN) : Optional.empty(),
                     (actor, action, backend) -> authority.available && ADMIN.equals(actor),
                     Set.of(TARGET), ApiRuntimeCompositionTest::report),
-                authority::ready);
+                authority::ready,separated);
         }
 
         private static Grant grant(Action action, GrantScope scope) {
@@ -228,4 +229,113 @@ class ApiRuntimeCompositionTest {
             status(404, call(ctx, "GET", "/v1/admin/backends", "admin", false, null));
         }
     }
+    private static PGSimpleDataSource login(String name){
+        var ds=new PGSimpleDataSource();ds.setURL(DB.getJdbcUrl());ds.setUser(name);ds.setPassword("fixture-only-a14");
+        ds.setConnectTimeout(3);ds.setSocketTimeout(5);return ds;
+    }
+    private static void fixtureGrant(String action,String scope)throws Exception{
+        try(var c=source.getConnection();var ps=c.prepareStatement("""
+            INSERT INTO fs.file_grant(grant_id,tenant_id,actor,consumer,purpose,action,scope,not_before,expires_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            """)){
+            ps.setObject(1,UUID.randomUUID());ps.setObject(2,TENANT.value());ps.setString(3,USER.actorId());ps.setString(4,"asset");
+            ps.setString(5,"attachment");ps.setString(6,action);ps.setString(7,scope);
+            ps.setObject(8,NOW.minusSeconds(1).atOffset(ZoneOffset.UTC));ps.setObject(9,NOW.plusSeconds(300).atOffset(ZoneOffset.UTC));ps.executeUpdate();
+        }
+    }
+    @Test void separatedCompositionRunsHttpLifecycleAndInternalCommandsWithRestrictedLogins() throws Exception {
+        RuntimeComposition.migrate(source);seed();
+        var roles=RuntimeDatabaseRoles.Role.values();
+        var kinds=List.of(IsolatedRoleProfiles.Kind.METADATA_API,IsolatedRoleProfiles.Kind.LOGICAL,
+            IsolatedRoleProfiles.Kind.PURGE_PREPARATION,IsolatedRoleProfiles.Kind.PLACEMENT,IsolatedRoleProfiles.Kind.BACKEND_ONLY,
+            IsolatedRoleProfiles.Kind.GRANT_READ,IsolatedRoleProfiles.Kind.READINESS,IsolatedRoleProfiles.Kind.TRANSFER,
+            IsolatedRoleProfiles.Kind.COMPLETION_WORKER,IsolatedRoleProfiles.Kind.GOVERNANCE);
+        var bindings=new EnumMap<RuntimeDatabaseRoles.Role,RuntimeDatabaseRoles.Binding>(RuntimeDatabaseRoles.Role.class);
+        try{
+            for(int i=0;i<roles.length;i++){
+                String group="a14_group_"+i,name="a14_login_"+i;
+                var profile=new IsolatedRoleProfiles(kinds.get(i));profile.provision(source,group);
+                sql("CREATE ROLE "+name+" LOGIN PASSWORD 'fixture-only-a14' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+                sql("GRANT "+group+" TO "+name);profile.verify(source,name,group);
+                bindings.put(roles[i],new RuntimeDatabaseRoles.Binding(name,login(name)));
+            }
+            separated=new RuntimeDatabaseRoles(bindings);
+            assertTrue(separated.ready());
+            fixtureGrant("INITIATE","INITIATE_PURPOSE");
+            for(String action:List.of("READ_SESSION","READ_METADATA","LIST_METADATA","UPLOAD_TRANSFER","DELETE_FILE","RESTORE_FILE","PREPARE_PURGE"))
+                fixtureGrant(action,"OWNED_FILE");
+            try(var ctx=RuntimeApplication.application(TestConfiguration.class).run("--server.port=0","--fs.role=API","--fs.require-separated-roles=true")){
+                status(200,call(ctx,"GET","/health/ready",null,false,null));
+                status(200,call(ctx,"GET","/v1/admin/backends","admin",false,null));
+                status(200,call(ctx,"GET",POLICY,"admin",true,null));
+                status(403,call(ctx,"GET",POLICY,"user",true,null));
+                var created=call(ctx,"POST","/v1/uploads","user",true,BODY);status(200,created);
+                var file=new FileId(field(created.body(),"fileId"));
+                var session=new SessionId(UUID.fromString(field(created.body(),"sessionId")));
+                var version=new VersionId(UUID.fromString(field(created.body(),"versionId")));
+                var secured=ctx.getBean(SecuredFiles.class);
+                var transfer=RuntimeComposition.uploadTransfers(separated,CLOCK,Duration.ofMinutes(1),5);
+                var authority=new io.vyrnforge.filestorage.runtime.transfer.DurableUploadAuthority(secured,transfer);
+                var handle=authority.issue("user",TENANT,session,null);
+                authority.claim("user",handle.handle(),io.vyrnforge.filestorage.runtime.transfer.TransferInstruction.Action.UPLOAD);
+                var work=RuntimeComposition.completionWork(separated,CLOCK,Duration.ofMinutes(1),5,Duration.ofSeconds(30),Duration.ZERO,3,ADMIN);
+                var completion=new io.vyrnforge.filestorage.runtime.transfer.CompletionCommands(secured,transfer,work);
+                String digest="a".repeat(64);
+                completion.complete("user",TENANT,session,digest,null);
+                var verify=work.load(work.claim().claims().getFirst());work.finish(verify,digest);
+                var worker=separated.source(RuntimeDatabaseRoles.Role.WORKER);
+                var scans=new io.vyrnforge.filestorage.persistence.JdbcUploadScan(
+                    new io.vyrnforge.filestorage.persistence.JdbcUploadTransfers(worker,CLOCK,Duration.ofMinutes(1),5),
+                    new io.vyrnforge.filestorage.persistence.JdbcOperations(worker,CLOCK,Duration.ofSeconds(30),Duration.ZERO,3),ADMIN,3);
+                var scan=scans.load(scans.claim(1).claims().getFirst());
+                scans.finish(scan,new Content(5,digest,"text/plain"),Scan.CLEAN);
+                status(200,call(ctx,"GET","/v1/files/"+file.value(),"user",true,null));
+                status(200,call(ctx,"POST","/v1/files/"+file.value()+"/delete?expectedRevision=0","user",true,null));
+                status(404,call(ctx,"GET","/v1/files/"+file.value(),"user",true,null));
+                // Fixture-only legacy retention evidence; no policy activation or actual deletion.
+                sql("INSERT INTO fs.file_retention_evidence(tenant_id,file_id,lifecycle_revision,policy_revision,hold_state,retain_until,observed_at,valid_until) VALUES ('"+TENANT.value()+"','"+file.value()+"',1,1,'CLEAR','2026-01-01T00:00:00Z','2025-12-31T23:59:59Z','2026-01-01T00:01:00Z')");
+                var prepared=secured.preparePurge("user",TENANT,null,new io.vyrnforge.filestorage.application.FileApplication.PurgeRequest(file,version,1,1)).value();
+                assertNotNull(prepared.operationId());assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+                status(200,call(ctx,"POST","/v1/files/"+file.value()+"/restore?expectedRevision=1","user",true,null));
+                var governance=RuntimeComposition.governance(separated,CLOCK,(actor,tenant,f,action)->TENANT.equals(tenant)
+                    &&Set.of(ADMIN,USER).contains(actor),(claim,evidence,actor)->false);
+                long revision=governance.draft(ADMIN,TENANT,new io.vyrnforge.filestorage.application.LifecycleGovernance.PolicyDraft(0,10,
+                    io.vyrnforge.filestorage.application.LifecycleGovernance.QuotaMode.CHARGE_UNTIL_VERIFIED_PURGE),CorrelationContext.create());
+                governance.review(USER,TENANT,revision,CorrelationContext.create());
+                governance.assertHold(ADMIN,TENANT,file,"b".repeat(64),CorrelationContext.create());
+                assertEquals(0,scalar("SELECT count(*) FROM fs.isolated_policy_activation"));
+                assertEquals(1,scalar("SELECT count(*) FROM fs.governed_legal_hold"));
+                try(var c=separated.source(RuntimeDatabaseRoles.Role.GRANT_READ).getConnection();var st=c.createStatement()){
+                    assertEquals("42501",assertThrows(java.sql.SQLException.class,()->st.execute("UPDATE fs.file_grant SET revoked=true")).getSQLState());
+                }
+                try(var c=separated.source(RuntimeDatabaseRoles.Role.PURGE_PREPARATION).getConnection();var st=c.createStatement()){
+                    assertEquals("42501",assertThrows(java.sql.SQLException.class,()->st.execute("UPDATE fs.file_retention_evidence SET hold_state='CLEAR'")).getSQLState());
+                    assertEquals("23514",assertThrows(java.sql.SQLException.class,()->st.execute("UPDATE fs.file_retention_evidence SET file_id='changed'")).getSQLState());
+                }
+                sql("REVOKE a14_group_5 FROM a14_login_5");
+                // Identity admission alone is not a privilege matrix: readiness checks required grants below.
+                assertFalse(separated.ready());
+                status(503,call(ctx,"GET","/health/ready",null,false,null));
+                assertNotEquals(200,call(ctx,"GET","/v1/files/"+file.value(),"user",true,null).statusCode());
+                sql("GRANT a14_group_5 TO a14_login_5");
+                status(200,call(ctx,"GET","/health/ready",null,false,null));
+            }
+            var invalid=new EnumMap<RuntimeDatabaseRoles.Role,RuntimeDatabaseRoles.Binding>(bindings);
+            invalid.put(RuntimeDatabaseRoles.Role.METADATA,new RuntimeDatabaseRoles.Binding("wrong_login",bindings.get(RuntimeDatabaseRoles.Role.METADATA).source()));
+            separated=new RuntimeDatabaseRoles(invalid);
+            assertFalse(separated.ready());
+            assertThrows(RuntimeException.class,()->{try(var ignored=RuntimeApplication.application(TestConfiguration.class).run("--server.port=0","--fs.require-separated-roles=true")){fail("invalid identity started");}});
+            invalid.put(RuntimeDatabaseRoles.Role.METADATA,new RuntimeDatabaseRoles.Binding(DB.getUsername(),source));
+            separated=new RuntimeDatabaseRoles(invalid);assertFalse(separated.ready());
+            separated=null;
+            assertThrows(RuntimeException.class,()->{try(var ignored=RuntimeApplication.application(TestConfiguration.class).run("--server.port=0","--fs.require-separated-roles=true")){fail("legacy source admitted");}});
+        }finally{
+            separated=null;
+            for(int i=roles.length-1;i>=0;i--){
+                String group="a14_group_"+i,name="a14_login_"+i;
+                for(String role:List.of(name,group))if(scalar("SELECT count(*) FROM pg_roles WHERE rolname='"+role+"'")>0){sql("DROP OWNED BY "+role);sql("DROP ROLE "+role);}
+            }
+        }
+    }
+
 }
