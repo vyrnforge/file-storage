@@ -77,6 +77,7 @@ final class IsolatedRoleProfiles {
                     "file_version","upload_session","storage_operation");
                 table("INSERT","fs.backend","fs.backend_revision","fs.storage_location","fs.policy_revision","fs.policy_rule","fs.active_policy");
                 column("UPDATE","fs.backend","endpoint");
+                table("UPDATE","fs.storage_location"); // registry SHARE ROW EXCLUSIVE; V1 rejects every changed value
                 column("UPDATE","fs.backend_revision","status","validated_revision");
                 column("UPDATE","fs.policy_revision","sealed");
                 column("UPDATE","fs.active_policy","policy_revision");

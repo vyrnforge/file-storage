@@ -2807,6 +2807,7 @@ class DurableUploadAuthorityTest {
         sql("CREATE ROLE a13_migration LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
         sql("CREATE ROLE a13_restore_dispatch LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
         try{
+            sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability,execution_mode) VALUES ('a13_restore_dispatch',?,'a13-restore-fixture','CAPTURE','AUDITED')",TENANT.value());
             sql("CREATE DATABASE a13_restore OWNER a13_migration");
             sql("REVOKE CONNECT,TEMP ON DATABASE a13_restore FROM PUBLIC");
             try{
@@ -2819,7 +2820,24 @@ class DurableUploadAuthorityTest {
                     "--no-owner","--no-privileges","--exit-on-error","/tmp/a13-rehearsal.dump");
                 assertEquals(0,restore.getExitCode(),restore.getStderr());
                 RuntimeComposition.migrate(migration);assertTrue(StorageMigrations.ready(migration));
+                // --no-privileges resets routines to default PUBLIC EXECUTE. Quarantine
+                // repairs the privilege boundary before any service connection is permitted.
                 try(var c=migration.getConnection();var st=c.createStatement()){
+                    c.setAutoCommit(false);
+                    st.execute("REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA fs,fs_kernel FROM PUBLIC");
+                    st.execute("REVOKE ALL ON ALL TABLES IN SCHEMA fs,fs_kernel FROM PUBLIC");
+                    st.execute("REVOKE ALL ON SCHEMA fs,fs_kernel FROM PUBLIC");
+                    st.execute("ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC");
+                    st.execute("UPDATE fs.accounting_manifest_principal SET execution_mode='DISABLED'");
+                    c.commit();
+                }
+                try(var c=migration.getConnection();var st=c.createStatement()){
+                    try(var rows=st.executeQuery("SELECT count(*) FROM fs.accounting_manifest_principal WHERE execution_mode='DISABLED'")){
+                        assertTrue(rows.next());assertEquals(1,rows.getLong(1));
+                    }
+                    try(var rows=st.executeQuery("SELECT has_function_privilege('a13_restore_dispatch','fs.capture_accounting_manifest(uuid,uuid,bigint)','EXECUTE'),has_function_privilege('a13_restore_dispatch','fs.audited_accounting_manifest(uuid,uuid,bigint,text,text,uuid,uuid,uuid)','EXECUTE')")){
+                        assertTrue(rows.next());assertFalse(rows.getBoolean(1));assertFalse(rows.getBoolean(2));
+                    }
                     try(var rows=st.executeQuery("SELECT count(*) FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname IN ('fs','fs_kernel') AND r.relowner<>current_user::regrole")){
                         assertTrue(rows.next());assertEquals(0,rows.getLong(1));
                     }
@@ -2845,6 +2863,7 @@ class DurableUploadAuthorityTest {
                     assertEquals("42501",assertThrows(SQLException.class,()->st.execute("CREATE TABLE fs_kernel.prohibited(id int)")).getSQLState());
                 }
                 assertEquals(pending,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PENDING'"));
+                assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_principal WHERE login_role='a13_restore_dispatch' AND execution_mode='AUDITED'"));
                 sql("REVOKE CONNECT ON DATABASE a13_restore FROM a13_restore_dispatch");
                 assertThrows(SQLException.class,dispatcher::getConnection);
             }finally{
@@ -2852,6 +2871,7 @@ class DurableUploadAuthorityTest {
                 DB.execInContainer("rm","-f","/tmp/a13-rehearsal.dump");
             }
         }finally{
+            sql("DELETE FROM fs.accounting_manifest_principal WHERE login_role='a13_restore_dispatch'");
             for(String role:List.of("a13_restore_dispatch","a13_restore_group","a13_migration"))
                 if(scalar("SELECT count(*) FROM pg_roles WHERE rolname=?",role)>0){sql("DROP OWNED BY "+role);sql("DROP ROLE "+role);}
         }
