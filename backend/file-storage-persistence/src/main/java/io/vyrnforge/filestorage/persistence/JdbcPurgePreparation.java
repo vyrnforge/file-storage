@@ -90,6 +90,41 @@ final class JdbcPurgePreparation {
         });
     }
 
+    /** Revalidate immutable preparation snapshot under the file lock for simulation only. */
+    FileId validateSimulation(Connection c,TenantId tenant,UUID operation)throws SQLException{
+        try(var ps=tx.statement(c,"""
+            SELECT p.file_id,p.version_id,p.lifecycle_revision,p.policy_revision,p.actor,p.consumer,
+                   f.name,f.state,f.lifecycle_revision,p.location_id,p.backend_id,p.config_revision,
+                   p.object_key_sha256,p.content_sha256,p.content_size,p.retain_until,p.evidence_observed_at,p.evidence_valid_until
+            FROM fs.purge_preparation p JOIN fs.file f ON f.tenant_id=p.tenant_id AND f.file_id=p.file_id
+            WHERE p.tenant_id=? AND p.operation_id=? FOR UPDATE OF f
+            """,tenant.value(),operation);var rows=ps.executeQuery()){
+            if(!rows.next())throw missing();
+            var file=new File(new FileId(rows.getString(1)),tenant,rows.getString(7),FileState.valueOf(rows.getString(8)));
+            long revision=rows.getLong(3);
+            if(file.state()!=FileState.SOFT_DELETED||revision!=rows.getLong(9))throw conflict();
+            var caller=new Caller(tenant,rows.getString(5),rows.getString(6));
+            var request=new PurgeRequest(file.id(),new VersionId(rows.getObject(2,UUID.class)),revision,rows.getLong(4));
+            var target=target(c,caller,file,revision);
+            var evidence=evidence(c,caller,request);
+            if(!target.version().equals(request.version())||!target.location().value().equals(rows.getObject(10,UUID.class))
+                ||!target.backend().value().equals(rows.getObject(11,UUID.class))||target.configRevision()!=rows.getLong(12)
+                ||!target.keyHash().equals(rows.getString(13))||!target.digest().equals(rows.getString(14))||target.size()!=rows.getLong(15)
+                ||evidence==null||evidence.policyRevision()!=request.policyRevision()
+                ||RetentionSafety.assess(file.state(),revision,evidence,tx.now())!=Assessment.REVIEW_REQUIRED
+                ||!evidence.retainUntil().equals(instant(rows,16))||!evidence.observedAt().equals(instant(rows,17))
+                ||!evidence.validUntil().equals(instant(rows,18)))throw conflict();
+            // Check all generations: a reader may outlive a delete/restore/delete cycle.
+            try(var readers=tx.statement(c,"""
+                SELECT 1 FROM fs.download_transfer_handle h LEFT JOIN fs.download_reader d USING(handle_hash)
+                WHERE h.tenant_id=? AND h.file_id=? AND h.claimed_at IS NOT NULL AND d.drained_at IS NULL LIMIT 1
+                """,tenant.value(),file.id().value());var pending=readers.executeQuery()){
+                if(pending.next())throw conflict();
+            }
+            return file.id();
+        }
+    }
+
     private Target target(Connection c,Caller caller,File file,long revision)throws SQLException{
         // Do not accept a caller-supplied location or resolve a provider. Use the exact original
         // clean pin, including measured integrity and successful scan operation.

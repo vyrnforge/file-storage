@@ -7,12 +7,17 @@ import java.util.Objects;
 /** Internal only; never serialize or log a transfer instruction or its placement. */
 public record TransferInstruction(TenantId tenant, String actorId, String application, Action action,
         FileId file, VersionId version, SessionId session, BackendId backend, long revision,
-        Locator locator, long size, Instant expiresAt, String sha256) {
+        Locator locator, long size, Instant expiresAt, String sha256, java.util.UUID readerToken) {
     public enum Action { UPLOAD, DOWNLOAD }
 
     public TransferInstruction(TenantId tenant,String actorId,String application,Action action,FileId file,
             VersionId version,SessionId session,BackendId backend,long revision,Locator locator,long size,Instant expiresAt){
-        this(tenant,actorId,application,action,file,version,session,backend,revision,locator,size,expiresAt,null);
+        this(tenant,actorId,application,action,file,version,session,backend,revision,locator,size,expiresAt,null,null);
+    }
+
+    public TransferInstruction(TenantId tenant,String actorId,String application,Action action,FileId file,
+            VersionId version,SessionId session,BackendId backend,long revision,Locator locator,long size,Instant expiresAt,String sha256){
+        this(tenant,actorId,application,action,file,version,session,backend,revision,locator,size,expiresAt,sha256,null);
     }
 
     public TransferInstruction {
