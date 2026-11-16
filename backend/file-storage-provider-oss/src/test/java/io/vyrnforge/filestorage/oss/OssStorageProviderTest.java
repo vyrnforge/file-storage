@@ -59,6 +59,14 @@ class OssStorageProviderTest extends ProviderContract {
     }
 
     @Test
+    void stagingFactoryRejectsCnameBeforeClientCreation() {
+        var target = new Target(Provider.OSS, java.net.URI.create("https://oss.example.invalid"),
+                "cn-example", Addressing.CNAME);
+        fails(ErrorCode.INVALID, () -> OssStagingFactory.open(target, LOCATIONS.get(A),
+                "fixture-only", "fixture-only", null, spool, 1024, Duration.ofSeconds(1)));
+    }
+
+    @Test
     void unvalidatedAndVersionedBucketsFailClosed() {
         LocationId id = new LocationId(UUID.randomUUID());
         for (String status : java.util.List.of("Enabled", "Suspended", "Unknown")) {

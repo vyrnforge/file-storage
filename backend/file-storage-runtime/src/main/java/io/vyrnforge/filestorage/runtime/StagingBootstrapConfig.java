@@ -60,7 +60,7 @@ public final class StagingBootstrapConfig {
             if(!"https".equals(target.endpoint().getScheme())||!(target.endpoint().getPath().isEmpty()||"/".equals(target.endpoint().getPath()))
                 ||!target.region().matches("[A-Za-z0-9-]{1,64}")||target.endpoint().getPort()==0||target.endpoint().getPort()>65535
                 ||(provider==Provider.S3&&target.addressing()!=Addressing.PATH&&target.addressing()!=Addressing.VIRTUAL_HOST)
-                ||(provider==Provider.OSS&&target.addressing()!=Addressing.VIRTUAL_HOST&&target.addressing()!=Addressing.CNAME))throw invalid();
+                ||(provider==Provider.OSS&&target.addressing()!=Addressing.VIRTUAL_HOST))throw invalid();
             var id=new LocationId(UUID.fromString(take(p,k+"location")));
             var backend=new BackendId(UUID.fromString(take(p,k+"backend")));
             String bucket=take(p,k+"bucket"),prefix=take(p,k+"prefix"),ref=reference(take(p,k+"ref"));
