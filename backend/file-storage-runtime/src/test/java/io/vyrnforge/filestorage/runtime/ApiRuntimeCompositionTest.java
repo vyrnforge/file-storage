@@ -97,7 +97,7 @@ class ApiRuntimeCompositionTest {
         @Bean Authority authority() { return new Authority(); }
 
         @Bean ApiRuntimeDependencies dependencies(Authority authority) {
-            return new ApiRuntimeDependencies(source, CLOCK, Duration.ofMinutes(5), Duration.ofSeconds(30),
+            return new ApiRuntimeDependencies(separated==null?source:separated.source(RuntimeDatabaseRoles.Role.METADATA), CLOCK, Duration.ofMinutes(5), Duration.ofSeconds(30),
                 new Trust(ISS, AUD), bearer -> {
                     if (!authority.available || !Set.of("user", "admin").contains(bearer))
                         throw new IllegalArgumentException("private fixture detail");

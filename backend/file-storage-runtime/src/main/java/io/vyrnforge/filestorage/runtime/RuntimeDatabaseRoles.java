@@ -59,6 +59,23 @@ public final class RuntimeDatabaseRoles {
                         var target=new Database(rs.getString(3),rs.getLong(4),rs.getString(5),rs.getInt(6));
                         if(expected==null)expected=target;else if(!expected.equals(target))return false;
                     }
+                    // Required per-duty sentinel and universal prohibition on schema history
+                    // writes. Exact ACL inventory remains an operator-reviewed admission input.
+                    String required=switch(role){
+                        case METADATA -> "has_table_privilege(current_user,'fs.file','INSERT')";
+                        case LOGICAL -> "has_column_privilege(current_user,'fs.file','state','UPDATE')";
+                        case PURGE_PREPARATION -> "has_table_privilege(current_user,'fs.purge_preparation','INSERT')";
+                        case PLACEMENT -> "has_table_privilege(current_user,'fs.policy_revision','INSERT')";
+                        case BACKEND -> "has_table_privilege(current_user,'fs.backend','INSERT')";
+                        case GRANT_READ -> "has_table_privilege(current_user,'fs.file_grant','SELECT')";
+                        case READINESS -> "has_table_privilege(current_user,'fs.flyway_schema_history','SELECT') AND has_table_privilege(current_user,'fs_kernel.flyway_schema_history','SELECT')";
+                        case TRANSFER -> "has_column_privilege(current_user,'fs.upload_transfer_handle','claimed_at','UPDATE')";
+                        case WORKER -> "has_column_privilege(current_user,'fs.storage_operation','status','UPDATE')";
+                        case GOVERNANCE -> "has_table_privilege(current_user,'fs.retention_policy_draft','INSERT')";
+                    };
+                    try(var rs=st.executeQuery("SELECT ("+required+") AND NOT has_table_privilege(current_user,'fs.flyway_schema_history','INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_table_privilege(current_user,'fs_kernel.flyway_schema_history','INSERT,UPDATE,DELETE,TRUNCATE')")){
+                        if(!rs.next()||!rs.getBoolean(1))return false;
+                    }
                 }
             }
             return io.vyrnforge.filestorage.persistence.StorageMigrations.ready(source(Role.READINESS));
