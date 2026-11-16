@@ -28,13 +28,19 @@ public final class JdbcTransactions implements Transactions {
     private final JdbcPurgePreparation purgePreparation;
 
     public JdbcTransactions(DataSource dataSource, java.time.Clock clock, java.time.Duration leaseTtl) {
+        this(dataSource,dataSource,dataSource,clock,leaseTtl);
+    }
+
+    /** Distinct trusted sources for independently authorized transaction boundaries. */
+    public JdbcTransactions(DataSource dataSource, DataSource lifecycleSource, DataSource purgeSource,
+            java.time.Clock clock, java.time.Duration leaseTtl) {
         this.clock = Objects.requireNonNull(clock);
         this.transaction = new JdbcReliabilityTransaction(
                 new KernelDataSource(Objects.requireNonNull(dataSource), Connection.TRANSACTION_REPEATABLE_READ),
                 new JacksonRecordCodec(), clock);
         this.reliability = new InitiationReliability(dataSource, clock, leaseTtl);
-        this.lifecycle = new JdbcFileLifecycle(dataSource,clock);
-        this.purgePreparation = new JdbcPurgePreparation(dataSource,clock);
+        this.lifecycle = new JdbcFileLifecycle(Objects.requireNonNull(lifecycleSource),clock);
+        this.purgePreparation = new JdbcPurgePreparation(Objects.requireNonNull(purgeSource),clock);
     }
 
     @Override

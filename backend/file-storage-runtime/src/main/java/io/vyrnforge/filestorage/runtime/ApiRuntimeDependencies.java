@@ -20,7 +20,17 @@ public record ApiRuntimeDependencies(
         SecuredFiles.Trust trust, SecuredFiles.Verifier verifier,
         TenantMembershipPort membership, ModuleEntitlementPort entitlement,
         ConsumerAuthority consumer, PolicyAdministration policy, BackendAuthority backend,
-        RuntimeReadiness.AuthorityProbe readiness) {
+        RuntimeReadiness.AuthorityProbe readiness, RuntimeDatabaseRoles databaseRoles) {
+    /** Legacy isolated single-source composition, never staging admission. */
+    public ApiRuntimeDependencies(DataSource source, Clock clock, Duration sessionTtl, Duration lease,
+            SecuredFiles.Trust trust, SecuredFiles.Verifier verifier, TenantMembershipPort membership,
+            ModuleEntitlementPort entitlement, ConsumerAuthority consumer, PolicyAdministration policy,
+            BackendAuthority backend, RuntimeReadiness.AuthorityProbe readiness) {
+        this(source,clock,sessionTtl,lease,trust,verifier,membership,entitlement,consumer,policy,backend,readiness,null);
+    }
+    public DataSource source(RuntimeDatabaseRoles.Role role){
+        return databaseRoles==null?source:databaseRoles.source(role);
+    }
     public ApiRuntimeDependencies {
         Objects.requireNonNull(source);
         Objects.requireNonNull(clock);
