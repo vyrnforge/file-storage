@@ -113,6 +113,30 @@ class WyrmgateJwtVerifierTest {
         assertEquals(1,fixture.db.rows.size());assertEquals("file-storage",result.value().file().storageService());
         assertEquals("actor-a",fixture.db.rows.getFirst().request().caller().actor());
     }
+    @Test void keySourceOutageAndRecoveryNeverReuseRemovedKeyOrMutateOnDenial() throws Exception{
+        var v=verifier();
+        var fixture=new SecuredFilesTest();
+        var facade=fixture.facade(v);
+        String old=valid(previous),next=valid(current);
+        snapshot=new WyrmgateJwtVerifier.KeySnapshot(ISS,jwks(current,previous),NOW);
+        assertTrue(v.ready());assertEquals("alice",v.verify(old).subject());
+        unavailable=true;
+        assertFalse(v.ready());
+        for(String token:List.of(old,next)){
+            var denied=assertThrows(SecurityFailure.class,()->facade.initiate(token,SecuredFilesTest.A,null,SecuredFilesTest.command()));
+            assertEquals(SecurityCode.AUTHENTICATION_FAILED,denied.code());
+            assertNull(denied.getCause());
+            assertEquals("AUTHENTICATION_FAILED",denied.getMessage());
+            assertTrue(fixture.db.rows.isEmpty());
+        }
+        unavailable=false;
+        snapshot=new WyrmgateJwtVerifier.KeySnapshot(ISS,jwks(current),NOW);
+        assertTrue(v.ready());reject(v,old);
+        assertThrows(SecurityFailure.class,()->facade.initiate(old,SecuredFilesTest.A,null,SecuredFilesTest.command()));
+        assertTrue(fixture.db.rows.isEmpty());
+        assertNotNull(facade.initiate(next,SecuredFilesTest.A,null,SecuredFilesTest.command()));
+        assertEquals(1,fixture.db.rows.size());
+    }
     @Test void stagingRs256ReadinessRequiresFreshUsablePublicKeys()throws Exception{
         var v=WyrmgateJwtVerifier.rs256(new Trust(ISS,AUD),()->{
             if(unavailable)throw new IllegalStateException("fixture unavailable");

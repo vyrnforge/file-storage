@@ -58,3 +58,8 @@ PR #109 squash merged `e16f016c20e3338d50b3e78b15512b0eab549a87` after explicit 
 ## Q15 owner acceptance
 
 PR #110 squash merged `dd3feae440ee601259bd77af983cfaeedb842cd0` after explicit owner approval; 229 tests, CI 43913331781 and audit 43913331656 passed, artifact 14248503712 verified, 67 findings with zero new substantive findings. AQ-03 authorized next; Q10/Q11/Q17 evidence-first, no full audit acceptance or frontend resumption.
+
+
+## AQ-03A owner acceptance
+
+PR #111 squash merged `2273545a64a0b1c6cceb5eae85d2edb73e751454` after explicit owner approval. 231 tests, CI 43915805582 and audit 43915805516 successful, 67 identical SpotBugs findings. Q17 isolated composition verified; AQ-03B authorized next for sanitized security-failure observability and remaining SQL privilege review. No full audit acceptance or deployment.

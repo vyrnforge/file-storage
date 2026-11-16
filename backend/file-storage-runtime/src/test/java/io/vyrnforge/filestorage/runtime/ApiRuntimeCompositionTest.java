@@ -96,7 +96,7 @@ class ApiRuntimeCompositionTest {
     static class TestConfiguration {
         @Bean Authority authority() { return new Authority(); }
 
-        @Bean ApiRuntimeDependencies dependencies(Authority authority) {
+        @Bean ApiRuntimeDependencies dependencies(Authority authority, org.springframework.core.env.Environment environment) {
             return new ApiRuntimeDependencies(separated==null?source:separated.source(RuntimeDatabaseRoles.Role.METADATA), CLOCK, Duration.ofMinutes(5), Duration.ofSeconds(30),
                 new Trust(ISS, AUD), bearer -> {
                     if (!authority.available || !Set.of("user", "admin").contains(bearer))
@@ -107,7 +107,7 @@ class ApiRuntimeCompositionTest {
                 new ApiRuntimeDependencies.ConsumerAuthority(
                     (issuer, subject, audience) -> "user".equals(subject)
                         ? Optional.of(new Binding(USER, TENANT, "asset", Set.of(Action.values()))) : Optional.empty(),
-                    caller -> List.of(grant(Action.INITIATE, GrantScope.INITIATE_PURPOSE),
+                    caller -> environment.getProperty("fs.staging.enabled",Boolean.class,false)?List.of():List.of(grant(Action.INITIATE, GrantScope.INITIATE_PURPOSE),
                             grant(Action.READ_SESSION, GrantScope.OWNED_FILE), grant(Action.READ_METADATA, GrantScope.OWNED_FILE))),
                 new ApiRuntimeDependencies.PolicyAdministration(
                     (issuer, subject, audience, tenant) -> "admin".equals(subject) && TENANT.equals(tenant)
@@ -338,6 +338,58 @@ class ApiRuntimeCompositionTest {
         }
     }
 
+    @Test void effectivePrivilegeAuditDetectsSequenceRoutineAndOwnershipDrift() throws Exception {
+        RuntimeComposition.migrate(source);
+        var profile=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.GRANT_READ);
+        String group="a14_audit_group",name="a14_audit_login";
+        try{
+            profile.provision(source,group);
+            sql("CREATE ROLE "+name+" LOGIN PASSWORD 'fixture-only-a14' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+            sql("GRANT "+group+" TO "+name);
+            profile.verify(source,name,group);
+            // All File Storage SECURITY DEFINER routines must have fixed search_path and no PUBLIC EXECUTE.
+            assertTrue(scalar("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='fs' AND p.prosecdef")>0);
+            assertEquals(0,scalar("""
+                SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname='fs' AND p.prosecdef AND
+                  (NOT coalesce('search_path=pg_catalog, fs, pg_temp'=ANY(p.proconfig),false)
+                   OR EXISTS(SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+                      WHERE a.grantee=0 AND a.privilege_type='EXECUTE'))
+                """));
+            try(var c=login(name).getConnection();var st=c.createStatement()){
+                assertEquals("42501",assertThrows(java.sql.SQLException.class,
+                    ()->st.execute("SELECT fs.read_accounting_manifest(gen_random_uuid(),gen_random_uuid())")).getSQLState());
+                assertEquals("42501",assertThrows(java.sql.SQLException.class,
+                    ()->st.execute("SELECT * FROM fs.accounting_manifest_principal")).getSQLState());
+            }
+            sql("CREATE SEQUENCE fs.audit_fixture_sequence");
+            profile.verify(source,name,group);
+            sql("GRANT USAGE ON SEQUENCE fs.audit_fixture_sequence TO "+group);
+            assertTrue(profile.drift(source,name,group).contains("sequence fs.audit_fixture_sequence USAGE"));
+            sql("REVOKE USAGE ON SEQUENCE fs.audit_fixture_sequence FROM "+group);
+            profile.verify(source,name,group);
+            sql("CREATE FUNCTION fs.audit_fixture_routine() RETURNS integer LANGUAGE SQL AS 'SELECT 1'");
+            sql("REVOKE EXECUTE ON FUNCTION fs.audit_fixture_routine() FROM PUBLIC");
+            profile.verify(source,name,group);
+            sql("GRANT EXECUTE ON FUNCTION fs.audit_fixture_routine() TO PUBLIC");
+            assertTrue(profile.drift(source,name,group).contains("function fs.audit_fixture_routine"));
+            sql("REVOKE EXECUTE ON FUNCTION fs.audit_fixture_routine() FROM PUBLIC");
+            // Fixture-only owner transfer: verify owner-derived authority is detected even without explicit grant.
+            sql("ALTER FUNCTION fs.audit_fixture_routine() OWNER TO "+group);
+            assertTrue(profile.drift(source,name,group).contains("service routine ownership"));
+            sql("DROP FUNCTION fs.audit_fixture_routine()");
+            profile.verify(source,name,group);
+            sql("GRANT "+group+" TO "+name+" WITH ADMIN TRUE");
+            assertTrue(profile.drift(source,name,group).stream().anyMatch(x->x.startsWith("role/membership ")));
+            sql("REVOKE ADMIN OPTION FOR "+group+" FROM "+name);
+            profile.verify(source,name,group);
+        }finally{
+            for(String role:List.of(name,group))if(scalar("SELECT count(*) FROM pg_roles WHERE rolname='"+role+"'")>0){
+                sql("DROP OWNED BY "+role);sql("DROP ROLE "+role);
+            }
+        }
+    }
+
     static final class StagingFixture {
         volatile byte[] bytes;
         volatile boolean ready=true;
@@ -444,6 +496,57 @@ class ApiRuntimeCompositionTest {
                 }
                 // HTTP client can receive the final byte before the server closes its lease and commits drain evidence.
                 awaitCount("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL",1);
+                // Match StagingBootstrap.prepare's empty fallback supplier. The separated
+                // composition must use its durable GRANT_READ source for catalog and usage.
+                var secured=ctx.getBean(SecuredFiles.class);
+                assertTrue(ctx.getBean(ApiRuntimeDependencies.class).consumer().grants()
+                    .current(new io.vyrnforge.filestorage.application.FileApplication.Caller(TENANT,USER.actorId(),"asset")).isEmpty());
+                status(403,call(ctx,"GET","/v1/files","user",true,null));
+                status(403,call(ctx,"GET","/v1/usage","user",true,null));
+                status(403,call(ctx,"GET","/v1/deleted-files","user",true,null));
+                fixtureGrant("LIST_METADATA","OWNED_FILE");
+                var catalog=call(ctx,"GET","/v1/files","user",true,null);status(200,catalog);
+                assertEquals(file,field(catalog.body(),"fileId"));
+                status(200,call(ctx,"GET","/v1/usage","user",true,null));
+                var usage=secured.usage("user",TENANT,null).value();
+                assertEquals(1,usage.states().stream().filter(b->b.state()==VersionState.AVAILABLE)
+                    .mapToLong(b->b.fileCount()).sum());
+                status(403,call(ctx,"GET","/v1/deleted-files","user",true,null));
+                fixtureGrant("LIST_DELETED_METADATA","OWNED_FILE");
+                fixtureGrant("DELETE_FILE","OWNED_FILE");fixtureGrant("RESTORE_FILE","OWNED_FILE");
+                status(200,call(ctx,"POST","/v1/files/"+file+"/delete?expectedRevision=0","user",true,null));
+                var deleted=call(ctx,"GET","/v1/deleted-files","user",true,null);status(200,deleted);
+                assertEquals(file,field(deleted.body(),"fileId"));
+                assertTrue(secured.catalog("user",TENANT,null,null,50).value().items().isEmpty());
+                status(200,call(ctx,"POST","/v1/files/"+file+"/restore?expectedRevision=1","user",true,null));
+                assertTrue(secured.deleted("user",TENANT,null,null,50).value().items().isEmpty());
+                sql("UPDATE fs.file_grant SET revoked=true WHERE action IN ('LIST_METADATA','LIST_DELETED_METADATA')");
+                status(403,call(ctx,"GET","/v1/files","user",true,null));
+                status(403,call(ctx,"GET","/v1/usage","user",true,null));
+                status(403,call(ctx,"GET","/v1/deleted-files","user",true,null));
+                fixtureGrant("LIST_METADATA","OWNED_FILE");
+                status(200,call(ctx,"GET","/v1/files","user",true,null));
+                // Loss of the actual grant-reader duty is a fail-closed authority outage,
+                // not a fallback to the configured supplier or cached grant.
+                sql("REVOKE a15_group_5 FROM a15_login_5");
+                try{
+                    status(503,call(ctx,"GET","/health/ready",null,false,null));
+                    var denied=call(ctx,"GET","/v1/files","user",true,null);status(403,denied);
+                    assertEquals("ACCESS_DENIED",field(denied.body(),"code"));
+                    assertFalse(denied.body().contains("fs.file_grant"));
+                    status(403,call(ctx,"GET","/v1/usage","user",true,null));
+                }finally{sql("GRANT a15_group_5 TO a15_login_5");}
+                status(200,call(ctx,"GET","/health/ready",null,false,null));
+                status(200,call(ctx,"GET","/v1/files","user",true,null));
+                // Required-grant readiness is deliberately not the full effective ACL audit.
+                var grantProfile=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.GRANT_READ);
+                sql("GRANT SELECT ON fs.backend TO a15_group_5");
+                try{
+                    assertTrue(separated.ready());
+                    assertTrue(grantProfile.drift(source,"a15_login_5","a15_group_5")
+                        .contains("table fs.backend SELECT"));
+                }finally{sql("REVOKE SELECT ON fs.backend FROM a15_group_5");}
+                grantProfile.verify(source,"a15_login_5","a15_group_5");
                 assertEquals(0,fixture.delivered.size());
                 assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PUBLISHED'"));
             }
