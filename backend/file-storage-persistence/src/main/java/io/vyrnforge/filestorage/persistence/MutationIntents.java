@@ -42,16 +42,25 @@ final class MutationIntents {
     static void record(EventIntentPort events, AuditIntentPort audits, Clock clock,
                        CorrelationContext correlation, ActorReference actor, UUID tenant,
                        String type, String resourceType, String resourceId, Map<String, Object> payload) {
+        record(events,audits,clock,correlation,actor,tenant,type,resourceType,resourceId,payload,
+                UuidV7.generate(),UuidV7.generate());
+    }
+
+    /** Explicit IDs bind an audited command receipt to the exact Kernel intents. */
+    static void record(EventIntentPort events, AuditIntentPort audits, Clock clock,
+                       CorrelationContext correlation, ActorReference actor, UUID tenant,
+                       String type, String resourceType, String resourceId, Map<String, Object> payload,
+                       UUID auditId, UUID eventId) {
         Objects.requireNonNull(correlation);
         // Do not persist raw identity issuer/subject or display name in business intents.
         var safeActor = new ActorReference(actor.actorType(), actor.actorId(), null, null);
         var now = clock.instant();
         var changes = new HashMap<String, Object>(payload);
         changes.put("requestId", correlation.requestId().toString());
-        audits.accept(new AuditEvent(UuidV7.generate(), now, tenant, safeActor, type,
+        audits.accept(new AuditEvent(auditId, now, tenant, safeActor, type,
                 new ResourceReference(resourceType, resourceId, tenant), AuditOutcome.SUCCESS,
                 "file-storage", correlation.correlationId(), null, changes));
-        events.accept(new EventEnvelope<>(UuidV7.generate(), type, 1, now, tenant, "file-storage",
+        events.accept(new EventEnvelope<>(eventId, type, 1, now, tenant, "file-storage",
                 resourceType, resourceId, correlation.correlationId(), correlation.causationId(),
                 safeActor, Map.copyOf(payload)));
     }
