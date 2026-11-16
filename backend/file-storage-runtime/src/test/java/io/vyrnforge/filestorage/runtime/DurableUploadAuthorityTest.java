@@ -88,7 +88,11 @@ class DurableUploadAuthorityTest {
     }
 
     private SecuredFiles secured(Clock clock) {
-        return RuntimeComposition.secured(source, new Trust(ISS,AUD), bearer -> {
+        return secured(clock,source);
+    }
+
+    private SecuredFiles secured(Clock clock,PGSimpleDataSource database) {
+        return RuntimeComposition.secured(database, new Trust(ISS,AUD), bearer -> {
             if (!Set.of("user","other","other-app","other-tenant").contains(bearer)) throw new IllegalArgumentException("private verifier detail");
             return new VerifiedAccess(ISS,bearer,Set.of(AUD),TokenKind.ACCESS,NOW,NOW.plusSeconds(3600),NOW);
         }, (issuer, subject, audience) -> Optional.of(new Binding(
@@ -97,7 +101,7 @@ class DurableUploadAuthorityTest {
                 "other-app".equals(subject) ? "itsm" : "asset", Set.of(Action.values()))),
                 (actor, tenant) -> true,
                 (tenant,module) -> new ModuleEntitlement(TENANT.value(),"file-storage",true,NOW),
-                new JdbcGrants(source,clock,100,5), clock,Duration.ofMinutes(5),Duration.ofSeconds(30));
+                new JdbcGrants(database,clock,100,5), clock,Duration.ofMinutes(5),Duration.ofSeconds(30));
     }
 
     private DurableUploadAuthority authority() { return authority(CLOCK); }
@@ -2159,7 +2163,11 @@ class DurableUploadAuthorityTest {
                 }finally{c.rollback();}
             }
             assertEquals(0,scalar("SELECT count(*) FROM fs.accounting_manifest WHERE manifest_id=?",second));
-            assertEquals(second,manifestCommand(capture,create,TENANT.value(),second,revision));
+            try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                var one=executor.submit(()->manifestCommand(capture,create,TENANT.value(),second,revision));
+                var two=executor.submit(()->manifestCommand(capture,create,TENANT.value(),second,revision));
+                assertEquals(second,one.get(8,TimeUnit.SECONDS));assertEquals(second,two.get(8,TimeUnit.SECONDS));
+            }
             assertEquals(2,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=?",second));
             // A concurrent source write rolls back; review times out, then retries successfully.
             try(var c=source.getConnection();var st=c.createStatement()){
@@ -2176,11 +2184,71 @@ class DurableUploadAuthorityTest {
             assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),second,revision,"NEEDS_INVESTIGATION")).getSQLState());
             assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_review WHERE manifest_id=?",second));
             assertThrows(SQLException.class,()->sql("UPDATE fs.accounting_manifest_entry SET evidence='{}' WHERE manifest_id=?",second));
+            // Manifest classification agrees with A8, with exact clean scan and terminal evidence.
+            available();
+            var claimed=secured.initiate("user",TENANT,null,new Initiate("attachment","a9-claimed.txt",5,"text/plain","a9-claimed")).value();
+            var handle=authority().issue("user",TENANT,claimed.session(),null);
+            authority().claim("user",handle.handle(),TransferInstruction.Action.UPLOAD);
+            var recovery=recovery(Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC));
+            assertTrue(recovery.runOne());assertTrue(recovery.runOne());assertFalse(recovery.runOne());
+            var terminal=UUID.randomUUID();
+            assertEquals(terminal,manifestCommand(capture,create,TENANT.value(),terminal,revision));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=? AND evidence->>'candidate'='CHARGED' AND evidence->>'scanVerdict'='CLEAN'",terminal));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=? AND evidence->>'candidate'='RELEASED' AND evidence->>'recoveryReason'='SESSION_EXPIRED'",terminal));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=? AND evidence->>'candidate'='UNRESOLVED' AND evidence->>'claimed'='true'",terminal));
             assertEquals(0,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
         }finally{
             sql("DELETE FROM fs.accounting_manifest_principal WHERE login_role IN ('a9_capture','a9_review')");
             sql("DROP OWNED BY a9_capture,a9_review");
             sql("DROP ROLE a9_capture,a9_review");
+        }
+    }
+
+
+    @Test void isolatedNonOwnerInitiationUsesExplicitQuotaAndKernelPrivileges() throws Exception {
+        long revision=enableIntegratedQuota(5);
+        sql("CREATE ROLE a9_initiator LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try{
+            sql("GRANT USAGE ON SCHEMA fs,fs_kernel TO a9_initiator");
+            sql("""
+                GRANT SELECT ON fs.backend,fs.backend_revision,fs.storage_location,fs.active_policy,fs.policy_rule,fs.policy_revision,
+                  fs.file,fs.file_version,fs.upload_session,fs.initiation_request,fs.file_grant,fs.upload_scan_evidence,
+                  fs.upload_transfer_handle,fs.isolated_quota_fence,fs.isolated_quota_reservation,fs.isolated_policy_activation
+                TO a9_initiator
+                """);
+            // V4 FOR SHARE requires an UPDATE privilege. The physical identity trigger
+            // rejects a changed endpoint; no configuration revision write privilege is granted.
+            sql("GRANT UPDATE(endpoint) ON fs.backend TO a9_initiator");
+            sql("GRANT INSERT ON fs.file,fs.file_version,fs.upload_session,fs.initiation_request,fs.isolated_quota_reservation TO a9_initiator");
+            sql("GRANT INSERT(tenant_id),UPDATE(epoch) ON fs.isolated_quota_fence TO a9_initiator");
+            sql("GRANT EXECUTE ON FUNCTION fs.touch_quota_fence(uuid) TO a9_initiator");
+            sql("GRANT SELECT,INSERT,UPDATE,DELETE ON fs_kernel.platform_idempotency TO a9_initiator");
+            sql("GRANT SELECT,INSERT ON fs_kernel.platform_audit_event,fs_kernel.platform_event_outbox TO a9_initiator");
+            var login=manifestLogin("a9_initiator");
+            try(var c=login.getConnection();var st=c.createStatement()){
+                try(var rows=st.executeQuery("SELECT session_user,current_user")){assertTrue(rows.next());assertEquals("a9_initiator",rows.getString(1));assertEquals("a9_initiator",rows.getString(2));}
+                for(String denied:List.of("DELETE FROM fs.isolated_quota_reservation","UPDATE fs.isolated_policy_activation SET quota_limit=99",
+                    "UPDATE fs.isolated_quota_fence SET enabled_revision=NULL","TRUNCATE fs.upload_session","SELECT * FROM fs.accounting_manifest_principal")){
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
+                }
+                assertEquals("23514",assertThrows(SQLException.class,()->st.execute("UPDATE fs.backend SET endpoint='https://changed.example.test'")).getSQLState());
+            }
+            var client=secured(CLOCK,login);
+            var cmd=new Initiate("attachment","restricted.txt",5,"text/plain","a9-restricted");
+            sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_a9_initiate CHECK (event_type <> 'file-storage.upload.initiated') NOT VALID");
+            try{
+                assertThrows(RuntimeException.class,()->client.initiate("user",TENANT,null,cmd));
+                assertEquals(0,scalar("SELECT count(*) FROM fs.upload_session"));
+                assertEquals(0,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
+            }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_a9_initiate");}
+            var created=client.initiate("user",TENANT,null,cmd).value();
+            assertEquals(created.session(),client.initiate("user",TENANT,null,cmd).value().session());
+            assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE session_id=? AND policy_revision=? AND status='RESERVED' AND bytes=5",created.session().value(),revision));
+            assertEquals(Code.CONFLICT,assertThrows(Failure.class,()->client.initiate("user",TENANT,null,new Initiate("attachment","too-many.txt",1,"text/plain","a9-too-many"))).code());
+            assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session"));
+        }finally{
+            sql("DROP OWNED BY a9_initiator");
+            sql("DROP ROLE a9_initiator");
         }
     }
 

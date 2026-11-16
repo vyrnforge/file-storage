@@ -11,10 +11,10 @@ CREATE TABLE fs.accounting_source_epoch (
  tenant_id uuid PRIMARY KEY, epoch bigint NOT NULL DEFAULT 0 CHECK(epoch>=0)
 );
 CREATE FUNCTION fs.advance_accounting_source_epoch() RETURNS trigger LANGUAGE plpgsql
- SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET lock_timeout='2s' AS $
+ SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET lock_timeout='2s' AS $$
 DECLARE old_t uuid; new_t uuid;
 BEGIN
- IF TG_TABLE_NAME='upload_integrity_verification' THEN
+ IF TG_TABLE_NAME IN ('upload_integrity_verification','upload_scan_evidence','upload_terminal_recovery') THEN
   IF TG_OP<>'INSERT' THEN SELECT tenant_id INTO old_t FROM fs.upload_session WHERE session_id=OLD.session_id; END IF;
   IF TG_OP<>'DELETE' THEN SELECT tenant_id INTO new_t FROM fs.upload_session WHERE session_id=NEW.session_id; END IF;
  ELSE
@@ -23,7 +23,7 @@ BEGIN
  END IF;
  UPDATE fs.accounting_source_epoch SET epoch=epoch+1 WHERE tenant_id=old_t OR tenant_id=new_t;
  RETURN NULL;
-END; $;
+END; $$;
 REVOKE EXECUTE ON FUNCTION fs.advance_accounting_source_epoch() FROM PUBLIC;
 -- Integrity evidence has no tenant column; its owning session supplies it.
 -- Cascaded session removal is itself a source change.
@@ -38,6 +38,10 @@ CREATE TRIGGER accounting_epoch_initiation_request AFTER INSERT OR UPDATE OR DEL
 CREATE TRIGGER accounting_epoch_upload_transfer_handle AFTER INSERT OR UPDATE OR DELETE ON fs.upload_transfer_handle
  FOR EACH ROW EXECUTE FUNCTION fs.advance_accounting_source_epoch();
 CREATE TRIGGER accounting_epoch_upload_integrity_verification AFTER INSERT OR UPDATE OR DELETE ON fs.upload_integrity_verification
+ FOR EACH ROW EXECUTE FUNCTION fs.advance_accounting_source_epoch();
+CREATE TRIGGER accounting_epoch_upload_scan_evidence AFTER INSERT OR UPDATE OR DELETE ON fs.upload_scan_evidence
+ FOR EACH ROW EXECUTE FUNCTION fs.advance_accounting_source_epoch();
+CREATE TRIGGER accounting_epoch_upload_terminal_recovery AFTER INSERT OR UPDATE OR DELETE ON fs.upload_terminal_recovery
  FOR EACH ROW EXECUTE FUNCTION fs.advance_accounting_source_epoch();
 CREATE TRIGGER accounting_epoch_isolated_quota_reservation AFTER INSERT OR UPDATE OR DELETE ON fs.isolated_quota_reservation
  FOR EACH ROW EXECUTE FUNCTION fs.advance_accounting_source_epoch();
@@ -90,13 +94,14 @@ BEGIN
   RAISE EXCEPTION 'manifest requires read committed' USING ERRCODE='PQU01';
  END IF;
  LOCK TABLE fs.file,fs.file_version,fs.upload_session,fs.initiation_request,
-  fs.upload_transfer_handle,fs.upload_integrity_verification,fs.isolated_quota_reservation,
+  fs.upload_transfer_handle,fs.upload_integrity_verification,fs.upload_scan_evidence,
+  fs.upload_terminal_recovery,fs.isolated_quota_reservation,
   fs.isolated_policy_activation,fs.isolated_quota_policy_draft,fs.isolated_quota_policy_review,
   fs.isolated_quota_fence IN SHARE MODE;
 END; $$;
 
 -- Snapshot exact accounting inputs, never object keys, provider credentials, names or handles.
--- A completed session is only a candidate charge with matching durable integrity evidence.
+-- Preserve A8's conservative scan/recovery rules; never infer provider truth.
 CREATE FUNCTION fs.accounting_source_entries(t uuid)
  RETURNS TABLE(session_id uuid,evidence jsonb) LANGUAGE sql STABLE
  SET search_path=pg_catalog,fs,pg_temp AS $$
@@ -107,22 +112,36 @@ CREATE FUNCTION fs.accounting_source_entries(t uuid)
   'expiresAt',s.expires_at,'expiresNanoRemainder',s.expires_nano_remainder,
   'fileState',f.state,'versionState',v.state,'expectedBytes',r.expected_size,
   'claimed',h.claimed_at IS NOT NULL,'claimedAt',h.claimed_at,
+  'handlePresent',h.session_id IS NOT NULL,'handleBytes',h.expected_size,'handleExpiresAt',h.expires_at,
   'verifiedAt',i.verified_at,'verifiedBytes',i.observed_size,'verifiedDigest',i.observed_sha256,
+  'scanOperation',e.operation_id,'scanVerdict',e.verdict,'scanBytes',e.observed_size,
+  'scanDigest',e.observed_sha256,'scannedAt',e.scanned_at,'recoveryReason',x.reason,
+  'recoveredAt',x.recovered_at,'cleanupDisposition',x.cleanup_disposition,
   'ledgerRevision',q.policy_revision,'ledgerBytes',q.bytes,'ledgerStatus',q.status,
   'ledgerFile',q.file_id,'ledgerVersion',q.version_id,'ledgerLocation',q.location_id,'ledgerConsumer',q.consumer,
-  'candidate',CASE
-    WHEN q.session_id IS NOT NULL THEN 'ALREADY_ACCOUNTED'
-    WHEN r.expected_size IS NULL THEN 'UNRESOLVED'
-    WHEN s.state='COMPLETED' AND i.verified_at IS NOT NULL AND i.observed_size=r.expected_size THEN 'CHARGED'
-    WHEN s.state IN ('FAILED','EXPIRED') AND h.claimed_at IS NULL THEN 'RELEASED'
-    WHEN s.state IN ('FAILED','EXPIRED','COMPLETED') THEN 'UNRESOLVED'
-    ELSE 'RESERVED' END)
+  'metadataCandidate',c.candidate,
+  'candidate',CASE WHEN q.session_id IS NULL THEN c.candidate
+    WHEN ROW(q.file_id,q.version_id,q.location_id,q.consumer,q.bytes)
+      IS NOT DISTINCT FROM ROW(s.file_id,s.version_id,s.location_id,s.consumer,r.expected_size)
+      AND q.status=c.candidate THEN 'ALREADY_ACCOUNTED' ELSE 'UNRESOLVED' END)
  FROM fs.upload_session s JOIN fs.file f ON f.tenant_id=s.tenant_id AND f.file_id=s.file_id
  JOIN fs.file_version v ON v.tenant_id=s.tenant_id AND v.version_id=s.version_id
  LEFT JOIN fs.initiation_request r ON r.tenant_id=s.tenant_id AND r.session_id=s.session_id
  LEFT JOIN fs.upload_transfer_handle h ON h.session_id=s.session_id
  LEFT JOIN fs.upload_integrity_verification i ON i.session_id=s.session_id
+ LEFT JOIN fs.upload_scan_evidence e ON e.session_id=s.session_id
+ LEFT JOIN fs.upload_terminal_recovery x ON x.session_id=s.session_id
  LEFT JOIN fs.isolated_quota_reservation q ON q.tenant_id=s.tenant_id AND q.session_id=s.session_id
+ CROSS JOIN LATERAL (SELECT CASE
+   WHEN r.expected_size IS NULL THEN 'UNRESOLVED'
+   WHEN s.state='COMPLETED' AND v.state='AVAILABLE' AND i.verified_at IS NOT NULL
+     AND i.observed_size=r.expected_size AND e.verdict='CLEAN' AND e.observed_size=r.expected_size
+     AND e.observed_sha256=i.observed_sha256 THEN 'CHARGED'
+   WHEN s.state='INITIATED' AND v.state='PENDING' THEN 'RESERVED'
+   WHEN s.state='VERIFYING' AND v.state='VERIFYING' THEN 'RESERVED'
+   WHEN s.state IN ('FAILED','EXPIRED') AND v.state='FAILED' AND h.claimed_at IS NULL
+     AND x.session_id IS NOT NULL THEN 'RELEASED'
+   ELSE 'UNRESOLVED' END AS candidate) c
  WHERE s.tenant_id=t
  $$;
 CREATE FUNCTION fs.accounting_untracked(t uuid) RETURNS jsonb LANGUAGE sql STABLE
@@ -156,6 +175,8 @@ BEGIN
  SELECT * INTO principal FROM fs.accounting_manifest_principal
  WHERE login_role=session_user AND tenant_id=t AND capability='CAPTURE' FOR SHARE;
  IF NOT FOUND THEN RAISE EXCEPTION 'manifest access denied' USING ERRCODE='42501'; END IF;
+ IF mid IS NULL OR rev IS NULL THEN RAISE EXCEPTION 'manifest identity required' USING ERRCODE='PQU01'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(mid::text,3109));
  PERFORM fs.lock_accounting_sources();
  SELECT * INTO existing FROM fs.accounting_manifest WHERE manifest_id=mid;
  IF FOUND THEN
@@ -184,6 +205,8 @@ BEGIN
  SELECT * INTO principal FROM fs.accounting_manifest_principal
  WHERE login_role=session_user AND tenant_id=t AND capability='REVIEW' FOR SHARE;
  IF NOT FOUND THEN RAISE EXCEPTION 'manifest access denied' USING ERRCODE='42501'; END IF;
+ IF mid IS NULL OR rev IS NULL THEN RAISE EXCEPTION 'manifest identity required' USING ERRCODE='PQU01'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(mid::text,3109));
  PERFORM fs.lock_accounting_sources();
  SELECT * INTO m FROM fs.accounting_manifest WHERE tenant_id=t AND manifest_id=mid AND policy_revision=rev;
  IF NOT FOUND OR m.requester=principal.actor OR decision IS NULL OR decision NOT IN ('ACKNOWLEDGED','NEEDS_INVESTIGATION')
