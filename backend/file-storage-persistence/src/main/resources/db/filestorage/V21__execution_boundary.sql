@@ -4,7 +4,7 @@ ALTER TABLE fs.accounting_manifest_principal ADD COLUMN execution_mode text NOT 
 
 -- Existing mappings fail closed until the owner explicitly chooses a mode.
 CREATE OR REPLACE FUNCTION fs.capture_accounting_manifest(t uuid,mid uuid,rev bigint) RETURNS uuid
- LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET lock_timeout='2s' SET timezone='UTC' AS $
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET lock_timeout='2s' SET timezone='UTC' AS $a11raw$
 DECLARE principal fs.accounting_manifest_principal%ROWTYPE; existing fs.accounting_manifest%ROWTYPE;
  n integer; ttl bigint; captured timestamptz; source_epoch bigint;
 BEGIN
@@ -31,10 +31,10 @@ BEGIN
  INSERT INTO fs.accounting_manifest_entry
  SELECT t,mid,rev,s.session_id,s.evidence FROM fs.accounting_source_entries(t) s;
  RETURN mid;
-END; $;
+END; $a11raw$;
 
 CREATE OR REPLACE FUNCTION fs.review_accounting_manifest(t uuid,mid uuid,rev bigint,decision text) RETURNS uuid
- LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET lock_timeout='2s' SET timezone='UTC' AS $
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET lock_timeout='2s' SET timezone='UTC' AS $a11raw$
 DECLARE principal fs.accounting_manifest_principal%ROWTYPE; m fs.accounting_manifest%ROWTYPE;
  prior fs.accounting_manifest_review%ROWTYPE;
 BEGIN
@@ -65,10 +65,10 @@ BEGIN
  ) THEN RAISE EXCEPTION 'stale accounting manifest' USING ERRCODE='PQU01'; END IF;
  INSERT INTO fs.accounting_manifest_review VALUES(t,mid,rev,principal.actor,clock_timestamp(),decision);
  RETURN mid;
-END; $;
+END; $a11raw$;
 
 CREATE OR REPLACE FUNCTION fs.read_accounting_manifest(t uuid,mid uuid) RETURNS jsonb
- LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET timezone='UTC' AS $
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET timezone='UTC' AS $a11raw$
 DECLARE result jsonb;
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM fs.accounting_manifest_principal
@@ -83,7 +83,7 @@ BEGIN
  INTO result FROM fs.accounting_manifest m WHERE m.tenant_id=t AND m.manifest_id=mid;
  IF result IS NULL THEN RAISE EXCEPTION 'manifest not found' USING ERRCODE='PQU01'; END IF;
  RETURN result;
-END; $;
+END; $a11raw$;
 
 CREATE OR REPLACE FUNCTION fs.audited_accounting_manifest(t uuid,mid uuid,rev bigint,cmd text,decision text,
  aid uuid,eid uuid,cid uuid) RETURNS TABLE(actor_id text,created boolean)
