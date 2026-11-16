@@ -77,7 +77,7 @@ CREATE TRIGGER reviewed_quota_activation_guard BEFORE INSERT ON fs.isolated_poli
 
 -- New integration enablement must bind to a reviewed current activation; old enabled rows
 -- are preserved, but a legacy non-integrated activation cannot be used to opt in.
-CREATE FUNCTION fs.guard_reviewed_quota_enablement() RETURNS trigger LANGUAGE plpgsql AS $
+CREATE FUNCTION fs.guard_reviewed_quota_enablement() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF NEW.enabled_revision IS NULL THEN RETURN NEW; END IF;
  IF TG_OP='UPDATE' THEN
@@ -91,7 +91,7 @@ BEGIN
       AND a.actor<>q.author AND a.actor<>r.reviewer AND a.activated_at>=r.reviewed_at)
  THEN RAISE EXCEPTION 'reviewed quota enablement required' USING ERRCODE='PQU01'; END IF;
  RETURN NEW;
-END; $;
+END; $$;
 CREATE TRIGGER reviewed_quota_enablement_guard BEFORE INSERT OR UPDATE ON fs.isolated_quota_fence
  FOR EACH ROW EXECUTE FUNCTION fs.guard_reviewed_quota_enablement();
 
