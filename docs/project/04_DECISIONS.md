@@ -112,3 +112,7 @@ Engineering choice: explicit LIST_DELETED_METADATA and distinct recovery endpoin
 
 2026-11-16 (Asia/Jakarta): PR #82 accepted/squash merged `a1fd681bd0dab49f13f14418082b9d365a2a86ee`; exact-head CI 43712395352 passed 185 tests. Owner authorized #36 FS-310A3 durable purge preparation only; V13 candidate, [contract](../architecture/32_PURGE_PREPARATION.md). Actual provider deletion, production retention/hold/quota policy and deployment remain gated.
 Engineering choice: internal PREPARE_PURGE grant, immutable per-deletion-generation review ledger; exact pin and retention evidence snapshot, all reader safety UNVERIFIED, V13 executable PURGE_VERSION disabled at database and enqueue boundary. One request per generation; evidence change invalidates replay; no reapproval writer or worker.
+
+
+2026-11-16 (Asia/Jakarta): PR #83 accepted/squash merged `65b6ec440cea7ec0ab30303bbdcb335c8f3952b2`; exact-head CI 43779802955 passed 187 tests. Owner authorized #36 FS-310A4 durable reader safety and simulated execution only. V14 candidate, [contract](../architecture/33_READER_SAFETY_SIMULATION.md). No actual provider deletion, production retention/hold/quota policy or deployment.
+Engineering choice: atomic claim-linked reader lease, explicit successful stream/lease close acknowledgement; expired/untracked/legacy claims remain blockers. Separate bounded simulation ledger with current snapshot/drain rechecks and token/attempt fencing; no provider I/O or execution permit.

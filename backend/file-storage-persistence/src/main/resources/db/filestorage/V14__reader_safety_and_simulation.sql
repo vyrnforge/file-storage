@@ -45,3 +45,33 @@ CREATE TABLE fs.purge_simulation (
     CHECK ((status='SIMULATED')=(finished_at IS NOT NULL)),
     CHECK (finished_at IS NULL OR (finished_at>=claimed_at AND finished_at<locked_until))
 );
+
+-- Retain all claims even when an older runtime failed to write a lease.
+CREATE FUNCTION fs.guard_claimed_download_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.claimed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'claimed download evidence retained' USING ERRCODE='23514';
+    END IF;
+    RETURN OLD;
+END;
+$$;
+CREATE TRIGGER claimed_download_delete_guard BEFORE DELETE ON fs.download_transfer_handle
+    FOR EACH ROW EXECUTE FUNCTION fs.guard_claimed_download_delete();
+
+CREATE FUNCTION fs.guard_purge_simulation() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP='DELETE' THEN
+        RAISE EXCEPTION 'simulation history retained' USING ERRCODE='23514';
+    ELSIF TG_OP='INSERT' THEN
+        IF NEW.status='CLAIMED' AND NEW.attempts=1 THEN RETURN NEW; END IF;
+    ELSIF OLD.status='CLAIMED' AND NEW.operation_id=OLD.operation_id AND NEW.max_attempts=OLD.max_attempts THEN
+        IF NEW.status='SIMULATED' AND NEW.claim_token=OLD.claim_token AND NEW.attempts=OLD.attempts
+            AND NEW.claimed_at=OLD.claimed_at AND NEW.locked_until=OLD.locked_until THEN RETURN NEW;
+        ELSIF NEW.status='CLAIMED' AND NEW.claim_token<>OLD.claim_token AND NEW.attempts=OLD.attempts+1
+            AND NEW.claimed_at>=OLD.locked_until THEN RETURN NEW; END IF;
+    END IF;
+    RAISE EXCEPTION 'invalid simulation transition' USING ERRCODE='23514';
+END;
+$$;
+CREATE TRIGGER purge_simulation_guard BEFORE INSERT OR UPDATE OR DELETE ON fs.purge_simulation
+    FOR EACH ROW EXECUTE FUNCTION fs.guard_purge_simulation();
