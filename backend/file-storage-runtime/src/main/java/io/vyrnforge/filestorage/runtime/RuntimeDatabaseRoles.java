@@ -9,7 +9,7 @@ import javax.sql.DataSource;
  */
 public final class RuntimeDatabaseRoles {
     public enum Role { METADATA, LOGICAL, PURGE_PREPARATION, PLACEMENT, BACKEND, GRANT_READ,
-        READINESS, TRANSFER, WORKER, GOVERNANCE }
+        READINESS, TRANSFER, WORKER, GOVERNANCE, DISPATCHER }
     public record Binding(String login,DataSource source){
         public Binding{
             Objects.requireNonNull(source);
@@ -72,8 +72,9 @@ public final class RuntimeDatabaseRoles {
                         case TRANSFER -> "has_column_privilege(current_user,'fs.upload_transfer_handle','claimed_at','UPDATE')";
                         case WORKER -> "has_column_privilege(current_user,'fs.storage_operation','status','UPDATE')";
                         case GOVERNANCE -> "has_table_privilege(current_user,'fs.retention_policy_draft','INSERT')";
+                        case DISPATCHER -> "has_schema_privilege(current_user,'fs_kernel','USAGE') AND NOT has_schema_privilege(current_user,'fs','USAGE') AND has_column_privilege(current_user,'fs_kernel.platform_event_outbox','status','UPDATE')";
                     };
-                    try(var rs=st.executeQuery("SELECT ("+required+") AND NOT has_table_privilege(current_user,'fs.flyway_schema_history','INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_table_privilege(current_user,'fs_kernel.flyway_schema_history','INSERT,UPDATE,DELETE,TRUNCATE')")){
+                    try(var rs=st.executeQuery("SELECT ("+required+") AND NOT has_table_privilege(current_user,(SELECT r.oid FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname='fs' AND r.relname='flyway_schema_history'),'INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_table_privilege(current_user,(SELECT r.oid FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname='fs_kernel' AND r.relname='flyway_schema_history'),'INSERT,UPDATE,DELETE,TRUNCATE')")){
                         if(!rs.next()||!rs.getBoolean(1))return false;
                     }
                 }
