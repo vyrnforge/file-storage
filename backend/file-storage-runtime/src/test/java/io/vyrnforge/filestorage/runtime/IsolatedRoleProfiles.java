@@ -5,10 +5,10 @@ import java.util.*;
 import javax.sql.DataSource;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Version 2 candidate profiles: disposable rehearsal only, never invoked by runtime or Flyway. */
+/** Version 3 candidate profiles: disposable rehearsal only, never invoked by runtime or Flyway. */
 final class IsolatedRoleProfiles {
-    static final int VERSION=2;
-    enum Kind { INITIATOR, LIFECYCLE, MANIFEST, DISPATCHER, METADATA_API, TRANSFER, BACKEND_ADMIN }
+    static final int VERSION=3;
+    enum Kind { INITIATOR, LIFECYCLE, MANIFEST, DISPATCHER, METADATA_API, TRANSFER, BACKEND_ADMIN, LOGICAL, PURGE_PREPARATION, PLACEMENT, BACKEND_ONLY, GRANT_READ, READINESS, GOVERNANCE, COMPLETION_WORKER }
     record Grant(String object,String privilege,List<String> columns) {}
     private final Kind kind;
     private final List<Grant> grants=new ArrayList<>();
@@ -19,7 +19,7 @@ final class IsolatedRoleProfiles {
         this.kind=kind;
         schemas.add("fs_kernel");
         if(kind!=Kind.DISPATCHER)schemas.add("fs");
-        if(kind!=Kind.DISPATCHER){
+        if(kind!=Kind.DISPATCHER && kind!=Kind.GRANT_READ && kind!=Kind.READINESS){
             table("SELECT","fs_kernel.platform_audit_event","fs_kernel.platform_event_outbox");
             table("INSERT","fs_kernel.platform_audit_event","fs_kernel.platform_event_outbox");
             column("UPDATE","fs_kernel.platform_event_outbox","event_id");
@@ -36,7 +36,7 @@ final class IsolatedRoleProfiles {
                 functions.add("fs.touch_quota_fence(uuid)");
                 for(String p:List.of("SELECT","INSERT","UPDATE","DELETE"))table(p,"fs_kernel.platform_idempotency");
             }
-            case LIFECYCLE -> {
+            case LIFECYCLE, COMPLETION_WORKER -> {
                 readFs("file","file_version","upload_session","initiation_request","backend","backend_revision",
                     "storage_location","file_grant","upload_transfer_handle","upload_integrity_verification","upload_scan_evidence",
                     "upload_terminal_recovery","storage_operation","isolated_quota_reservation","isolated_quota_fence","isolated_policy_activation");
@@ -49,6 +49,10 @@ final class IsolatedRoleProfiles {
                 column("UPDATE","fs.file_version","state");column("UPDATE","fs.upload_session","state");
                 table("INSERT","fs.storage_operation","fs.upload_scan_evidence","fs.upload_terminal_recovery");
                 column("UPDATE","fs.storage_operation","status","last_error_code","finished_at","available_at","claim_token","locked_until","attempts");
+                if(kind==Kind.COMPLETION_WORKER){
+                    table("INSERT","fs.upload_integrity_verification");
+                    column("UPDATE","fs.upload_integrity_verification","verified_at","observed_size","observed_sha256");
+                }
             }
             case MANIFEST -> {
                 functions.add("fs.audited_accounting_manifest(uuid,uuid,bigint,text,text,uuid,uuid,uuid)");
@@ -82,6 +86,51 @@ final class IsolatedRoleProfiles {
                 column("UPDATE","fs.policy_revision","sealed");
                 column("UPDATE","fs.active_policy","policy_revision");
             }
+            case LOGICAL -> {
+                readFs("file","file_version","upload_session","initiation_request","upload_scan_evidence","file_grant");
+                column("UPDATE","fs.file","state","lifecycle_revision","deleted_at");
+                column("UPDATE","fs.file_version","version_id");
+                column("UPDATE","fs.upload_session","session_id");
+                column("UPDATE","fs.initiation_request","session_id");
+                column("UPDATE","fs.file_grant","grant_id");
+            }
+            case PURGE_PREPARATION -> {
+                readFs("file","file_version","upload_session","initiation_request","upload_scan_evidence","file_grant",
+                    "upload_transfer_handle","upload_integrity_verification","storage_operation","download_transfer_handle",
+                    "file_retention_evidence","governed_legal_hold","isolated_policy_activation","purge_preparation");
+                column("UPDATE","fs.file","file_id");
+                column("UPDATE","fs.file_version","version_id");
+                for(String t:List.of("upload_session","initiation_request","upload_transfer_handle","upload_integrity_verification","upload_scan_evidence"))
+                    column("UPDATE","fs."+t,"session_id");
+                column("UPDATE","fs.storage_operation","operation_id");
+                column("UPDATE","fs.file_grant","grant_id");
+                column("UPDATE","fs.file_retention_evidence","file_id");
+                table("INSERT","fs.purge_preparation");
+            }
+            case PLACEMENT -> {
+                readFs("backend","backend_revision","storage_location","active_policy","policy_revision","policy_rule");
+                table("INSERT","fs.policy_revision","fs.policy_rule","fs.active_policy");
+                column("UPDATE","fs.backend","endpoint");
+                column("UPDATE","fs.policy_revision","sealed");
+                column("UPDATE","fs.active_policy","policy_revision");
+            }
+            case BACKEND_ONLY -> {
+                readFs("backend","backend_revision","storage_location","active_policy","policy_revision","policy_rule",
+                    "file_version","upload_session","storage_operation");
+                table("INSERT","fs.backend","fs.backend_revision","fs.storage_location");
+                column("UPDATE","fs.backend","endpoint");
+                table("UPDATE","fs.storage_location");
+                column("UPDATE","fs.backend_revision","status","validated_revision");
+            }
+            case GRANT_READ -> readFs("file_grant");
+            case READINESS -> table("SELECT","fs.flyway_schema_history","fs_kernel.flyway_schema_history");
+            case GOVERNANCE -> {
+                readFs("file","retention_policy_draft","retention_policy_review","governed_legal_hold",
+                    "download_transfer_handle","download_reader","reader_reconciliation","reader_reconciliation_review");
+                column("UPDATE","fs.file","file_id");
+                table("INSERT","fs.retention_policy_draft","fs.retention_policy_review","fs.governed_legal_hold",
+                    "fs.reader_reconciliation","fs.reader_reconciliation_review");
+            }
             case DISPATCHER -> {
                 table("SELECT","fs_kernel.platform_event_outbox");
                 column("UPDATE","fs_kernel.platform_event_outbox","status","last_error_code","published_at","available_at",
@@ -93,7 +142,7 @@ final class IsolatedRoleProfiles {
     private void table(String p,String... tables){for(String t:tables)grants.add(new Grant(t,p,List.of()));}
     private void column(String p,String t,String... c){grants.add(new Grant(t,p,List.of(c)));}
     private static String safe(String name){
-        if(!name.matches("a1[23]_[a-z0-9_]+"))throw new IllegalArgumentException("fixture role required");
+        if(!name.matches("a1[234]_[a-z0-9_]+"))throw new IllegalArgumentException("fixture role required");
         return name;
     }
     static void exec(DataSource owner,String sql)throws SQLException{
