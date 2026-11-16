@@ -1,0 +1,35 @@
+name: K-CON-02 current Storage Kernel consumer verification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/k-con-02-kernel-consumer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  current-consumer:
+    if: github.head_ref == 'verification/k-con-02-kernel-032-storage-2273545'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Existing consumer tests and exact dependency evidence
+        run: |
+          set -euo pipefail
+          make prepare-s3-fixture
+          make ci
+          mvn -B -ntp --strict-checksums -f backend/pom.xml dependency:tree -Dincludes=io.github.vyrnforge
+          echo '88bd473f9e909d3031b5efce02e1b4189df1d731893190b9910767c3d97eef2e  '"$HOME/.m2/repository/io/github/vyrnforge/platform-kernel/0.3.2/platform-kernel-0.3.2.jar" | sha256sum -c -
+          echo 'f10b134fce8a5ff7836a271d9e3764f2d9fcb029e1296d7d1042ad1f4575bf55  '"$HOME/.m2/repository/io/github/vyrnforge/platform-kernel-jdbc/0.3.2/platform-kernel-jdbc-0.3.2.jar" | sha256sum -c -
+          java -version
+          git rev-parse HEAD
+          git show --no-patch --format='commit=%H parents=%P' HEAD
