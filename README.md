@@ -98,3 +98,5 @@ PR #81 accepted/merged 660f14b (183 tests). [FS-310A2 lifecycle safety](docs/arc
 PR #82 accepted/merged a1fd681 (185 tests). [FS-310A3 purge preparation](docs/architecture/32_PURGE_PREPARATION.md) — V13 candidate; executable purge disabled.
 
 PR #83 accepted/merged 65b6ec4 (187 tests). [FS-310A4 reader safety and simulation](docs/architecture/33_READER_SAFETY_SIMULATION.md) — V14 candidate; physical purge disabled.
+
+PR #84 accepted/merged 0d0cc02 (190 tests). [FS-310A5 governed lifecycle](docs/architecture/34_GOVERNED_LIFECYCLE.md) — V15 candidate; physical purge disabled.

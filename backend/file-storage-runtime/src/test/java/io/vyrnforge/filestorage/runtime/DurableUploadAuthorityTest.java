@@ -1609,6 +1609,120 @@ class DurableUploadAuthorityTest {
         assertEquals(expected,count,"server-side reader drain acknowledgement");
     }
 
+    @Test void governedPolicyReviewAndProtectiveHoldAreNotActivation() throws Exception {
+        available();
+        var reviewer=new ActorReference(ActorType.USER,"fixture-reviewer",null,null);
+        var governance=new JdbcLifecycleGovernance(source,CLOCK,(actor,tenant,file,action)->TENANT.equals(tenant)
+            &&Set.of(ADMIN,reviewer).contains(actor),(claim,evidence,actor)->false);
+        var draft=new io.vyrnforge.filestorage.application.LifecycleGovernance.PolicyDraft(0,86400,
+            io.vyrnforge.filestorage.application.LifecycleGovernance.QuotaMode.CHARGE_UNTIL_VERIFIED_PURGE);
+        assertThrows(Failure.class,()->governance.draft(USER,TENANT,draft,CorrelationContext.create()));
+        assertThrows(Failure.class,()->governance.draft(ADMIN,OTHER,draft,CorrelationContext.create()));
+        assertEquals(1,governance.draft(ADMIN,TENANT,draft,CorrelationContext.create()));
+        assertThrows(Failure.class,()->governance.draft(ADMIN,TENANT,draft,CorrelationContext.create()));
+        assertThrows(Failure.class,()->governance.review(ADMIN,TENANT,1,CorrelationContext.create()));
+        governance.review(reviewer,TENANT,1,CorrelationContext.create());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.retention_policy_review"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.file_retention_evidence"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.retention_policy_draft SET retention_seconds=1"));
+        grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","RESTORE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","PREPARE_PURGE","OWNED_FILE",null);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        seedPurgeEvidence(1,1,"CLEAR",NOW);
+        var request=new PurgeRequest(fileId(),view.version(),1,1);
+        var prep=secured.preparePurge("user",TENANT,null,request).value();
+        var simulation=new JdbcPurgeSimulation(source,CLOCK,Duration.ofSeconds(5),2);
+        var claim=simulation.claim(TENANT,prep.operationId());
+        assertThrows(Failure.class,()->governance.assertHold(USER,TENANT,fileId(),"a".repeat(64),CorrelationContext.create()));
+        governance.assertHold(ADMIN,TENANT,fileId(),"a".repeat(64),CorrelationContext.create());
+        assertThrows(Failure.class,()->simulation.complete(claim));
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        assertThrows(SQLException.class,()->sql("DELETE FROM fs.governed_legal_hold"));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,1);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,2);
+        seedPurgeEvidence(3,1,"CLEAR",NOW);
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),3,1)));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+    }
+
+    @Test void preparationSupersessionFencesOldClaimsAndRequiresIndependentGrant() throws Exception {
+        available();
+        for(String action:List.of("DELETE_FILE","PREPARE_PURGE"))
+            grant("fixture-user","asset",action,"OWNED_FILE",null);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        seedPurgeEvidence(1,1,"CLEAR",NOW);
+        var original=secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,1)).value();
+        var simulation=new JdbcPurgeSimulation(source,CLOCK,Duration.ofSeconds(5),2);
+        var old=simulation.claim(TENANT,original.operationId());
+        sql("UPDATE fs.file_retention_evidence SET policy_revision=2");
+        var request=new PurgeRequest(fileId(),view.version(),1,2,original.operationId());
+        assertThrows(RuntimeException.class,()->secured.preparePurge("user",TENANT,null,request));
+        grant("fixture-user","asset","SUPERSEDE_PURGE","OWNED_FILE",null);
+        var start=new CountDownLatch(1);
+        PurgePreparation replacement;
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+            Callable<PurgePreparation> task=()->{start.await();return secured(CLOCK).preparePurge("user",TENANT,null,request).value();};
+            var a=executor.submit(task);var b=executor.submit(task);start.countDown();
+            replacement=a.get(10,TimeUnit.SECONDS);assertEquals(replacement,b.get(10,TimeUnit.SECONDS));
+        }
+        assertNotEquals(original.operationId(),replacement.operationId());
+        assertEquals(2,scalar("SELECT count(*) FROM fs.purge_preparation"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.file.purge-superseded'"));
+        assertThrows(Failure.class,()->simulation.complete(old));
+        assertThrows(Failure.class,()->simulation.claim(TENANT,original.operationId()));
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,2,UUID.randomUUID())));
+        assertTrue(simulation.complete(simulation.claim(TENANT,replacement.operationId())));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_simulation WHERE status='SIMULATED'"));
+    }
+
+    @Test void independentReaderReviewRequiresVerifiedExactClaimAndNeverDeletes() throws Exception {
+        available();
+        for(String action:List.of("DELETE_FILE","DOWNLOAD_TRANSFER","PREPARE_PURGE"))
+            grant("fixture-user","asset",action,"OWNED_FILE",null);
+        var downloads=downloads(CLOCK);
+        var issued=downloads.issue("user",TENANT,fileId(),view.version(),null).value();
+        // Older runtime consumes the handle without creating a reader lease.
+        sql("UPDATE fs.download_transfer_handle SET claimed_at=? WHERE claimed_at IS NULL",NOW.atOffset(ZoneOffset.UTC));
+        String hash;
+        try(var c=source.getConnection();var ps=c.prepareStatement("SELECT encode(handle_hash,'hex') FROM fs.download_transfer_handle WHERE claimed_at IS NOT NULL");var rows=ps.executeQuery()){
+            assertTrue(rows.next());hash=rows.getString(1);
+        }
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        seedPurgeEvidence(1,1,"CLEAR",NOW);
+        var prep=secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,1)).value();
+        var simulation=new JdbcPurgeSimulation(source,CLOCK,Duration.ofSeconds(5),2);
+        assertThrows(Failure.class,()->simulation.claim(TENANT,prep.operationId()));
+        var reviewer=new ActorReference(ActorType.USER,"fixture-reviewer",null,null);
+        var accepted=new java.util.concurrent.atomic.AtomicBoolean(false);
+        var governance=new JdbcLifecycleGovernance(source,CLOCK,(actor,tenant,file,action)->TENANT.equals(tenant)
+            &&Set.of(ADMIN,reviewer).contains(actor),(claim,evidence,actor)->{
+                assertEquals(TENANT,claim.tenant());assertEquals(fileId(),claim.file());assertEquals(view.version(),claim.version());
+                assertEquals(hash,claim.handleHash());assertEquals("b".repeat(64),evidence);assertEquals(reviewer,actor);
+                return accepted.get();
+            });
+        assertThrows(Failure.class,()->governance.requestReaderReview(USER,TENANT,fileId(),hash,"b".repeat(64),CorrelationContext.create()));
+        var id=governance.requestReaderReview(ADMIN,TENANT,fileId(),hash,"b".repeat(64),CorrelationContext.create());
+        var review=new io.vyrnforge.filestorage.application.LifecycleGovernance.ReaderReview(id,"b".repeat(64));
+        assertThrows(Failure.class,()->governance.confirmReaderStopped(ADMIN,TENANT,fileId(),review,CorrelationContext.create()));
+        assertThrows(Failure.class,()->governance.confirmReaderStopped(reviewer,OTHER,fileId(),review,CorrelationContext.create()));
+        assertThrows(Failure.class,()->governance.confirmReaderStopped(reviewer,TENANT,fileId(),review,CorrelationContext.create()));
+        assertThrows(Failure.class,()->simulation.claim(TENANT,prep.operationId()));
+        accepted.set(true);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_reader_review CHECK (event_type <> 'file-storage.reader.stop-confirmed') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->governance.confirmReaderStopped(reviewer,TENANT,fileId(),review,CorrelationContext.create()));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.reader_reconciliation_review"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_reader_review");}
+        governance.confirmReaderStopped(reviewer,TENANT,fileId(),review,CorrelationContext.create());
+        assertThrows(Failure.class,()->governance.confirmReaderStopped(reviewer,TENANT,fileId(),review,CorrelationContext.create()));
+        assertTrue(simulation.complete(simulation.claim(TENANT,prep.operationId())));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.reader_reconciliation_review"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.download_reader"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+        assertThrows(SQLException.class,()->sql("DELETE FROM fs.reader_reconciliation_review"));
+    }
+
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
         sql("""
             INSERT INTO fs.file_retention_evidence(tenant_id,file_id,lifecycle_revision,policy_revision,hold_state,retain_until,observed_at,valid_until)
