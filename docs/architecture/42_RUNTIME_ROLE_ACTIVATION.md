@@ -1,0 +1,26 @@
+# FS-310A13 — Runtime role separation and activation controls
+
+Status: candidate; CI and owner review pending. A12 PR #97 accepted, merge fb606a7698df1bbef789efd51732178867ebaa95, exact-head CI 43824603192 passed 212 tests. Refs #13/#16/#33/#35/#36.
+
+## Version 2 isolated role matrix
+
+The test-only IsolatedRoleProfiles.java extends V1 with METADATA_API (initiation/session/catalog), TRANSFER (upload/download issue and claim, integrity verification, reader acknowledgement, exact read pins), BACKEND_ADMIN (registry, revision validation/activation and placement publication). LIFECYCLE remains separate for completion/scan/recovery, MANIFEST and DISPATCHER retain A12 boundaries. A13 executes these real adapters under separate disposable logins, including negative DML and cross-role tests. Backend administration is only backend/placement; governed retention/quota policy, logical delete/restore, purge preparation/simulation, grant administration, complete HTTP composition and provider-client credential resolution are not claimed as fully separated production profiles. Application authorization remains necessary; trusted writer boundary, not RLS or hostile-writer security. No automatic production grants.
+
+V22 adds immutable version_id, upload session_id and storage operation_id guards to support lock-only UPDATE column grants for transfer queries. Existing V7 scan evidence already rejects UPDATE; A11 guards remain. No new executable provider operation, no ledger writer, no data backfill. Populated V18→V20→V21→V22 upgrade and repeat rehearsal; existing logical identity preserved.
+
+## Privilege drift and credential lifecycle
+
+V2 checks effective table/column/schema/function permissions and grant options, role attributes and membership edges, database CONNECT/TEMP/CREATE baseline and public schema CREATE, explicit default ACL grants to service roles/PUBLIC, service relation ownership. PostgreSQL 17 baseline PUBLIC CONNECT/TEMP is recorded, not treated as production best practice. Test-only detection, no automatic remediation. Default ACL coverage is conservative (explicit grants), not exhaustive inspection of every cluster role or external schema; sequences, all database role settings, function/schema ownership, grantor chains, actual connection policy and production ACL inventory remain separate gates.
+
+Isolated password rotation denies new old-credential sessions; existing connection remains usable until membership revoked; NOLOGIN blocks new connections. Rotation and revocation do not automatically cancel in-flight transactions. Production secret manager, pool drain/termination, break-glass and rotation monitoring must be approved and rehearsed.
+
+## Restore and restart
+
+Disposable logical archive (no owner/ACL restore) into separate database owned by non-superuser migration login. Revoke PUBLIC CONNECT/TEMP before restore, restore as explicit owner, rerun migrations/readiness, check relation ownership and preserved upload/pending event count. Dispatcher cannot connect until explicit CONNECT and scoped profile granted; test in-memory publisher, repeated dispatch does not resend published rows, source outbox unchanged; revoke CONNECT to prevent new sessions. Real transport replay remains at-least-once and requires reconciliation/deduplication; no actual broker delivery. Database in same PostgreSQL cluster, no cross-cluster/PITR/encryption/RPO/RTO certification. Quarantine network and existing sessions, disable all restored manifest mappings before enabling service logins, review role IDs and permissions, validate data and reconcile pending/claimed outbox rows, then independently approve dispatch. No production restore or deployment.
+
+## Staging activation package (proposed; not authorized)
+
+- Exact source/release, CI and SBOM/dependency review; migration owner and role inventory, effective privilege diff, default ACL and ownership review; migration rehearsal at representative volume.
+- Environment separation, IAM bindings and per-role data source wiring, secret references/rotation, provider test-only locations, network policy and scanner evidence; prevent production credentials/data and destructive operations.
+- Restore exercise with quarantine, outbox replay decision and event deduplication; monitoring, lock contention/load evidence, capacity/SLO and rollback/forward recovery runbook.
+- Owner reviews outstanding role paths, security and operations evidence, then separately approves isolated staging deployment. Production policy values, actual historical accounting execution, legal-hold release, physical deletion and production deployment require separate approvals. PR #87 excluded.
