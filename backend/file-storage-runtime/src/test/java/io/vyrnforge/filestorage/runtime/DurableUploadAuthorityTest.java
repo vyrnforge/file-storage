@@ -2231,8 +2231,7 @@ class DurableUploadAuthorityTest {
             try(var c=login.getConnection();var st=c.createStatement()){
                 try(var rows=st.executeQuery("SELECT session_user,current_user")){assertTrue(rows.next());assertEquals("a9_initiator",rows.getString(1));assertEquals("a9_initiator",rows.getString(2));}
                 for(String denied:List.of("DELETE FROM fs.isolated_quota_reservation","UPDATE fs.isolated_policy_activation SET quota_limit=99",
-                    "UPDATE fs.isolated_quota_fence SET enabled_revision=NULL","UPDATE fs.isolated_quota_fence SET epoch=epoch+1",
-                    "UPDATE fs.isolated_quota_reservation SET status='RELEASED'","SELECT fs.touch_quota_fence(tenant_id) FROM fs.isolated_quota_fence","TRUNCATE fs.upload_session","SELECT * FROM fs.accounting_manifest_principal","UPDATE fs_kernel.platform_event_outbox SET status='PUBLISHED'","UPDATE fs_kernel.platform_event_outbox SET payload_json='{}'","DELETE FROM fs_kernel.platform_event_outbox","UPDATE fs_kernel.platform_audit_event SET action='changed'")){
+                    "UPDATE fs.isolated_quota_fence SET enabled_revision=NULL","TRUNCATE fs.upload_session","SELECT * FROM fs.accounting_manifest_principal","UPDATE fs_kernel.platform_event_outbox SET status='PUBLISHED'","UPDATE fs_kernel.platform_event_outbox SET payload_json='{}'","DELETE FROM fs_kernel.platform_event_outbox","UPDATE fs_kernel.platform_audit_event SET action='changed'")){
                     assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
                 }
                 assertEquals("23514",assertThrows(SQLException.class,()->st.execute("UPDATE fs.backend SET endpoint='https://changed.example.test'")).getSQLState());
@@ -2346,7 +2345,8 @@ class DurableUploadAuthorityTest {
             var login=manifestLogin("a10_worker");
             try(var c=login.getConnection();var st=c.createStatement()){
                 for(String denied:List.of("DELETE FROM fs.isolated_quota_reservation","UPDATE fs.isolated_quota_fence SET enabled_revision=NULL",
-                    "UPDATE fs.file SET state='SOFT_DELETED'","UPDATE fs.file_grant SET revoked=true",
+                    "UPDATE fs.isolated_quota_fence SET epoch=epoch+1","UPDATE fs.isolated_quota_reservation SET status='RELEASED'",
+                    "SELECT fs.touch_quota_fence(tenant_id) FROM fs.isolated_quota_fence","UPDATE fs.file SET state='SOFT_DELETED'","UPDATE fs.file_grant SET revoked=true",
                     "UPDATE fs.storage_operation SET kind='PURGE_VERSION'","DELETE FROM fs.upload_session",
                     "UPDATE fs_kernel.platform_event_outbox SET payload_json='{}'")){
                     assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
