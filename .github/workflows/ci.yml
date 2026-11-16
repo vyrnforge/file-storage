@@ -40,6 +40,10 @@ jobs:
         run: python3 scripts/staging-license-evidence.py backend/file-storage-runtime/target
       - name: Bind CycloneDX and packaged runtime review evidence
         run: python3 scripts/staging-release-evidence.py backend/file-storage-runtime/target
+      - name: Build per-component distribution review and notice candidate
+        run: |
+          python3 scripts/staging-distribution-review.py backend/file-storage-runtime/target --supplemental-sources
+          python3 scripts/staging-attestation-statements.py --self-test
       - name: Retain candidate evidence only
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -53,6 +57,8 @@ jobs:
             backend/file-storage-runtime/target/staging-osv-meta.json
             backend/file-storage-runtime/target/staging-license-evidence.json
             backend/file-storage-runtime/target/staging-license-notices.zip
+            backend/file-storage-runtime/target/staging-distribution-review.json
+            backend/file-storage-runtime/target/staging-distribution-notices.zip
           if-no-files-found: error
           retention-days: 14
       - name: A17 security regression gate

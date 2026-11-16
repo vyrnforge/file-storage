@@ -37,6 +37,8 @@ jobs:
           python3 scripts/staging-license-evidence.py "$target"
           python3 scripts/staging-release-evidence.py "$target"
           python3 scripts/staging-security-gate.py "$target"
+          python3 scripts/staging-distribution-review.py "$target" --supplemental-sources
+          python3 scripts/staging-attestation-statements.py --self-test
       - name: Retain exact candidate bytes for attestation
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -48,6 +50,8 @@ jobs:
             backend/file-storage-runtime/target/staging-release-review.json
             backend/file-storage-runtime/target/staging-license-evidence.json
             backend/file-storage-runtime/target/staging-license-notices.zip
+            backend/file-storage-runtime/target/staging-distribution-review.json
+            backend/file-storage-runtime/target/staging-distribution-notices.zip
             backend/file-storage-runtime/target/staging-osv.json
             backend/file-storage-runtime/target/staging-osv-meta.json
             backend/file-storage-runtime/target/staging-inventory.json
@@ -64,6 +68,11 @@ jobs:
       attestations: write
       artifact-metadata: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: approved-main-candidate
@@ -90,6 +99,13 @@ jobs:
           assert osv["bomSha256"] == sha("bom.json")
           assert v["licenseEvidenceSha256"] == sha("staging-license-evidence.json")
           assert v["licenseNoticeArchiveSha256"] == sha("staging-license-notices.zip")
+          d = json.loads((p / "staging-distribution-review.json").read_text())
+          assert d["decision"] == "NO-GO"
+          assert d["artifactSha256"] == v["artifactSha256"]
+          assert d["bomSha256"] == v["cycloneDxSha256"]
+          assert d["licenseEvidenceSha256"] == v["licenseEvidenceSha256"]
+          assert d["originalNoticeArchiveSha256"] == v["licenseNoticeArchiveSha256"]
+          assert d["distributionNoticeArchiveSha256"] == sha("staging-distribution-notices.zip")
           assert r["decision"] == "NO-GO"
           assert r["vulnerabilityEvidence"]["advisoryCount"] == 0
           assert r["vulnerabilityScan"] == "NO_FINDINGS_REVIEW_REQUIRED"
@@ -119,8 +135,9 @@ jobs:
         run: |
           subject=candidate/file-storage-runtime-0.0.1-SNAPSHOT.jar
           identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/staging-attestation.yml@refs/heads/main"
-          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --cert-identity "$identity" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --deny-self-hosted-runners --format json > provenance-verified.json
-          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --cert-identity "$identity" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --deny-self-hosted-runners --predicate-type https://cyclonedx.org/bom --format json > sbom-verified.json
+          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --cert-identity "$identity" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --signer-digest "$GITHUB_SHA" --deny-self-hosted-runners --format json > provenance-verified.json
+          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --cert-identity "$identity" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --signer-digest "$GITHUB_SHA" --deny-self-hosted-runners --predicate-type https://cyclonedx.org/bom --format json > sbom-verified.json
+          python3 scripts/staging-attestation-statements.py "$subject" candidate/bom.json provenance-verified.json sbom-verified.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: candidate-attestation-verification
