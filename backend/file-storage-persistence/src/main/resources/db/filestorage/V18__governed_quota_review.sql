@@ -18,7 +18,7 @@ CREATE TRIGGER quota_policy_review_immutable BEFORE UPDATE OR DELETE ON fs.isola
 
 -- Bound lock waits in the existing database fence. Function-local setting is restored on return.
 CREATE OR REPLACE FUNCTION fs.touch_quota_fence(t uuid) RETURNS void LANGUAGE plpgsql
- SET lock_timeout='5s' AS $$
+ SET lock_timeout='2s' AS $$
 BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended(t::text,3105));
  INSERT INTO fs.isolated_quota_fence(tenant_id) VALUES(t)

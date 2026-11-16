@@ -1730,7 +1730,7 @@ class DurableUploadAuthorityTest {
             &&Set.of(ADMIN,POLICY_REVIEWER,POLICY_ACTIVATOR).contains(actor),(claim,evidence,actor)->false);
     }
     private JdbcIsolatedPolicyQuota isolatedQuota(Clock clock){
-        return new JdbcIsolatedPolicyQuota(source,clock,TENANT,(actor,tenant,file,action)->Set.of(ADMIN,POLICY_ACTIVATOR).contains(actor));
+        return new JdbcIsolatedPolicyQuota(source,clock,TENANT,(actor,tenant,file,action)->Set.of(ADMIN,POLICY_ACTIVATOR,POLICY_REVIEWER).contains(actor));
     }
     private long reviewedPolicy(Clock clock,long expected,long seconds){
         var g=policyGovernance(clock);
@@ -1949,6 +1949,125 @@ class DurableUploadAuthorityTest {
         assertEquals(0,q.reconcile(ADMIN,TENANT).mismatchedReservations());
         assertThrows(Failure.class,()->q.settle(ADMIN,TENANT,claimed.session(),JdbcIsolatedPolicyQuota.Status.RELEASED,corr));
         assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+    }
+
+    @Test void governedQuotaTransitionPreservesPinnedReservationsAndFencesConcurrentAdmission() throws Exception {
+        long first=enableIntegratedQuota(15);var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        view=secured.initiate("user",TENANT,null,new Initiate("attachment","first.txt",5,"text/plain","a8-first")).value();
+        long next=reviewedPolicy(CLOCK,first,20);
+        assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,first,next,10,60,corr));
+        var draft=new JdbcIsolatedPolicyQuota.QuotaDraft(first,next,10,90);
+        assertThrows(Failure.class,()->q.draftQuota(USER,TENANT,draft,corr));
+        q.draftQuota(ADMIN,TENANT,draft,corr);
+        assertThrows(Failure.class,()->q.reviewQuota(ADMIN,TENANT,next,corr));
+        assertThrows(Failure.class,()->q.activateReviewed(POLICY_ACTIVATOR,TENANT,first,next,corr));
+        q.reviewQuota(POLICY_REVIEWER,TENANT,next,corr);
+        assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,first,next,10,60,corr));
+        assertThrows(SQLException.class,()->sql("INSERT INTO fs.isolated_policy_activation VALUES (?,?,?,?,?,?)",
+            TENANT.value(),next,11,90,NOW.atOffset(ZoneOffset.UTC),POLICY_ACTIVATOR.actorId()));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.isolated_quota_policy_draft SET quota_limit=99"));
+        assertThrows(SQLException.class,()->sql("DELETE FROM fs.isolated_quota_policy_review"));
+        var active=q.activateReviewed(POLICY_ACTIVATOR,TENANT,first,next,corr);
+        assertEquals(10,active.quotaLimit());assertEquals(90,active.evidenceTtlSeconds());
+        assertEquals(first,scalar("SELECT policy_revision FROM fs.isolated_quota_reservation WHERE session_id=?",view.session().value()));
+        var second=secured.initiate("user",TENANT,null,new Initiate("attachment","second.txt",5,"text/plain","a8-second")).value();
+        assertEquals(next,scalar("SELECT policy_revision FROM fs.isolated_quota_reservation WHERE session_id=?",second.session().value()));
+        long third=reviewedPolicy(CLOCK,next,30);
+        q.draftQuota(ADMIN,TENANT,new JdbcIsolatedPolicyQuota.QuotaDraft(next,third,9,90),corr);
+        q.reviewQuota(POLICY_REVIEWER,TENANT,third,corr);
+        assertThrows(Failure.class,()->q.activateReviewed(POLICY_ACTIVATOR,TENANT,next,third,corr));
+        long fourth=reviewedPolicy(CLOCK,third,40);
+        q.draftQuota(ADMIN,TENANT,new JdbcIsolatedPolicyQuota.QuotaDraft(next,fourth,15,90),corr);
+        q.reviewQuota(POLICY_REVIEWER,TENANT,fourth,corr);
+        assertThrows(Failure.class,()->q.activateReviewed(POLICY_ACTIVATOR,TENANT,next,third,corr));
+        // First raise capacity, then race a reduction against a new reservation.
+        q.activateReviewed(POLICY_ACTIVATOR,TENANT,next,fourth,corr);
+        long fifth=reviewedPolicy(CLOCK,fourth,50);
+        q.draftQuota(ADMIN,TENANT,new JdbcIsolatedPolicyQuota.QuotaDraft(fourth,fifth,10,90),corr);
+        q.reviewQuota(POLICY_REVIEWER,TENANT,fifth,corr);
+        var start=new CountDownLatch(1);
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+            var activation=executor.submit(()->{start.await();try{q.activateReviewed(POLICY_ACTIVATOR,TENANT,fourth,fifth,corr);return true;}catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());return false;}});
+            var initiation=executor.submit(()->{start.await();try{secured.initiate("user",TENANT,null,new Initiate("attachment","race.txt",5,"text/plain","a8-race"));return true;}catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());return false;}});
+            start.countDown();boolean changed=activation.get(10,TimeUnit.SECONDS);
+            assertNotEquals(changed,initiation.get(10,TimeUnit.SECONDS));
+            assertEquals(changed?10:15,q.usage(ADMIN,TENANT).reserved().longValueExact());
+        }
+        available();
+        assertEquals(first,scalar("SELECT policy_revision FROM fs.isolated_quota_reservation WHERE session_id=?",view.session().value()));
+        assertEquals(5,q.usage(ADMIN,TENANT).charged().longValueExact());
+        assertEquals(0,q.captureFinding(ADMIN,TENANT,corr).mismatchedReservations());
+    }
+
+    @Test void quotaFindingDryRunIsImmutableAndNeverBackfills() throws Exception {
+        var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        var initial=q.captureFinding(ADMIN,TENANT,corr);
+        assertNull(initial.policyRevision());assertFalse(initial.integrated());
+        assertEquals(1,initial.missingReservations());assertEquals(5,initial.candidateReservedBytes().longValueExact());
+        available();
+        var unclaimed=secured.initiate("user",TENANT,null,new Initiate("attachment","unclaimed.txt",5,"text/plain","a8-unclaimed")).value();
+        var claimed=secured.initiate("user",TENANT,null,new Initiate("attachment","claimed.txt",5,"text/plain","a8-claimed")).value();
+        var handle=authority().issue("user",TENANT,claimed.session(),null);
+        authority().claim("user",handle.handle(),TransferInstruction.Action.UPLOAD);
+        var future=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);
+        assertTrue(recovery(future).runOne());assertTrue(recovery(future).runOne());
+        var later=isolatedQuota(future);
+        var report=later.captureFinding(ADMIN,TENANT,corr);
+        assertEquals(3,report.missingReservations());assertEquals(5,report.candidateChargedBytes().longValueExact());
+        assertEquals(5,report.candidateReleasedBytes().longValueExact());assertEquals(1,report.unresolvedSessions());
+        assertEquals(1,report.uncertainTerminal());assertEquals(0,report.candidateReservedBytes().longValueExact());
+        assertEquals(initial,later.finding(ADMIN,TENANT,initial.id()));
+        assertThrows(Failure.class,()->later.finding(ADMIN,OTHER,report.id()));
+        assertThrows(Failure.class,()->later.reviewFinding(ADMIN,TENANT,report.id(),JdbcIsolatedPolicyQuota.FindingDisposition.ACKNOWLEDGED,corr));
+        later.reviewFinding(POLICY_REVIEWER,TENANT,report.id(),JdbcIsolatedPolicyQuota.FindingDisposition.NEEDS_INVESTIGATION,corr);
+        assertThrows(Failure.class,()->later.reviewFinding(POLICY_REVIEWER,TENANT,report.id(),JdbcIsolatedPolicyQuota.FindingDisposition.ACKNOWLEDGED,corr));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.isolated_quota_finding SET missing_reservations=0"));
+        assertThrows(SQLException.class,()->sql("DELETE FROM fs.isolated_quota_finding_review"));
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_quota_finding CHECK (event_type <> 'file-storage.quota.finding-captured') NOT VALID");
+        try{assertThrows(RuntimeException.class,()->later.captureFinding(ADMIN,TENANT,corr));assertEquals(2,scalar("SELECT count(*) FROM fs.isolated_quota_finding"));}
+        finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_quota_finding");}
+        assertEquals(0,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session WHERE session_id=? AND state='EXPIRED'",unclaimed.session().value()));
+    }
+
+    @Test void quotaFindingDatabaseReaderCannotMutateOrInvokeFence() throws Exception {
+        isolatedQuota(CLOCK).captureFinding(ADMIN,TENANT,CorrelationContext.create());
+        // Disposable database role only; rollback role and grants at end.
+        try(var c=source.getConnection();var st=c.createStatement()){
+            c.setAutoCommit(false);
+            try{
+                st.execute("CREATE ROLE a8_quota_reader NOLOGIN");
+                st.execute("GRANT USAGE ON SCHEMA fs TO a8_quota_reader");
+                st.execute("GRANT SELECT ON fs.isolated_quota_finding TO a8_quota_reader");
+                st.execute("SET LOCAL ROLE a8_quota_reader");
+                try(var rows=st.executeQuery("SELECT count(*) FROM fs.isolated_quota_finding")){rows.next();assertEquals(1,rows.getLong(1));}
+                for(String statement:List.of("UPDATE fs.isolated_quota_finding SET missing_reservations=0",
+                    "DELETE FROM fs.isolated_quota_policy_draft","DELETE FROM fs.isolated_policy_activation",
+                    "DELETE FROM fs.isolated_quota_reservation","SELECT fs.touch_quota_fence('"+TENANT.value()+"'::uuid)")){
+                    var save=c.setSavepoint();
+                    var denied=assertThrows(SQLException.class,()->st.execute(statement));assertEquals("42501",denied.getSQLState());
+                    c.rollback(save);c.releaseSavepoint(save);
+                }
+            }finally{c.rollback();}
+        }
+        assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_finding"));
+    }
+
+    @Test void quotaFenceContentionIsBoundedAndRetryDoesNotDoubleReserve() throws Exception {
+        enableIntegratedQuota(5);var cmd=new Initiate("attachment","wait.txt",5,"text/plain","a8-wait");
+        try(var c=source.getConnection();var ps=c.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(CAST(? AS text),3105))")){
+            c.setAutoCommit(false);ps.setString(1,TENANT.value().toString());
+            try(var rows=ps.executeQuery()){rows.next();}
+            try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                var result=executor.submit(()->assertThrows(Failure.class,()->secured.initiate("user",TENANT,null,cmd)).code());
+                assertEquals(Code.CONFLICT,result.get(8,TimeUnit.SECONDS));
+            }finally{c.rollback();}
+        }
+        assertEquals(0,scalar("SELECT count(*) FROM fs.upload_session"));
+        view=secured.initiate("user",TENANT,null,cmd).value();
+        assertEquals(view.session(),secured.initiate("user",TENANT,null,cmd).value().session());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
     }
 
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
