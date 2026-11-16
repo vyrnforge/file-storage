@@ -213,18 +213,18 @@ def build(target, supplemental=False):
                 row["embeddedNotices"] + row.get("sourceEvidence", {}).get("notices", []))]
             tagged_source = None
             if row["bomRef"] in tagged:
-                family, tagged_docs = tagged[row["bomRef"]]
-                if family["id"] not in retained_tags:
+                upstream_family, tagged_docs = tagged[row["bomRef"]]
+                if upstream_family["id"] not in retained_tags:
                     records = []
                     for j, (doc, raw, encoding) in enumerate(tagged_docs):
-                        dest = f"upstream-tags/{family['id']}/{j:04d}-{pathlib.PurePosixPath(doc['path']).name}"
+                        dest = f"upstream-tags/{upstream_family['id']}/{j:04d}-{pathlib.PurePosixPath(doc['path']).name}"
                         out.writestr(dest, raw)
                         records.append({"path": doc["path"], "gitBlobSha": doc["gitBlobSha"],
                                         "sha256": sha(raw), "bytes": len(raw), "encoding": encoding,
                                         "distributionEntry": dest})
-                    retained_tags[family["id"]] = records
-                tagged_source = {"repository": family["repository"], "tag": family["tag"], "commit": family["commit"],
-                                 "scope": family["scope"], "documents": retained_tags[family["id"]]}
+                    retained_tags[upstream_family["id"]] = records
+                tagged_source = {"repository": upstream_family["repository"], "tag": upstream_family["tag"], "commit": upstream_family["commit"],
+                                 "scope": upstream_family["scope"], "documents": retained_tags[upstream_family["id"]]}
             source = None
             if row["bomRef"] in sources:
                 source, payloads = sources[row["bomRef"]]
@@ -289,6 +289,22 @@ def self_test():
         build(p)
         review = read_json((p / "staging-distribution-review.json").read_bytes())
         require(review["decision"] == "NO-GO" and review["counts"] == {"EMBEDDED_TEXT_PRESENT": 1}, "valid fixture failed")
+        # Exercise the supplemental branch with a real retained tagged document.
+        # Mock network input only; build, archive and summary are the actual code.
+        from unittest.mock import patch
+        tagged_doc = {"path": "LICENSE", "gitBlobSha": hashlib.sha1(
+            ("blob %d\0" % len(doc)).encode() + doc).hexdigest()}
+        tagged_family = {"id": "demo", "repository": "example/demo", "tag": "v1",
+                         "commit": "c" * 40, "scope": "FULL_PROJECT_LICENSE_CORROBORATION"}
+        with patch(__name__ + ".tagged_sources", return_value={
+                ref: (tagged_family, [(tagged_doc, doc, "UTF-8")])}):
+            build(p, supplemental=True)
+        tagged_review = read_json((p / "staging-distribution-review.json").read_bytes())
+        require(tagged_review["classifications"] == {"PERMISSIVE": 1}, "tagged classification overwritten")
+        require(tagged_review["upstreamTaggedSourceComponents"] == 1, "tagged coverage missing")
+        record = tagged_review["libraries"][0]["upstreamTaggedSource"]["documents"][0]
+        with zipfile.ZipFile(p / "staging-distribution-notices.zip") as tagged_archive:
+            require(tagged_archive.read(record["distributionEntry"]) == doc, "tagged bytes changed")
         require(not is_text("third-party.jar", b"PK"), "binary archive accepted")
         require(not is_text("LICENSE.class", b"\xca\xfe\xba\xbe"), "class accepted")
         require(is_text("LICENSE.txt", doc), "text rejected")
@@ -305,7 +321,7 @@ def self_test():
             finally:
                 path.write_bytes(saved)
     require(not is_text("LICENSE.txt", b"\xa7"), "unreviewed non-UTF8 accepted")
-    print("A18 distribution review self-tests: 9 passed")
+    print("A18 distribution review self-tests: 10 passed")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
