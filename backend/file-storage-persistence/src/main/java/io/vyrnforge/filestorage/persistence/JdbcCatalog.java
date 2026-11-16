@@ -4,6 +4,7 @@ import io.vyrnforge.filestorage.application.FileApplication.*;
 import io.vyrnforge.filestorage.domain.StorageModel.*;
 import java.sql.*;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -16,7 +17,7 @@ final class JdbcCatalog {
     private static final int QUERY_TIMEOUT_SECONDS=5;
 
     private static final String VISIBLE="""
-        SELECT f.file_id,f.tenant_id,f.name,f.state AS file_state,f.lifecycle_revision,v.version_id,v.state AS version_state,
+        SELECT f.file_id,f.tenant_id,f.name,f.state AS file_state,f.lifecycle_revision,f.deleted_at,v.version_id,v.state AS version_state,
                r.expected_size,r.declared_mime_type,
                CASE WHEN v.state='AVAILABLE' AND e.verdict='CLEAN' THEN e.observed_size ELSE 0 END AS available_size
         FROM fs.file f
@@ -24,18 +25,18 @@ final class JdbcCatalog {
         JOIN fs.file_version v ON v.tenant_id=s.tenant_id AND v.file_id=s.file_id AND v.version_id=s.version_id
         JOIN fs.initiation_request r ON r.tenant_id=s.tenant_id AND r.session_id=s.session_id AND r.consumer=s.consumer
         LEFT JOIN fs.upload_scan_evidence e ON e.session_id=s.session_id
-        WHERE f.tenant_id=? AND f.state='ACTIVE'
+        WHERE f.tenant_id=? AND f.state=?
           AND EXISTS (SELECT 1 FROM allowed a WHERE a.purpose=s.purpose AND a.expires_at>?
                     AND ((a.file_id IS NULL AND r.actor=? AND s.consumer=?) OR a.file_id=f.file_id))
           AND EXISTS (SELECT 1 FROM fs.file_grant g WHERE g.tenant_id=f.tenant_id
-                    AND g.actor=? AND g.consumer=? AND g.purpose=s.purpose AND g.action='LIST_METADATA'
+                    AND g.actor=? AND g.consumer=? AND g.purpose=s.purpose AND g.action=?
                     AND NOT g.revoked AND g.not_before<=? AND g.expires_at>?
                     AND ((g.scope='OWNED_FILE' AND r.actor=? AND s.consumer=?)
                          OR (g.scope='EXACT_FILE' AND g.file_id=f.file_id)))
         """;
 
     private static PreparedStatement statement(Connection c,Caller caller,List<CatalogGrant> grants,Instant now,
-                                                String suffix,Object... tail)throws SQLException{
+                                                boolean deleted,String suffix,Object... tail)throws SQLException{
         if(grants.isEmpty()||grants.size()>256)throw new Failure(Code.DENIED);
         String values=String.join(",",Collections.nCopies(grants.size(),"(CAST(? AS text),CAST(? AS text),CAST(? AS timestamptz))"));
         var args=new ArrayList<Object>();
@@ -45,8 +46,8 @@ final class JdbcCatalog {
             args.add(grant.expiresAt().truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC));
         }
         var timestamp=now.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
-        args.addAll(List.of(caller.tenant().value(),timestamp,caller.actor(),caller.consumer(),caller.actor(),
-            caller.consumer(),timestamp,timestamp,caller.actor(),caller.consumer()));
+        args.addAll(List.of(caller.tenant().value(),deleted?"SOFT_DELETED":"ACTIVE",timestamp,caller.actor(),caller.consumer(),caller.actor(),
+            caller.consumer(),deleted?"LIST_DELETED_METADATA":"LIST_METADATA",timestamp,timestamp,caller.actor(),caller.consumer()));
         args.addAll(Arrays.asList(tail));
         var ps=c.prepareStatement("WITH allowed(purpose,file_id,expires_at) AS (VALUES "+values+"), visible AS ("+VISIBLE+") "+suffix);
         try{
@@ -61,14 +62,10 @@ final class JdbcCatalog {
         String sql="SELECT * FROM visible WHERE (CAST(? AS text) IS NULL OR file_id COLLATE \"C\">CAST(? AS text) COLLATE \"C\") "
             +"ORDER BY file_id COLLATE \"C\" LIMIT ?";
         String cursor=after==null?null:after.value();
-        try(var ps=statement(c,caller,grants,now,sql,cursor,cursor,limit+1);var rows=ps.executeQuery()){
+        try(var ps=statement(c,caller,grants,now,false,sql,cursor,cursor,limit+1);var rows=ps.executeQuery()){
             var result=new ArrayList<MetadataView>();
             while(rows.next()){
-                var file=new File(new FileId(rows.getString("file_id")),caller.tenant(),rows.getString("name"),
-                    FileState.valueOf(rows.getString("file_state")));
-                result.add(new MetadataView(file.reference(),new VersionId(rows.getObject("version_id",UUID.class)),
-                    file.state(),VersionState.valueOf(rows.getString("version_state")),file.name(),
-                    rows.getLong("expected_size"),rows.getString("declared_mime_type"),rows.getLong("lifecycle_revision")));
+                result.add(metadata(rows,caller));
             }
             FileId next=null;
             if(result.size()>limit){
@@ -79,8 +76,34 @@ final class JdbcCatalog {
         }
     }
 
+    private static MetadataView metadata(ResultSet rows,Caller caller)throws SQLException{
+        var file=new File(new FileId(rows.getString("file_id")),caller.tenant(),rows.getString("name"),
+            FileState.valueOf(rows.getString("file_state")));
+        return new MetadataView(file.reference(),new VersionId(rows.getObject("version_id",UUID.class)),
+            file.state(),VersionState.valueOf(rows.getString("version_state")),file.name(),
+            rows.getLong("expected_size"),rows.getString("declared_mime_type"),rows.getLong("lifecycle_revision"));
+    }
+
+    static DeletedPage deleted(Connection c,Caller caller,List<CatalogGrant> grants,FileId after,int limit,Instant now)throws SQLException{
+        if(limit<1||limit>100)throw new Failure(Code.INVALID);
+        String sql="SELECT * FROM visible WHERE (CAST(? AS text) IS NULL OR file_id COLLATE \"C\">CAST(? AS text) COLLATE \"C\") "
+            +"ORDER BY file_id COLLATE \"C\" LIMIT ?";
+        String cursor=after==null?null:after.value();
+        try(var ps=statement(c,caller,grants,now,true,sql,cursor,cursor,limit+1);var rows=ps.executeQuery()){
+            var result=new ArrayList<DeletedMetadata>();
+            while(rows.next())result.add(new DeletedMetadata(metadata(rows,caller),
+                rows.getObject("deleted_at",OffsetDateTime.class).toInstant()));
+            FileId next=null;
+            if(result.size()>limit){
+                result.removeLast();
+                next=new FileId(result.getLast().metadata().file().fileId());
+            }
+            return new DeletedPage(result,next);
+        }
+    }
+
     static CatalogUsage usage(Connection c,Caller caller,List<CatalogGrant> grants,Instant now)throws SQLException{
-        try(var ps=statement(c,caller,grants,now,"""
+        try(var ps=statement(c,caller,grants,now,false,"""
                 SELECT version_state,count(*) AS count,sum(expected_size) AS declared,sum(available_size) AS available
                 FROM visible GROUP BY version_state
                 """);var rows=ps.executeQuery()){

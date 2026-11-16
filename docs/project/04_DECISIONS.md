@@ -104,3 +104,7 @@ Alternatives reviewed: in-process streaming (combined profile only), direct prov
 
 2026-11-15: Owner approved PR #80, squash merged `02814b4ae0d2c596be56b798067e7b0b696c8d84`; exact-head CI 43709875026 passed 180 tests. Owner authorized #36 FS-310A1 reversible logical lifecycle only. V11 candidate in review; retention/hold, quota, physical purge, production migration and deployment remain gated. See [FS-310A1 contract](../architecture/30_LOGICAL_FILE_LIFECYCLE.md).
 Implementation choice: monotonic lifecycle CAS, explicit DELETE_FILE/RESTORE_FILE, external/local scope intersection, revision-fenced download handles, clean completed files only. No retention policy or purge authority.
+
+
+2026-11-15: PR #81 accepted/squash merged `660f14b84c3a6f2bbf15b7d2157189cf5d865fb4`; exact-head CI 43710854973 passed 183 tests. Owner authorized #36 FS-310A2 independent safety/recovery and conservative retention assessment only. V12 candidate; [contract](../architecture/31_LIFECYCLE_SAFETY.md). No production policy, physical purge, quota or deployment.
+Engineering choice: explicit LIST_DELETED_METADATA and distinct recovery endpoint; generation-scoped optional retention evidence, unknown/expired/held blocked, even elapsed retention returns REVIEW_REQUIRED. No policy writer, purge authority or production policy.

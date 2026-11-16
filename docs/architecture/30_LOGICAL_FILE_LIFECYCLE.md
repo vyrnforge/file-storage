@@ -1,6 +1,6 @@
 # FS-310A1 — Reversible logical file lifecycle
 
-Status: owner-authorized isolated implementation, review/CI pending. #36; #35 deleted-file denial. Baseline #80 merged 02814b4, 180 verified tests. No production application.
+Status: accepted/merged PR #81 at 660f14b, 183 tests verified (CI 43710854973). #36; #35 deleted-file denial. Baseline #80 merged 02814b4, 180 verified tests. No production application.
 
 ## Contract
 
@@ -15,3 +15,6 @@ Deleted files are excluded from metadata, session, catalog and logical usage, an
 ## Verification and gates
 
 V11 repeatability, PostgreSQL lifecycle and HTTP contract tests, grant separation, stale handles, concurrent retry, audit/outbox rollback, no physical deletion. Exact CI evidence recorded on PR after execution. Retention/holds, trash quota, deleted-file discovery and recovery UX, non-clean/in-flight lifecycle, verified purge and cleanup, live IAM/provider/scanner and production migration/deployment remain separately gated.
+
+
+Recovery discovery is addressed by [FS-310A2](31_LIFECYCLE_SAFETY.md); retention/purge production gates remain.

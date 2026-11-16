@@ -92,3 +92,5 @@ PR #78 accepted/merged edb185c (173 tests). [Authorized private download](docs/a
 PR #79 accepted/merged b8450b3 (177 tests). [Metadata catalog and usage](docs/architecture/29_METADATA_CATALOG.md) — #35 bounded discovery and logical usage in review.
 
 PR #80 accepted/merged 02814b4 (180 tests). [FS-310A1 reversible logical lifecycle](docs/architecture/30_LOGICAL_FILE_LIFECYCLE.md) — #36 V11 candidate in review; physical purge remains gated.
+
+PR #81 accepted/merged 660f14b (183 tests). [FS-310A2 lifecycle safety](docs/architecture/31_LIFECYCLE_SAFETY.md) — V12 recovery catalog and retention assessment in review; physical purge disabled.

@@ -24,6 +24,13 @@ public final class FileDtos {
             page.nextAfter()==null?null:page.nextAfter().value());
     }
 
+    public record DeletedItem(MetadataResponse metadata,Instant deletedAt) {}
+    public record DeletedResponse(java.util.List<DeletedItem> items,String nextAfterFileId) {}
+    static DeletedResponse deleted(io.vyrnforge.filestorage.application.FileApplication.DeletedPage page){
+        return new DeletedResponse(page.items().stream().map(item->new DeletedItem(metadata(item.metadata()),item.deletedAt())).toList(),
+            page.nextAfter()==null?null:page.nextAfter().value());
+    }
+
     public record ErrorResponse(String code, UUID correlationId, UUID requestId) {}
 
     static SessionResponse session(View view) {

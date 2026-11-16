@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * No object-store operations run inside the transaction.
  */
 public final class FileApplication {
-    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER, LIST_METADATA, DELETE_FILE, RESTORE_FILE }
+    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER, LIST_METADATA, DELETE_FILE, RESTORE_FILE, LIST_DELETED_METADATA }
     public enum Code { DENIED, NOT_FOUND, NO_PLACEMENT, CONFLICT, IN_PROGRESS, INVALID }
     public static final class Failure extends RuntimeException {
         private final Code code;
@@ -107,6 +107,9 @@ public final class FileApplication {
         default CatalogPage catalog(Caller caller,List<CatalogGrant> grants,FileId after,int limit,Instant now) {
             throw new Failure(Code.DENIED);
         }
+        default DeletedPage deleted(Caller caller,List<CatalogGrant> grants,FileId after,int limit,Instant now) {
+            throw new Failure(Code.DENIED);
+        }
         default CatalogUsage usage(Caller caller,List<CatalogGrant> grants,Instant now) {
             throw new Failure(Code.DENIED);
         }
@@ -125,6 +128,10 @@ public final class FileApplication {
     }
     public record CatalogPage(List<MetadataView> items,FileId nextAfter) {
         public CatalogPage {items=List.copyOf(items);}
+    }
+    public record DeletedMetadata(MetadataView metadata,Instant deletedAt) {}
+    public record DeletedPage(List<DeletedMetadata> items,FileId nextAfter) {
+        public DeletedPage {items=List.copyOf(items);}
     }
     /** Logical visible records, not physical bytes, quota reservations or provider billing. */
     public record UsageBucket(VersionState state,long fileCount,String declaredBytes,String availableBytes) {}
@@ -145,6 +152,12 @@ public final class FileApplication {
         if(limit<1||limit>100)throw new Failure(Code.INVALID);
         var scope=catalogScope(grants);
         return transactions.execute(unit->unit.catalog(caller,scope,after,limit,clock.instant()));
+    }
+    public DeletedPage deleted(Caller caller,List<CatalogGrant> grants,FileId after,int limit) {
+        if(caller==null)throw new Failure(Code.DENIED);
+        if(limit<1||limit>100)throw new Failure(Code.INVALID);
+        var scope=catalogScope(grants);
+        return transactions.execute(unit->unit.deleted(caller,scope,after,limit,clock.instant()));
     }
     public CatalogUsage usage(Caller caller,List<CatalogGrant> grants) {
         if(caller==null)throw new Failure(Code.DENIED);

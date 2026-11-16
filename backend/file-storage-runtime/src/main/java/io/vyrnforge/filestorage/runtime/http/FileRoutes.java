@@ -41,6 +41,18 @@ public final class FileRoutes {
         return ApiResponses.success(result.correlation(),FileDtos.catalog(result.value()));
     }
 
+    @GetMapping(value = "/deleted-files", produces = "application/json")
+    public ResponseEntity<FileDtos.DeletedResponse> deleted(HttpServletRequest request) {
+        var context=ApiRequest.from(request);
+        if(!java.util.Set.of("afterFileId","limit").containsAll(request.getParameterMap().keySet()))
+            throw new Failure(Code.INVALID);
+        String cursor=ApiRequest.query(request,"afterFileId",null);
+        int limit=(int)ApiRequest.number(ApiRequest.query(request,"limit","50"),1,100);
+        var result=secured.deleted(context.bearer(),context.tenant(),context.correlationId(),
+            cursor==null?null:new FileId(ApiRequest.fileId(cursor)),limit);
+        return ApiResponses.success(result.correlation(),FileDtos.deleted(result.value()));
+    }
+
     @GetMapping(value = "/usage", produces = "application/json")
     public ResponseEntity<io.vyrnforge.filestorage.application.FileApplication.CatalogUsage> usage(HttpServletRequest request) {
         var context=ApiRequest.from(request);

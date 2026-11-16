@@ -325,6 +325,20 @@ class DurableUploadAuthorityTest {
                     assertEquals(200,resultDownload.statusCode());assertArrayEquals(content,resultDownload.body());
                     assertEquals(403,http.send(requestDownload,HttpResponse.BodyHandlers.ofString()).statusCode());
                     assertEquals(4,credentialCloses.get());assertEquals(4,adapterCloses.get());
+                    grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
+                    grant("fixture-user","asset","RESTORE_FILE","OWNED_FILE",null);
+                    var old=downloads(CLOCK).issue("user",TENANT,fileId(),view.version(),null).value();
+                    var oldRequest=downloadRequest(uri.resolve("/transfer/v1/download").toString(),"user",old.handle());
+                    secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+                    assertEquals(403,http.send(oldRequest,HttpResponse.BodyHandlers.ofString()).statusCode());
+                    assertEquals(4,credentials.get(),"deleted claim must not open provider");
+                    secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,1);
+                    assertEquals(403,http.send(oldRequest,HttpResponse.BodyHandlers.ofString()).statusCode());
+                    assertEquals(4,credentials.get(),"stale claim must not open provider");
+                    var fresh=downloads(CLOCK).issue("user",TENANT,fileId(),view.version(),null).value();
+                    var again=http.send(downloadRequest(uri.resolve("/transfer/v1/download").toString(),"user",fresh.handle()),HttpResponse.BodyHandlers.ofByteArray());
+                    assertEquals(200,again.statusCode());assertArrayEquals(content,again.body());
+                    assertEquals(5,credentialCloses.get());assertEquals(5,adapterCloses.get());
                 }
             }
         }
@@ -511,6 +525,33 @@ class DurableUploadAuthorityTest {
                 assertEquals(409,http.send(command(commandBase+"/complete","user","{\"sha256\":\""+"0".repeat(64)+"\"}"),HttpResponse.BodyHandlers.ofString()).statusCode());
                 assertEquals(4,closed.get());assertEquals(4,adapterCloses.get());
                 assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
+                for(String action:List.of("DELETE_FILE","RESTORE_FILE","LIST_DELETED_METADATA"))
+                    grant("fixture-user","asset",action,"OWNED_FILE",null);
+                var staleIssued=http.send(command(downloadCommand,"user","{}"),HttpResponse.BodyHandlers.ofString());
+                assertEquals(200,staleIssued.statusCode());OpenApiContract.assertResponse(staleIssued);
+                var stale=tools.jackson.databind.json.JsonMapper.builder().build().readTree(staleIssued.body()).get("handle").asText();
+                var staleRequest=downloadRequest(base+"/transfer/v1/download","user",stale);
+                var deleted=http.send(lifecycleRequest(base+"/v1/files/"+file+"/delete?expectedRevision=0"),HttpResponse.BodyHandlers.ofString());
+                assertEquals(200,deleted.statusCode(),deleted.body());OpenApiContract.assertResponse(deleted);
+                assertEquals(404,http.send(metadata,HttpResponse.BodyHandlers.ofString()).statusCode());
+                assertEquals(404,http.send(command(downloadCommand,"user","{}"),HttpResponse.BodyHandlers.ofString()).statusCode());
+                var denied=http.send(staleRequest,HttpResponse.BodyHandlers.ofByteArray());
+                assertEquals(403,denied.statusCode());assertFalse(Arrays.equals(payload,denied.body()));
+                assertEquals(4,opened.get(),"deleted bytes must not reach provider");
+                var trash=catalogGet(http,base,"/v1/deleted-files","user",TENANT);
+                assertEquals(200,trash.statusCode());OpenApiContract.assertResponse(trash);
+                assertTrue(trash.body().contains(file));
+                var restored=http.send(lifecycleRequest(base+"/v1/files/"+file+"/restore?expectedRevision=1"),HttpResponse.BodyHandlers.ofString());
+                assertEquals(200,restored.statusCode());OpenApiContract.assertResponse(restored);
+                assertEquals(403,http.send(staleRequest,HttpResponse.BodyHandlers.ofString()).statusCode());
+                assertEquals(4,opened.get(),"restore must not resurrect old handle");
+                var freshIssued=http.send(command(downloadCommand,"user","{}"),HttpResponse.BodyHandlers.ofString());
+                assertEquals(200,freshIssued.statusCode());OpenApiContract.assertResponse(freshIssued);
+                var fresh=tools.jackson.databind.json.JsonMapper.builder().build().readTree(freshIssued.body()).get("handle").asText();
+                var freshBytes=http.send(downloadRequest(base+"/transfer/v1/download","user",fresh),HttpResponse.BodyHandlers.ofByteArray());
+                assertEquals(200,freshBytes.statusCode());assertArrayEquals(payload,freshBytes.body());
+                assertEquals(5,closed.get());assertEquals(5,adapterCloses.get());
+                assertArrayEquals(payload,fixture.bytes("fixture-oss",key));
             }
         }
     }
@@ -1211,6 +1252,98 @@ class DurableUploadAuthorityTest {
             var metadata=catalogGet(http,base,path,"user",TENANT);assertEquals(200,metadata.statusCode());OpenApiContract.assertResponse(metadata);
             assertEquals(2,tools.jackson.databind.json.JsonMapper.builder().build().readTree(metadata.body()).get("lifecycleRevision").asLong());
         }
+    }
+
+    @Test void deletedCatalogScopesPaginationAndRecoveryAcrossRequests() throws Exception {
+        available();
+        for(String action:List.of("DELETE_FILE","RESTORE_FILE","LIST_METADATA"))
+            grant("fixture-user","asset",action,"OWNED_FILE",null);
+        var first=fileId();
+        secured.lifecycle("user",TENANT,null,first,Action.DELETE_FILE,0);
+        assertThrows(RuntimeException.class,()->secured.deleted("user",TENANT,null,null,1));
+        grant("fixture-user","asset","LIST_DELETED_METADATA","OWNED_FILE",null);
+        grant("fixture-user","asset","LIST_DELETED_METADATA","EXACT_FILE",first.value());
+        view=secured.initiate("user",TENANT,null,new Initiate("attachment","second.txt",5,"text/plain","second-deleted")).value();
+        available();
+        var second=fileId();
+        secured.lifecycle("user",TENANT,null,second,Action.DELETE_FILE,0);
+        var page=secured.deleted("user",TENANT,null,null,1).value();
+        assertEquals(1,page.items().size());assertNotNull(page.nextAfter());
+        assertEquals(NOW,page.items().getFirst().deletedAt());
+        assertEquals(1,page.items().getFirst().metadata().lifecycleRevision());
+        var last=secured.deleted("user",TENANT,null,page.nextAfter(),1).value();
+        assertEquals(1,last.items().size());assertNull(last.nextAfter());
+        assertEquals(Set.of(first.value(),second.value()),Set.of(page.items().getFirst().metadata().file().fileId(),last.items().getFirst().metadata().file().fileId()));
+        assertTrue(secured.catalog("user",TENANT,null,null,100).value().items().isEmpty());
+        assertEquals(0,secured.usage("user",TENANT,null).value().states().stream().mapToLong(UsageBucket::fileCount).sum());
+        assertThrows(RuntimeException.class,()->secured.deleted("other-app",TENANT,null,null,100));
+        assertThrows(RuntimeException.class,()->secured.deleted("other-tenant",TENANT,null,null,100));
+        grant("fixture-other","asset","LIST_DELETED_METADATA","EXACT_FILE",first.value());
+        assertEquals(first.value(),secured.deleted("other",TENANT,null,null,100).value().items().getFirst().metadata().file().fileId());
+        assertThrows(RuntimeException.class,()->secured.lifecycle("other",TENANT,null,first,Action.RESTORE_FILE,1));
+        var external=RuntimeComposition.secured(source,new Trust(ISS,AUD),proof->new VerifiedAccess(ISS,"user",Set.of(AUD),TokenKind.ACCESS,NOW,NOW.plusSeconds(300),NOW),
+            (issuer,subject,audience)->Optional.of(new Binding(USER,TENANT,"asset",Set.of(Action.LIST_DELETED_METADATA))),
+            (actor,tenant)->true,(tenant,module)->new ModuleEntitlement(TENANT.value(),"file-storage",true,NOW),
+            caller->List.of(new Grant(TENANT,USER.actorId(),"asset",Action.LIST_DELETED_METADATA,"attachment",GrantScope.EXACT_FILE,
+                first,NOW,NOW.plusSeconds(300),false)),CLOCK,Duration.ofMinutes(5),Duration.ofSeconds(30));
+        assertEquals(1,external.deleted("user",TENANT,null,null,100).value().items().size());
+        sql("UPDATE fs.file_grant SET revoked=true WHERE actor='fixture-user' AND action='LIST_DELETED_METADATA'");
+        grant("fixture-user","asset","LIST_DELETED_METADATA","EXACT_FILE",second.value());
+        assertTrue(external.deleted("user",TENANT,null,null,100).value().items().isEmpty());
+        var app=RuntimeApplication.application(io.vyrnforge.filestorage.runtime.http.ApiHttpConfiguration.class);
+        app.addInitializers(ctx->ctx.getBeanFactory().registerSingleton("securedFiles",secured));
+        try(var ctx=app.run("--server.port=0","--fs.role=API");var http=HttpClient.newHttpClient()){
+            String base="http://127.0.0.1:"+ctx.getEnvironment().getProperty("local.server.port");
+            var result=catalogGet(http,base,"/v1/deleted-files?limit=1","user",TENANT);
+            assertEquals(200,result.statusCode(),result.body());OpenApiContract.assertResponse(result);
+            assertTrue(result.body().contains(second.value()));assertFalse(result.body().contains(first.value()));
+            for(String secret:List.of("fixture-bucket","private-prefix","ref:fixture","objectKey","sessionId","backendId","locationId","holdState","retainUntil"))
+                assertFalse(result.body().contains(secret));
+            for(String path:List.of("/v1/deleted-files?limit=0","/v1/deleted-files?limit=101","/v1/deleted-files?limit=1&limit=2","/v1/deleted-files?afterFileId=","/v1/deleted-files?state=ACTIVE")){
+                var bad=catalogGet(http,base,path,"user",TENANT);assertEquals(400,bad.statusCode(),bad.body());OpenApiContract.assertResponse(bad);
+            }
+        }
+        secured.lifecycle("user",TENANT,null,second,Action.RESTORE_FILE,1);
+        assertTrue(secured.deleted("user",TENANT,null,null,100).value().items().isEmpty());
+        assertEquals(1,secured.catalog("user",TENANT,null,null,100).value().items().size());
+    }
+
+    @Test void retentionEvidenceFailsClosedAndNeverAuthorizesPurge() throws Exception {
+        available();
+        grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","RESTORE_FILE","OWNED_FILE",null);
+        var safety=new JdbcRetentionSafety(source,CLOCK);
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.NOT_DELETED,safety.assess(TENANT,fileId()));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.EVIDENCE_MISSING,safety.assess(TENANT,fileId()));
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.EVIDENCE_MISSING,safety.assess(OTHER,fileId()));
+        sql("""
+            INSERT INTO fs.file_retention_evidence(tenant_id,file_id,lifecycle_revision,policy_revision,hold_state,retain_until,observed_at,valid_until)
+            VALUES (?,?,1,1,'UNKNOWN',NULL,?,?)
+            """,TENANT.value(),fileId().value(),NOW.minusSeconds(1).atOffset(ZoneOffset.UTC),NOW.plusSeconds(60).atOffset(ZoneOffset.UTC));
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.HOLD_UNKNOWN,safety.assess(TENANT,fileId()));
+        sql("UPDATE fs.file_retention_evidence SET hold_state='HELD'");
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.HELD,safety.assess(TENANT,fileId()));
+        sql("UPDATE fs.file_retention_evidence SET hold_state='CLEAR'");
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.RETENTION_UNRESOLVED,safety.assess(TENANT,fileId()));
+        sql("UPDATE fs.file_retention_evidence SET retain_until=?",NOW.plusSeconds(30).atOffset(ZoneOffset.UTC));
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.RETENTION_ACTIVE,safety.assess(TENANT,fileId()));
+        sql("UPDATE fs.file_retention_evidence SET retain_until=?",NOW.atOffset(ZoneOffset.UTC));
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.REVIEW_REQUIRED,safety.assess(TENANT,fileId()));
+        var expired=new JdbcRetentionSafety(source,Clock.fixed(NOW.plusSeconds(60),ZoneOffset.UTC));
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.EVIDENCE_STALE,expired.assess(TENANT,fileId()));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.file SET state='PURGE_PENDING'"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.file SET state='PURGED'"));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,1);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,2);
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.EVIDENCE_MISSING,safety.assess(TENANT,fileId()));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='CLEANUP_UPLOAD'"));
+    }
+
+    private static HttpRequest lifecycleRequest(String uri){
+        return HttpRequest.newBuilder(URI.create(uri)).header("Authorization","Bearer user")
+            .header("X-Tenant-Id",TENANT.value().toString()).POST(HttpRequest.BodyPublishers.noBody()).build();
     }
 
     private static HttpResponse<String> catalogGet(HttpClient http,String base,String path,String proof,TenantId tenant)throws Exception{
