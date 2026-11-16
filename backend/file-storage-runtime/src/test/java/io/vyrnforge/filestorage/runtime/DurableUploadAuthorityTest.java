@@ -361,7 +361,7 @@ class DurableUploadAuthorityTest {
             server.start();
             try(var inspection=client(server,user,password)){
                 inspection.createBucket(request->request.bucket("fixture-bucket"));
-                exerciseStagingRevisionAdmission(TARGET,backend,new Location(location,backend,"fixture-bucket","private-prefix"),
+                exerciseStagingRevisionAdmission(TARGET,backend,new Location(location,backend,"fixture-bucket","private-prefix/"),
                     view,new CredentialRef("ref:fixture/v1"),new CredentialRef("ref:fixture/v2"),(target,loc,revision,credential)->{
                         var sdk=client(server,user,password);
                         S3StorageProvider adapter;
@@ -396,7 +396,7 @@ class DurableUploadAuthorityTest {
         var old=secured.initiate("user",TENANT,null,new Initiate("attachment","old-oss.txt",5,"text/plain","oss-revision-old")).value();
         try(var fixture=new OssWireFixture()){
             // Explicit test-only mapping: logical virtual-host target to native SDK loopback fixture.
-            exerciseStagingRevisionAdmission(target,id,new Location(loc,id,"fixture-oss","private-oss"),old,oldRef,
+            exerciseStagingRevisionAdmission(target,id,new Location(loc,id,"fixture-oss","private-oss/"),old,oldRef,
                 new CredentialRef("ref:fixture/oss:v2"),(approved,placement,revision,credential)->{
                     var sdk=fixture.client();
                     OssStorageProvider adapter;
@@ -497,6 +497,22 @@ class DurableUploadAuthorityTest {
             instruction.file(),instruction.version(),instruction.session(),id,1,new Locator(placement.id(),"outside-prefix/object",null),
             instruction.size(),instruction.expiresAt(),instruction.sha256(),instruction.readerToken());
         assertThrows(TransferFailure.class,()->resolver.resolve(outside));
+        // Even explicitly configured pins cannot bypass registry revision state.
+        var draftRef=new CredentialRef("ref:fixture/revision-v3");
+        assertEquals(3,registry.reviseCredential(ADMIN,ctx,id,2,draftRef));
+        var draftKey=new StagingRuntimeDependencies.PinKey(id,3,placement.id());
+        var draftPin=new StagingRuntimeDependencies.Pin(target,placement,draftRef);
+        var draftInstruction=new TransferInstruction(instruction.tenant(),instruction.actorId(),instruction.application(),
+            instruction.action(),instruction.file(),instruction.version(),instruction.session(),id,3,instruction.locator(),
+            instruction.size(),instruction.expiresAt(),instruction.sha256(),instruction.readerToken());
+        assertThrows(TransferFailure.class,()->StagingOperations.resolver(registry,
+            dependencies.apply(Map.of(draftKey,draftPin)),true).resolve(draftInstruction));
+        var missingKey=new StagingRuntimeDependencies.PinKey(id,99,placement.id());
+        var missingInstruction=new TransferInstruction(instruction.tenant(),instruction.actorId(),instruction.application(),
+            instruction.action(),instruction.file(),instruction.version(),instruction.session(),id,99,instruction.locator(),
+            instruction.size(),instruction.expiresAt(),instruction.sha256(),instruction.readerToken());
+        assertThrows(TransferFailure.class,()->StagingOperations.resolver(registry,
+            dependencies.apply(Map.of(missingKey,p1)),true).resolve(missingInstruction));
         assertEquals(8,requested.size(),"invalid admission must precede credential lookup");
         failFactory.set(true);
         assertThrows(TransferFailure.class,()->resolver.resolve(instruction));
