@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * No object-store operations run inside the transaction.
  */
 public final class FileApplication {
-    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER, LIST_METADATA, DELETE_FILE, RESTORE_FILE, LIST_DELETED_METADATA, PREPARE_PURGE }
+    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER, LIST_METADATA, DELETE_FILE, RESTORE_FILE, LIST_DELETED_METADATA, PREPARE_PURGE, SUPERSEDE_PURGE }
     public enum Code { DENIED, NOT_FOUND, NO_PLACEMENT, CONFLICT, IN_PROGRESS, INVALID }
     public static final class Failure extends RuntimeException {
         private final Code code;
@@ -143,7 +143,10 @@ public final class FileApplication {
     }
 
     /** Request for review only: neither a purge permit nor a worker claim. */
-    public record PurgeRequest(FileId file,VersionId version,long lifecycleRevision,long policyRevision) {
+    public record PurgeRequest(FileId file,VersionId version,long lifecycleRevision,long policyRevision,UUID supersedes) {
+        public PurgeRequest(FileId file,VersionId version,long lifecycleRevision,long policyRevision){
+            this(file,version,lifecycleRevision,policyRevision,null);
+        }
         public PurgeRequest {
             Objects.requireNonNull(file);Objects.requireNonNull(version);
             if(lifecycleRevision<=0||lifecycleRevision%2!=1||policyRevision<=0)throw new Failure(Code.INVALID);

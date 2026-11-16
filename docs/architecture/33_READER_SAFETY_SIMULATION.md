@@ -1,6 +1,6 @@
 # FS-310A4 — Durable reader safety and simulated execution
 
-Status: owner-authorized isolated candidate; PR #83 accepted/merged 65b6ec4, CI 43779802955 passed 187 tests. #36. No physical purge, production retention/hold/quota policy or deployment.
+Status: accepted/merged PR #84 at 0d0cc02, CI 43781101800 passed 190 tests. #36. No physical purge, production retention/hold/quota policy or deployment.
 
 ## Reader lifecycle
 
@@ -13,3 +13,5 @@ Separate fs.purge_simulation keyed to V13 operation ID; never in fs.storage_oper
 ## Tests and remaining limits
 
 V14 repeatability; actual MinIO and native OSS HTTP successful reader drain; in-flight download blocks simulation until positive ack, wrong token/tenant, expired/untracked/uncertain close blockers, late idempotent ack, stale worker, bounded exhaustion, hold change, atomic intent rollback, restore/re-delete, no executable purge. Test fixture clocks and transport limits are not production defaults. Future authoritative policy writer, supersession/reapproval, reader reconciliation, production socket/SDK termination evidence, quota accounting, provider-version safety and actual verified purge remain separately gated. Exact CI recorded on PR.
+
+[FS-310A5](34_GOVERNED_LIFECYCLE.md) adds controlled evidence review without production verifier or actual purge.
