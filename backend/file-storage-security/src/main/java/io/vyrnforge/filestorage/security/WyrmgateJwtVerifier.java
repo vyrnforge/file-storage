@@ -45,6 +45,31 @@ public final class WyrmgateJwtVerifier implements SecuredFiles.Verifier {
         this.keys=Objects.requireNonNull(keys);this.clock=Objects.requireNonNull(clock);
         this.maxTokenLifetime=positive(maxTokenLifetime);this.maxSnapshotAge=positive(maxSnapshotAge);
     }
+    /** Reviewed staging profile; callers cannot select algorithms from token or configuration. */
+    public static WyrmgateJwtVerifier rs256(SecuredFiles.Trust trust,KeySource source,Clock clock,
+            Duration maxTokenLifetime,Duration maxSnapshotAge){
+        return new WyrmgateJwtVerifier(trust,Set.of(JWSAlgorithm.RS256),source,clock,maxTokenLifetime,maxSnapshotAge);
+    }
+    /** Readiness validates the full trusted public-key snapshot, not merely file existence. */
+    public boolean ready(){
+        try{
+            var snapshot=Objects.requireNonNull(keys.current());
+            var now=clock.instant();
+            if(!trust.issuer().equals(snapshot.issuer())||snapshot.jwks().length()>MAX_JWKS||snapshot.acquiredAt().isAfter(now)
+                ||Duration.between(snapshot.acquiredAt(),now).compareTo(maxSnapshotAge)>=0)return false;
+            var list=JWKSet.parse(snapshot.jwks()).getKeys();
+            var seen=new HashSet<String>();
+            if(list.isEmpty()||list.size()>MAX_KEYS)return false;
+            boolean usable=false;
+            for(var key:list){
+                if(!(key instanceof RSAKey rsa)||rsa.isPrivate()||rsa.size()<2048||rsa.getKeyID()==null||rsa.getKeyID().isBlank()
+                    ||rsa.getKeyID().length()>256||!seen.add(rsa.getKeyID())||!KeyUse.SIGNATURE.equals(rsa.getKeyUse())
+                    ||!RSA.contains(rsa.getAlgorithm())||(rsa.getKeyOperations()!=null&&!rsa.getKeyOperations().equals(Set.of(KeyOperation.VERIFY))))return false;
+                usable|=algorithms.contains(rsa.getAlgorithm());
+            }
+            return usable;
+        }catch(Exception ex){return false;}
+    }
     private static Duration positive(Duration d){
         Objects.requireNonNull(d);if(d.isZero()||d.isNegative())throw new IllegalArgumentException("invalid lifetime");return d;
     }
