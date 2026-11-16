@@ -103,7 +103,7 @@ public final class WyrmgateJwtVerifier implements SecuredFiles.Verifier {
         }catch(SecuredFiles.SecurityFailure ex){throw ex;}
         catch(Exception ex){throw denied();}
     }
-    private RSAKey selectKey(JWSHeader h,Instant now) throws Exception {
+    private RSAKey selectKey(JWSHeader h,Instant now) {
         RSAKey selected=null;
         try {
             KeySnapshot snapshot=Objects.requireNonNull(keys.current());
@@ -125,7 +125,7 @@ public final class WyrmgateJwtVerifier implements SecuredFiles.Verifier {
                 if(h.getKeyID().equals(rsa.getKeyID()))selected=rsa;
             }
             if(!usable)throw denied();
-        }catch(Exception ex){throw new SecuredFiles.SecurityFailure(SecuredFiles.SecurityCode.AUTHENTICATION_FAILED,
+        }catch(java.text.ParseException|RuntimeException ex){throw new SecuredFiles.SecurityFailure(SecuredFiles.SecurityCode.AUTHENTICATION_FAILED,
                 SecurityObservation.Reason.KEY_SOURCE_UNAVAILABLE);}
         if(selected==null||!h.getAlgorithm().equals(selected.getAlgorithm()))throw denied();
         return selected;
