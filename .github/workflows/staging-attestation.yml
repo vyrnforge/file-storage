@@ -85,11 +85,24 @@ jobs:
           assert v["cycloneDxSha256"] == sha("bom.json")
           assert v["inventorySha256"] == sha("staging-inventory.json")
           assert v["osvEvidenceSha256"] == sha("staging-osv-meta.json")
+          osv = json.loads((p / "staging-osv-meta.json").read_text())
+          assert osv["reportSha256"] == sha("staging-osv.json")
+          assert osv["bomSha256"] == sha("bom.json")
           assert v["licenseEvidenceSha256"] == sha("staging-license-evidence.json")
           assert v["licenseNoticeArchiveSha256"] == sha("staging-license-notices.zip")
           assert r["decision"] == "NO-GO"
           assert r["vulnerabilityEvidence"]["advisoryCount"] == 0
           assert r["vulnerabilityScan"] == "NO_FINDINGS_REVIEW_REQUIRED"
+          PY
+      - name: Require reviewed GitHub CLI before issuing attestations
+        run: |
+          python3 - <<'PY'
+          import re, subprocess
+          first = subprocess.check_output(["gh", "--version"], text=True).splitlines()[0]
+          match = re.fullmatch(r"gh version (\d+)\.(\d+)\.(\d+)(?: \([^\r\n]+\))?", first)
+          if not match or tuple(map(int, match.groups())) < (2, 102, 0):
+              raise SystemExit("Reviewed GitHub CLI >=2.102.0 is required; no attestations issued")
+          print(first)
           PY
       - name: Attest build provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
