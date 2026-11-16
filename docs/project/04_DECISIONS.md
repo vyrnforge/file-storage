@@ -169,3 +169,8 @@ FS-310A8 candidate PR #91: [implementation CI 43803914425](https://github.com/vy
 
 
 2026-11-16 (Asia/Jakarta): owner approved A18 PR #105 at exact head `9eca4ced4b2e66717ab484bfe58c36c1487845a2`; squash merged `c6713d6088a61ff67fae0dc16c16afd4da971c43`. CI 43846856194 passed 224 Java tests, ten distribution and six statement checks, 133/133 SBOM and 127/127 packaged Maven components, zero reported advisories. A19 authorized for remaining license dispositions and staging acceptance preparation only; [A19 contract](../architecture/48_LICENSE_DISPOSITIONS_STAGING_ACCEPTANCE.md). V23 retained. No distribution approval, signing, publication, provisioning, deployment, production policy, historical backfill, legal-hold release or physical provider deletion. PR #87 excluded. A19 candidate CI and owner review pending.
+
+
+## FS-65 Q16 proposed implementation correction — 2026-11-16
+
+Preserve DEC-FS003/005/009/012 and the existing registry CNAME rejection. Correct inconsistent A16 staging admission/docs by rejecting OSS CNAME at properties, typed pin and factory boundaries. No new architecture decision or CNAME approval; any future support requires separately reviewed bucket binding, alias/namespace, TLS/egress and provider evidence. Candidate pending exact-head CI and owner review. #65; PR #108 audit remains open.

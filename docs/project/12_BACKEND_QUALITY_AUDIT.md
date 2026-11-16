@@ -48,3 +48,8 @@ See `.github/workflows/backend-quality-audit.yml` and `scripts/backend-quality-i
 ## Verified evidence checkpoint — 2026-11-16
 
 See [individual analyzer triage, actual XML metrics and prioritized work breakdown](13_BACKEND_AUDIT_TRIAGE.md). Audit run 43884241791 artifact 14234465439 verified SHA-256 and exact synthetic merge parents. 67 findings individually source-triaged; no security clearance. Q15/Q16 confirmed, Q17 composition suspicion reconciled. First remediation draft #109; no acceptance, merge or deployment. Full review and independent signoff remain open.
+
+
+## Owner-approved Q16 merge
+
+PR #109 squash merged `e16f016c20e3338d50b3e78b15512b0eab549a87` after explicit owner approval. Exact-head CI 43897905525 and audit 43897905425 passed 226 tests, zero failures/errors/skips; audit artifact 14241095966 independently verified. 67 unchanged SpotBugs findings. Q16 accepted at isolated software scope; Q15 authorized next; #65 remains open. No release/deployment or frontend resumption.
