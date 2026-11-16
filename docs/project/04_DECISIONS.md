@@ -179,3 +179,8 @@ Preserve DEC-FS003/005/009/012 and the existing registry CNAME rejection. Correc
 ## FS-65 Q16 acceptance and Q15 authorized correction
 
 Owner explicitly approved Q16 and next AQ-02. #109 merged `e16f016c20e3338d50b3e78b15512b0eab549a87` with 226 passing tests, no new findings. Q15 preserves DEC-FS003/005/009/012: require explicit positive persisted revision in trusted staging config, admit exact tuple with immutable target/location/ref, no latest fallback. DB-role/provider reference separation and cross-backend reference isolation retained; same-backend explicit tuples may reuse an immutable reference for reviewed rollback or multiple locations. Old configuration without revision fails closed and requires operator review. Proposed implementation pending verification and owner acceptance; no new production or deployment authority.
+
+
+## FS-65 Q15 acceptance; AQ-03 evidence boundary
+
+Owner explicitly approved Q15 merge and next AQ-03. #110 merged `dd3feae440ee601259bd77af983cfaeedb842cd0` with 229 tests passing, no new substantive findings. First AQ-03 slice preserves existing authorization and role profiles, adds explicit staging catalog/usage/deleted grant and revocation/outage evidence, IAM failure recovery, and disposable ACL drift checks for sequences and routine/schema ownership. Readiness sentinel is not exhaustive ACL certification; no actual production ACL or deployment changes authorized. Q10 failure observability and remaining effective ACL/SQL review remain open.

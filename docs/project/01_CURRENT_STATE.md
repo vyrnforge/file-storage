@@ -184,3 +184,8 @@ A19 main `8ac934670967658ef8efc114bd06b730fd0e06f2`. Proposed staging OSS addres
 ## FS-65 Q16 accepted; Q15 candidate
 
 Owner explicitly approved #109 and AQ-02; #109 squash merged `e16f016c20e3338d50b3e78b15512b0eab549a87`, 226 tests, CI 43897905525 and audit 43897905425 passed; 67 unchanged findings. Q15 proposes bounded explicit backend/revision/location admission and complete persisted pin check before secret lookup. No consumer API/schema/migration changes, no deployment. Candidate CI/owner review pending; #65 and frontend hold remain.
+
+
+## FS-65 Q15 accepted; AQ-03 evidence candidate
+
+Owner approved #110 and AQ-03. Q15 squash merged `dd3feae440ee601259bd77af983cfaeedb842cd0`; CI 43913331781 and audit 43913331656, 229 tests and zero new substantive findings. AQ-03 first slice verifies separated staging durable catalog grants (empty legacy fallback), revocation and outage/recovery, IAM key-source outage, and extends disposable role drift evidence to sequence and routine/schema ownership. No runtime policy, migration, public API, or production ACL changes. CI/owner acceptance pending; Q10/Q11 remain open for full review; frontend hold remains.
