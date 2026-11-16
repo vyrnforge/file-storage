@@ -510,7 +510,7 @@ class ApiRuntimeCompositionTest {
                 status(200,call(ctx,"GET","/v1/usage","user",true,null));
                 var usage=secured.usage("user",TENANT,null).value();
                 assertEquals(1,usage.states().stream().filter(b->b.state()==VersionState.AVAILABLE)
-                    .mapToLong(b->b.count()).sum());
+                    .mapToLong(b->b.fileCount()).sum());
                 status(403,call(ctx,"GET","/v1/deleted-files","user",true,null));
                 fixtureGrant("LIST_DELETED_METADATA","OWNED_FILE");
                 fixtureGrant("DELETE_FILE","OWNED_FILE");fixtureGrant("RESTORE_FILE","OWNED_FILE");
