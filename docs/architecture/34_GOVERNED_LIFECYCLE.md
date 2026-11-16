@@ -1,6 +1,6 @@
 # FS-310A5 — Governed lifecycle
 
-Status: owner-authorized isolated candidate; PR #84 accepted/merged 0d0cc02, CI 43781101800 passed 190 tests. #36/#16/#33. Physical purge and deployment disabled.
+Status: accepted/merged PR #85 at 8ea998f, CI 43782219424 passed 193 tests. #36/#16/#33. Physical purge and deployment disabled.
 
 ## Policy and hold contracts
 
@@ -17,3 +17,5 @@ Exact claimed handle hash and immutable claim (tenant/file/version/claim/expiry)
 ## Verification
 
 V15 repeatability and three PostgreSQL regressions: draft CAS, independent review and protective hold across generations; supersession grant/concurrent retry/stale claims; exact-reader review with rejected proof, distinct reviewer, transactional rollback and positive synthetic verification. Existing 190 tests retained. Exact CI evidence recorded on PR.
+
+[FS-310A6](35_ISOLATED_POLICY_QUOTA.md) adds isolated activation and accounting primitives, not production activation.

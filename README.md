@@ -100,3 +100,5 @@ PR #82 accepted/merged a1fd681 (185 tests). [FS-310A3 purge preparation](docs/ar
 PR #83 accepted/merged 65b6ec4 (187 tests). [FS-310A4 reader safety and simulation](docs/architecture/33_READER_SAFETY_SIMULATION.md) — V14 candidate; physical purge disabled.
 
 PR #84 accepted/merged 0d0cc02 (190 tests). [FS-310A5 governed lifecycle](docs/architecture/34_GOVERNED_LIFECYCLE.md) — V15 candidate; physical purge disabled.
+
+PR #85 accepted/merged 8ea998f (193 tests). [FS-310A6 isolated policy and quota](docs/architecture/35_ISOLATED_POLICY_QUOTA.md) — V16 candidate; production policy and physical purge disabled.

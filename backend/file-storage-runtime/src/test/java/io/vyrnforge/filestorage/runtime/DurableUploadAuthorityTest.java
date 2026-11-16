@@ -68,7 +68,7 @@ class DurableUploadAuthorityTest {
     @AfterAll static void stop() { DB.stop(); }
 
     @BeforeEach void seed() throws Exception {
-        sql("TRUNCATE fs.backend,fs.policy_revision,fs.file,fs.file_grant,fs_kernel.platform_idempotency,fs_kernel.platform_audit_event,fs_kernel.platform_event_outbox CASCADE");
+        sql("TRUNCATE fs.backend,fs.policy_revision,fs.retention_policy_draft,fs.file,fs.file_grant,fs_kernel.platform_idempotency,fs_kernel.platform_audit_event,fs_kernel.platform_event_outbox CASCADE");
         var registry = new JdbcRegistry(source, CLOCK);
         var config = new JdbcConfiguration(source, CLOCK);
         var correlation = CorrelationContext.create();
@@ -1721,6 +1721,153 @@ class DurableUploadAuthorityTest {
         assertEquals(0,scalar("SELECT count(*) FROM fs.download_reader"));
         assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
         assertThrows(SQLException.class,()->sql("DELETE FROM fs.reader_reconciliation_review"));
+    }
+
+    private static final ActorReference POLICY_REVIEWER=new ActorReference(ActorType.USER,"fixture-policy-reviewer",null,null);
+    private static final ActorReference POLICY_ACTIVATOR=new ActorReference(ActorType.USER,"fixture-policy-activator",null,null);
+    private JdbcLifecycleGovernance policyGovernance(Clock clock){
+        return new JdbcLifecycleGovernance(source,clock,(actor,tenant,file,action)->TENANT.equals(tenant)
+            &&Set.of(ADMIN,POLICY_REVIEWER,POLICY_ACTIVATOR).contains(actor),(claim,evidence,actor)->false);
+    }
+    private JdbcIsolatedPolicyQuota isolatedQuota(Clock clock){
+        return new JdbcIsolatedPolicyQuota(source,clock,TENANT,(actor,tenant,file,action)->Set.of(ADMIN,POLICY_ACTIVATOR).contains(actor));
+    }
+    private long reviewedPolicy(Clock clock,long expected,long seconds){
+        var g=policyGovernance(clock);
+        long rev=g.draft(ADMIN,TENANT,new io.vyrnforge.filestorage.application.LifecycleGovernance.PolicyDraft(expected,seconds,
+            io.vyrnforge.filestorage.application.LifecycleGovernance.QuotaMode.CHARGE_UNTIL_VERIFIED_PURGE),CorrelationContext.create());
+        g.review(POLICY_REVIEWER,TENANT,rev,CorrelationContext.create());return rev;
+    }
+    @Test void isolatedPolicyActivationAndRetentionObservationAreRevisionFenced() throws Exception {
+        available();
+        var q=isolatedQuota(CLOCK);var g=policyGovernance(CLOCK);var correlation=CorrelationContext.create();
+        var draft=new io.vyrnforge.filestorage.application.LifecycleGovernance.PolicyDraft(0,10,
+            io.vyrnforge.filestorage.application.LifecycleGovernance.QuotaMode.CHARGE_UNTIL_VERIFIED_PURGE);
+        long rev=g.draft(ADMIN,TENANT,draft,correlation);
+        assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,correlation));
+        g.review(POLICY_REVIEWER,TENANT,rev,correlation);
+        assertThrows(Failure.class,()->q.activate(ADMIN,TENANT,0,rev,10,60,correlation));
+        assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,OTHER,0,rev,10,60,correlation));
+        assertThrows(Failure.class,()->q.resolve(ADMIN,TENANT,rev));
+        var policy=q.activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,correlation);
+        assertEquals(policy,q.resolve(ADMIN,TENANT,rev));assertEquals(10,policy.retentionSeconds());
+        assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,correlation));
+        assertThrows(Failure.class,()->q.observe(ADMIN,TENANT,fileId(),1,rev,correlation));
+        grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","RESTORE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","PREPARE_PURGE","OWNED_FILE",null);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        var observed=q.observe(ADMIN,TENANT,fileId(),1,rev,correlation);
+        assertEquals(NOW.plusSeconds(10),observed.retainUntil());
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Hold.UNKNOWN,observed.hold());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_retention_observation"));
+        assertThrows(SQLException.class,()->sql("DELETE FROM fs.isolated_retention_observation"));
+        assertThrows(Failure.class,()->q.observe(ADMIN,TENANT,fileId(),1,rev,correlation));
+        var later=Clock.fixed(NOW.plusSeconds(11),ZoneOffset.UTC);
+        var q2=isolatedQuota(later);
+        long next=reviewedPolicy(later,1,20);
+        q2.activate(POLICY_ACTIVATOR,TENANT,1,next,10,60,correlation);
+        assertThrows(Failure.class,()->q2.resolve(ADMIN,TENANT,1));
+        assertThrows(Failure.class,()->q2.observe(ADMIN,TENANT,fileId(),1,1,correlation));
+        policyGovernance(later).assertHold(ADMIN,TENANT,fileId(),"a".repeat(64),correlation);
+        var held=q2.observe(ADMIN,TENANT,fileId(),1,next,correlation);
+        assertEquals(NOW.plusSeconds(20),held.retainUntil());
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Hold.HELD,held.hold());
+        assertEquals(2,scalar("SELECT count(*) FROM fs.isolated_retention_observation"));
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,next)));
+        long shorter=reviewedPolicy(later,2,5);
+        assertThrows(Failure.class,()->q2.activate(POLICY_ACTIVATOR,TENANT,2,shorter,10,60,correlation));
+        assertEquals(next,q2.resolve(ADMIN,TENANT,next).revision());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+    }
+
+    @Test void isolatedQuotaConcurrentReservationAndVerifiedChargeAreAtomic() throws Exception {
+        long rev=reviewedPolicy(CLOCK,0,10);var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        q.activate(POLICY_ACTIVATOR,TENANT,0,rev,5,60,corr);
+        var second=secured.initiate("user",TENANT,null,new Initiate("attachment","second.txt",5,"text/plain","quota-second")).value();
+        var start=new CountDownLatch(1);
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+            Callable<Boolean> first=()->{start.await();try{q.reserve(ADMIN,TENANT,view.session(),rev,corr);return true;}catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());return false;}};
+            Callable<Boolean> other=()->{start.await();try{q.reserve(ADMIN,TENANT,second.session(),rev,corr);return true;}catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());return false;}};
+            var a=executor.submit(first);var b=executor.submit(other);start.countDown();
+            assertNotEquals(a.get(10,TimeUnit.SECONDS),b.get(10,TimeUnit.SECONDS));
+        }
+        assertEquals(5,q.usage(ADMIN,TENANT).reserved().longValueExact());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
+        // Use the actual winning session for clean completion.
+        if(scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE session_id=?",view.session().value())==0)view=second;
+        var reservation=q.reserve(ADMIN,TENANT,view.session(),rev,corr);
+        assertEquals(JdbcIsolatedPolicyQuota.Status.RESERVED,reservation.status());
+        assertThrows(Failure.class,()->q.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.CHARGED,corr));
+        assertThrows(Failure.class,()->q.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.RELEASED,corr));
+        long next=reviewedPolicy(CLOCK,rev,20);
+        assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,rev,next,4,60,corr));
+        q.activate(POLICY_ACTIVATOR,TENANT,rev,next,5,60,corr);
+        available();
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_quota_settle CHECK (event_type <> 'file-storage.quota.isolated-settled') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->q.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.CHARGED,corr));
+            assertEquals(5,q.usage(ADMIN,TENANT).reserved().longValueExact());
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_quota_settle");}
+        var charged=q.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.CHARGED,corr);
+        assertEquals(rev,charged.policyRevision());assertEquals(charged,q.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.CHARGED,corr));
+        assertEquals(0,q.usage(ADMIN,TENANT).reserved().longValueExact());assertEquals(5,q.usage(ADMIN,TENANT).charged().longValueExact());
+        grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","RESTORE_FILE","OWNED_FILE",null);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        assertEquals(5,q.usage(ADMIN,TENANT).charged().longValueExact());
+        assertThrows(Failure.class,()->q.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.RELEASED,corr));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,1);
+        assertEquals(5,q.usage(ADMIN,TENANT).charged().longValueExact());
+        assertThrows(SQLException.class,()->sql("DELETE FROM fs.isolated_quota_reservation"));
+    }
+
+    @Test void isolatedQuotaReleasesOnlyUnclaimedTerminalSessions() throws Exception {
+        long rev=reviewedPolicy(CLOCK,0,10);var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        q.activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,corr);
+        var other=secured.initiate("user",TENANT,null,new Initiate("attachment","other.txt",5,"text/plain","quota-other")).value();
+        q.reserve(ADMIN,TENANT,view.session(),rev,corr);q.reserve(ADMIN,TENANT,other.session(),rev,corr);
+        allow();var handle=authority().issue("user",TENANT,other.session(),null);
+        authority().claim("user",handle.handle(),TransferInstruction.Action.UPLOAD);
+        var future=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);
+        var recovery=recovery(future);assertTrue(recovery.runOne());assertTrue(recovery.runOne());
+        var late=isolatedQuota(future);
+        var released=late.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.RELEASED,corr);
+        assertEquals(released,late.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.RELEASED,corr));
+        assertThrows(Failure.class,()->late.settle(ADMIN,TENANT,other.session(),JdbcIsolatedPolicyQuota.Status.RELEASED,corr));
+        assertEquals(5,late.usage(ADMIN,TENANT).reserved().longValueExact());
+        assertEquals(0,late.usage(ADMIN,TENANT).charged().longValueExact());
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.isolated_quota_reservation SET status='RELEASED',finished_at=? WHERE session_id=?",future.instant().atOffset(ZoneOffset.UTC),other.session().value()));
+    }
+
+    @Test void isolatedActivationInvalidatesLegacyPreparationAndRetentionProjection() throws Exception {
+        available();
+        grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","PREPARE_PURGE","OWNED_FILE",null);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        seedPurgeEvidence(1,1,"CLEAR",NOW);
+        var request=new PurgeRequest(fileId(),view.version(),1,1);
+        var prep=secured.preparePurge("user",TENANT,null,request).value();
+        var simulation=new JdbcPurgeSimulation(source,CLOCK,Duration.ofSeconds(5),2);
+        var old=simulation.claim(TENANT,prep.operationId());
+        var assessment=new JdbcRetentionSafety(source,CLOCK);
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.REVIEW_REQUIRED,assessment.assess(TENANT,fileId()));
+        long rev=reviewedPolicy(CLOCK,0,10);
+        isolatedQuota(CLOCK).activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,CorrelationContext.create());
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.EVIDENCE_STALE,assessment.assess(TENANT,fileId()));
+        assertThrows(Failure.class,()->simulation.complete(old));
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        var later=Clock.fixed(NOW.plusSeconds(1),ZoneOffset.UTC);
+        var q=isolatedQuota(later);
+        q.observe(ADMIN,TENANT,fileId(),1,rev,CorrelationContext.create());
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.HOLD_UNKNOWN,
+            new JdbcRetentionSafety(source,later).assess(TENANT,fileId()));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.isolated_retention_observation SET hold_state='CLEAR'"));
+        sql("UPDATE fs.file_retention_evidence SET hold_state='CLEAR'");
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.EVIDENCE_STALE,
+            new JdbcRetentionSafety(source,later).assess(TENANT,fileId()));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.purge_simulation WHERE status='SIMULATED'"));
     }
 
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
