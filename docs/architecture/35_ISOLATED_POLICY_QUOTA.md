@@ -17,3 +17,6 @@ Separate per-session ledger; reserve exact durable initiation expected_size and 
 ## Verification
 
 V16 repeatability, four PostgreSQL regressions: independent activation, unreviewed/wrong tenant/stale revision denial, monotonic retention and evidence/hold observation; concurrent quota capacity, exact session charge, pinned revision, limit reduction and atomic rollback, retained charge after delete/restore; unclaimed terminal release vs claimed uncertainty. Additional regression: activation invalidates earlier synthetic CLEAR projection and outstanding simulation claim, assessor rejects unmatched/stale isolated evidence; protective holds override read-only assessment. Isolated observations cannot store CLEAR. Existing 193 tests retained. Exact CI evidence in PR.
+
+
+2026-11-16 (Asia/Jakarta): PR #86 accepted/squash merged 4af51dd819498d323345475d4a9cc3bf16d28288; exact-head CI 43785045045 passed 197 tests. Owner authorized FS-310A7 isolated transactional quota integration and reconciliation (#13/#16/#33/#35/#36). No production policy, historical backfill, hold release, actual provider deletion or deployment. PR #87 excluded.

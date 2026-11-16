@@ -1,0 +1,11 @@
+# FS-310A7 — Isolated transactional quota integration
+
+Status: owner-authorized candidate, CI pending. PR #86 accepted/merged 4af51dd; #13/#16/#33/#35/#36. No production activation or deployment.
+
+V17 enables automatic accounting only via constructor-bound isolated tenant and distinct trusted enable action, current reviewed activation, empty tenant (files, sessions, ledger). No runtime activation endpoint, backfill, disable or implicit defaults. Historical discrepancies remain report-only. Separate production authority/limits and independent review of quota limit/TTL remain open.
+
+Existing Kernel initiation transaction inserts file/version/session/request; V17 reserves the exact durable pin and expected bytes before commit, including idempotency/audit/outbox. Repeatable-read snapshots require a durable per-tenant write fence, not merely advisory locking. Session insertion, activation and ledger insertion touch the fence; concurrent stale writers conflict and retry. This also touches a fence for non-enabled tenants to serialize activation races; no quota rows are created for them. Terminal state transitions atomically charge clean completed availability or release unclaimed failed/expired sessions; uncertain claimed writes remain reserved. V16 exact evidence guard retained; V17 deferred session consistency check and immutable integrated initiation request. Standalone reserve/settle denied once integrated; existing lifecycle audit/outbox records cover accounting in the same transaction. Ledger timestamps are database transaction time; lifecycle evidence uses application clock. No provider I/O or charged release.
+
+Reconciliation: authorized tenant-bound single-statement counts for missing reservations, mismatches, untracked versions and uncertain terminal reservations. No repairs, backfill, consumer API or production access. SQL privileges and performance/load evidence remain production decisions; privileged schema owners can bypass triggers, not a substitute for role isolation. Current policy replacement remains governed; old reservations retain pinned revision.
+
+Verification: V17 repeatability, concurrent initiation and idempotent replay, failed initiation/scan/recovery outbox rollback, terminal uncertainty, cross-tenant denial and immutable integration. Full CI pending.
