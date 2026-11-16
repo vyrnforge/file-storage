@@ -538,6 +538,15 @@ class ApiRuntimeCompositionTest {
                 }finally{sql("GRANT a15_group_5 TO a15_login_5");}
                 status(200,call(ctx,"GET","/health/ready",null,false,null));
                 status(200,call(ctx,"GET","/v1/files","user",true,null));
+                // Required-grant readiness is deliberately not the full effective ACL audit.
+                var grantProfile=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.GRANT_READ);
+                sql("GRANT SELECT ON fs.backend TO a15_group_5");
+                try{
+                    assertTrue(separated.ready());
+                    assertTrue(grantProfile.drift(source,"a15_login_5","a15_group_5")
+                        .contains("table fs.backend SELECT"));
+                }finally{sql("REVOKE SELECT ON fs.backend FROM a15_group_5");}
+                grantProfile.verify(source,"a15_login_5","a15_group_5");
                 assertEquals(0,fixture.delivered.size());
                 assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PUBLISHED'"));
             }
