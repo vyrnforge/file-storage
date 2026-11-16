@@ -18,7 +18,8 @@ public record StagingRuntimeDependencies(String environment,SecuredFiles.Trust t
         Duration operationLease,Duration retryDelay,int attempts,int outboxBatch){
     public record Pin(Target target,Location location,CredentialRef credential){
         public Pin{Objects.requireNonNull(target);Objects.requireNonNull(location);Objects.requireNonNull(credential);
-            if(!"https".equals(target.endpoint().getScheme())||location.prefix().isBlank())throw new IllegalArgumentException("invalid staging pin");}
+            if(!"https".equals(target.endpoint().getScheme())||location.prefix().isBlank()
+                ||(target.provider()==Provider.OSS&&target.addressing()!=Addressing.VIRTUAL_HOST))throw new IllegalArgumentException("invalid staging pin");}
         @Override public String toString(){return "Pin[redacted]";}
     }
     public StagingRuntimeDependencies{

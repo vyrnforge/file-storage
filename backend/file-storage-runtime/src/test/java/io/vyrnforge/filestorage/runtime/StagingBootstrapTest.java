@@ -117,6 +117,17 @@ final class StagingBootstrapTest {
             assertEquals("invalid staging configuration",failure.getMessage());assertNull(failure.getCause());
         }
     }
+    @Test void ossCnameIsRejectedByPropertiesAndTypedPin()throws Exception{
+        var admitted=StagingBootstrapConfig.load(config);
+        var pin=admitted.locations.values().stream().filter(p->p.target().provider()==Provider.OSS).findFirst().orElseThrow();
+        assertEquals(Addressing.VIRTUAL_HOST,pin.target().addressing());
+        var cname=new Target(Provider.OSS,pin.target().endpoint(),pin.target().region(),Addressing.CNAME);
+        assertThrows(IllegalArgumentException.class,()->new StagingRuntimeDependencies.Pin(cname,pin.location(),pin.credential()));
+        writePrivate(config,content.replace("provider.2.addressing=VIRTUAL_HOST","provider.2.addressing=CNAME"));
+        var failure=assertThrows(IllegalArgumentException.class,()->StagingBootstrapConfig.load(config));
+        assertEquals("invalid staging configuration",failure.getMessage());
+        assertNull(failure.getCause());
+    }
     @Test void mountedSecretsRejectTraversalSymlinksPermissionsAndUnexpectedFields()throws Exception{
         var secrets=new MountedStagingSecrets(root);
         assertEquals("fixture-only",secrets.databasePassword("ref:staging/file-storage/db-metadata"));

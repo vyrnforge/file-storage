@@ -16,13 +16,13 @@ public final class OssStagingFactory {
     private OssStagingFactory(){}
     public static OssStorageProvider open(Target target,Location location,String access,String secret,String token,
             Path spool,long maxBytes,Duration timeout){
-        if(target.provider()!=Provider.OSS||!(target.addressing()==Addressing.VIRTUAL_HOST||target.addressing()==Addressing.CNAME)
+        if(target.provider()!=Provider.OSS||target.addressing()!=Addressing.VIRTUAL_HOST
             ||access==null||access.isBlank()||secret==null||secret.isBlank())throw new StorageProvider.StorageFailure(StorageProvider.ErrorCode.INVALID);
         OSS client=null;OssStorageProvider provider=null;
         try{
             int ms=Math.toIntExact(Math.max(1,timeout.toMillis()));
             var config=new ClientBuilderConfiguration();config.setSignatureVersion(SignVersion.V4);
-            config.setSLDEnabled(false);config.setSupportCname(target.addressing()==Addressing.CNAME);
+            config.setSLDEnabled(false);config.setSupportCname(false);
             config.setConnectionTimeout(ms);config.setConnectionRequestTimeout(ms);config.setSocketTimeout(ms);
             config.setRequestTimeoutEnabled(true);config.setRequestTimeout(ms);config.setMaxConnections(2);
             config.setMaxErrorRetry(0);config.setCrcCheckEnabled(true);config.setRedirectEnable(false);
