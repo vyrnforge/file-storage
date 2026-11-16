@@ -18,7 +18,7 @@ CREATE TABLE fs.governed_legal_hold (
  tenant_id uuid NOT NULL, file_id varchar(512) NOT NULL, hold_id uuid NOT NULL,
  authority_actor varchar(128) NOT NULL, evidence_sha256 varchar(64) NOT NULL CHECK(evidence_sha256 ~ '^[0-9a-f]{64}$'),
  asserted_at timestamptz NOT NULL, PRIMARY KEY(tenant_id,file_id,hold_id),
- FOREIGN KEY(tenant_id,file_id) REFERENCES fs.file
+ FOREIGN KEY(tenant_id,file_id) REFERENCES fs.file(tenant_id,file_id)
 );
 ALTER TABLE fs.purge_preparation DROP CONSTRAINT purge_preparation_tenant_id_file_id_lifecycle_revision_key;
 ALTER TABLE fs.purge_preparation ADD COLUMN supersedes_operation_id uuid UNIQUE REFERENCES fs.purge_preparation(operation_id);
