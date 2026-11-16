@@ -229,6 +229,18 @@ final class IsolatedRoleProfiles {
                     if(rows.getBoolean(4)!=allowed(rows.getString(1),rows.getString(3),rows.getString(2))||rows.getBoolean(5))
                         result.add("column "+rows.getString(1)+"."+rows.getString(2)+" "+rows.getString(3));}
             }
+            // Current role profiles grant no sequence authority; include PUBLIC/inherited and grant options.
+            try(var ps=c.prepareStatement("""
+                SELECT n.nspname||'.'||r.relname,p.priv,has_sequence_privilege(?,r.oid,p.priv),
+                  has_sequence_privilege(?,r.oid,p.priv||' WITH GRANT OPTION')
+                FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace
+                CROSS JOIN unnest(ARRAY['USAGE','SELECT','UPDATE']) p(priv)
+                WHERE n.nspname IN ('fs','fs_kernel') AND r.relkind='S'
+                """)){
+                ps.setString(1,login);ps.setString(2,login);
+                try(var rows=ps.executeQuery()){while(rows.next())
+                    if(rows.getBoolean(3)||rows.getBoolean(4))result.add("sequence "+rows.getString(1)+" "+rows.getString(2));}
+            }
             // All non-trigger service functions: compare by OID to the exact approved signatures.
             // Trigger routines cannot be called as ordinary SQL functions.
             try(var ps=c.prepareStatement("""
@@ -267,6 +279,20 @@ final class IsolatedRoleProfiles {
                 """)){
                 ps.setString(1,login);ps.setString(2,group);
                 try(var rows=ps.executeQuery()){rows.next();if(rows.getLong(1)>0)result.add("explicit default ACL");}
+            }
+            try(var ps=c.prepareStatement("""
+                SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname IN ('fs','fs_kernel') AND p.proowner IN (SELECT oid FROM pg_roles WHERE rolname IN (?,?))
+                """)){
+                ps.setString(1,login);ps.setString(2,group);
+                try(var rows=ps.executeQuery()){rows.next();if(rows.getLong(1)>0)result.add("service routine ownership");}
+            }
+            try(var ps=c.prepareStatement("""
+                SELECT count(*) FROM pg_namespace n WHERE n.nspname IN ('fs','fs_kernel')
+                  AND n.nspowner IN (SELECT oid FROM pg_roles WHERE rolname IN (?,?))
+                """)){
+                ps.setString(1,login);ps.setString(2,group);
+                try(var rows=ps.executeQuery()){rows.next();if(rows.getLong(1)>0)result.add("service schema ownership");}
             }
             try(var ps=c.prepareStatement("""
                 SELECT count(*) FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace
