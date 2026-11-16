@@ -113,4 +113,23 @@ class WyrmgateJwtVerifierTest {
         assertEquals(1,fixture.db.rows.size());assertEquals("file-storage",result.value().file().storageService());
         assertEquals("actor-a",fixture.db.rows.getFirst().request().caller().actor());
     }
+    @Test void stagingRs256ReadinessRequiresFreshUsablePublicKeys()throws Exception{
+        var v=WyrmgateJwtVerifier.rs256(new Trust(ISS,AUD),()->{
+            if(unavailable)throw new IllegalStateException("fixture unavailable");
+            return snapshot==null?new WyrmgateJwtVerifier.KeySnapshot(ISS,jwks(current),NOW):snapshot;
+        },Clock.fixed(NOW,ZoneOffset.UTC),Duration.ofMinutes(5),Duration.ofMinutes(10));
+        assertTrue(v.ready());assertEquals("alice",v.verify(valid(current)).subject());
+        for(var invalid:List.of(
+            new WyrmgateJwtVerifier.KeySnapshot(ISS,jwks(current,current),NOW),
+            new WyrmgateJwtVerifier.KeySnapshot(ISS,new JWKSet(current).toString(false),NOW),
+            new WyrmgateJwtVerifier.KeySnapshot(ISS,jwks(current),NOW.minusSeconds(600)),
+            new WyrmgateJwtVerifier.KeySnapshot(ISS,jwks(current),NOW.plusSeconds(1)),
+            new WyrmgateJwtVerifier.KeySnapshot("https://wrong.example.test",jwks(current),NOW),
+            new WyrmgateJwtVerifier.KeySnapshot(ISS,"{\"keys\":[]}",NOW))){
+            snapshot=invalid;assertFalse(v.ready());reject(v,valid(current));
+        }
+        snapshot=new WyrmgateJwtVerifier.KeySnapshot(ISS,jwks(current,previous),NOW);
+        assertTrue(v.ready());assertEquals("alice",v.verify(valid(previous)).subject());
+        unavailable=true;assertFalse(v.ready());reject(v,valid(current));
+    }
 }

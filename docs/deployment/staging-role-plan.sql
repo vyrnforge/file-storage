@@ -8,7 +8,7 @@ BEGIN
  IF current_database() <> 'fs_staging' OR NOT EXISTS (
    SELECT 1 FROM fs.flyway_schema_history WHERE version='23' AND success
  ) THEN RAISE EXCEPTION 'wrong staging database or migration state'; END IF;
-END
+END;
 $a16$;
 
 -- METADATA / METADATA_API

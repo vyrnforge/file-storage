@@ -54,13 +54,15 @@ public final class StagingBootstrap {
             });
             return app.run("--server.address=127.0.0.1","--server.port="+config.serverPort,"--fs.role=COMBINED",
                 "--fs.require-separated-roles=true","--fs.staging.enabled=true","--fs.staging.delay-ms="+config.delayMillis,
-                "--fs.staging.dispatch-enabled="+config.dispatch);
+                "--fs.staging.dispatch-enabled="+config.dispatch,"--spring.flyway.enabled=false",
+                "--server.error.include-message=never","--server.error.include-stacktrace=never");
         }
         @Override public String toString(){return "Prepared[redacted]";}
     }
     public static Prepared prepare(Path configuration,Integrations integrations,Clock clock){
         Objects.requireNonNull(integrations);Objects.requireNonNull(clock);
         try{
+            trustedFile(configuration);
             var c=StagingBootstrapConfig.load(configuration);
             var secrets=new MountedStagingSecrets(c.secretRoot);
             trustedFile(c.ca);trustedFile(c.jwks);
