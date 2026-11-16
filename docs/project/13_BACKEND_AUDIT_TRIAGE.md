@@ -155,3 +155,8 @@ Limitations: test-only evidence, not a production security change or independent
 ## AQ-03A owner acceptance
 
 PR #111 squash merged `2273545a64a0b1c6cceb5eae85d2edb73e751454` after explicit owner approval. 231 tests, CI 43915805582 and audit 43915805516 successful, 67 identical SpotBugs findings. Q17 isolated composition verified; AQ-03B authorized next for sanitized security-failure observability and remaining SQL privilege review. No full audit acceptance or deployment.
+
+
+## AQ-03B SQL privilege source review
+
+[Q11 migration and privilege ledger](14_SQL_PRIVILEGE_REVIEW.md) records V1–V23 source review, confirmed schema-history admission gap #113, known invoker compatibility exception and open role/parameter/external environment gates. #112 separately implements bounded sanitized failure observations. Both candidates pending verification; no overall audit closure.
