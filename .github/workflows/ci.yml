@@ -32,6 +32,8 @@ jobs:
         run: make prepare-s3-fixture
       - name: Verify foundation, hygiene and domain build
         run: make ci
+      - name: Verify console foundation
+        run: node --test console/test/*.test.mjs
       - name: Inventory staging runtime package
         run: python3 scripts/staging-build-evidence.py backend/file-storage-runtime/target/file-storage-runtime-0.0.1-SNAPSHOT.jar backend/file-storage-runtime/target/staging-inventory.json
       - name: Offline Maven vulnerability review evidence
