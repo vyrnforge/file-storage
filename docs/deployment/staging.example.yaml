@@ -1,0 +1,54 @@
+# Non-deployable configuration example. Values are illustrative references, not secrets.
+# Trusted Java deployment configuration must resolve references and supply typed beans.
+environment: staging
+runtime:
+  role: COMBINED
+  bind: 127.0.0.1
+  require-separated-roles: true
+  staging-enabled: false
+  dispatch-enabled: false
+  delay-ms: 1000
+  transfer-max-bytes: 1048576
+  transfer-concurrency: 2
+  buffer-bytes: 16384
+  transfer-timeout-seconds: 15
+  handle-ttl-seconds: 60
+  operation-lease-seconds: 60
+  retry-delay-seconds: 5
+  max-attempts: 3
+  outbox-batch: 10
+database:
+  target-reference: ref:staging/file-storage/database
+  migration-owner-reference: ref:staging/file-storage/migration-owner
+  roles:
+    METADATA: ref:staging/file-storage/db/metadata
+    LOGICAL: ref:staging/file-storage/db/logical
+    PURGE_PREPARATION: ref:staging/file-storage/db/purge-preparation
+    PLACEMENT: ref:staging/file-storage/db/placement
+    BACKEND: ref:staging/file-storage/db/backend
+    GRANT_READ: ref:staging/file-storage/db/grant-read
+    READINESS: ref:staging/file-storage/db/readiness
+    TRANSFER: ref:staging/file-storage/db/transfer
+    WORKER: ref:staging/file-storage/db/worker
+    GOVERNANCE: ref:staging/file-storage/db/governance
+    DISPATCHER: ref:staging/file-storage/db/dispatcher
+iam:
+  issuer: https://iam.staging.example.invalid
+  audience: file-storage-staging
+  bindings-reference: ref:staging/file-storage/iam/bindings
+providers:
+  - provider: S3
+    target: https://s3.staging.example.invalid
+    region: example-region
+    addressing: PATH
+    location-reference: ref:staging/file-storage/s3/location
+    credential-reference: ref:staging/file-storage/s3/credentials
+  - provider: OSS
+    target: https://oss.staging.example.invalid
+    region: example-region
+    addressing: AUTO
+    location-reference: ref:staging/file-storage/oss/location
+    credential-reference: ref:staging/file-storage/oss/credentials
+scanner-reference: ref:staging/file-storage/scanner
+event-transport-reference: ref:staging/file-storage/event-transport
+# No production policy, hold release, historical backfill, purge or migration executor.
