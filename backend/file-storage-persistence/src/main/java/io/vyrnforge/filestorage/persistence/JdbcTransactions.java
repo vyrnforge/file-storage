@@ -74,7 +74,7 @@ public final class JdbcTransactions implements Transactions {
 
     static RuntimeException translate(SQLException ex) {
         String state = ex.getSQLState();
-        if ("23505".equals(state) || "40001".equals(state) || "40P01".equals(state)) {
+        if ("PQU01".equals(state) || "23505".equals(state) || "40001".equals(state) || "40P01".equals(state)) {
             return new Failure(Code.CONFLICT);
         }
         if (state != null && (state.startsWith("22") || "23514".equals(state)

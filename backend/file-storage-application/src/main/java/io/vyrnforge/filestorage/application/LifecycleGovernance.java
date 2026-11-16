@@ -9,7 +9,7 @@ import java.util.UUID;
 /** Internal trusted authority contracts, not consumer DTOs or production policy defaults. */
 public final class LifecycleGovernance {
     private LifecycleGovernance(){}
-    public enum Action { DRAFT_POLICY, REVIEW_POLICY, ASSERT_HOLD, REQUEST_READER_REVIEW, CONFIRM_READER_STOPPED, ACTIVATE_ISOLATED_POLICY, RESOLVE_ISOLATED_POLICY, GENERATE_ISOLATED_EVIDENCE, ACCOUNT_ISOLATED_QUOTA }
+    public enum Action { DRAFT_POLICY, REVIEW_POLICY, ASSERT_HOLD, REQUEST_READER_REVIEW, CONFIRM_READER_STOPPED, ACTIVATE_ISOLATED_POLICY, RESOLVE_ISOLATED_POLICY, GENERATE_ISOLATED_EVIDENCE, ACCOUNT_ISOLATED_QUOTA, ENABLE_ISOLATED_QUOTA_INTEGRATION, RECONCILE_ISOLATED_QUOTA }
     public enum QuotaMode { CHARGE_UNTIL_VERIFIED_PURGE, RELEASE_ON_LOGICAL_DELETE }
     /** Composition must establish actor identity and tenant/file-specific permission. No default implementation. */
     @FunctionalInterface public interface Authority {
