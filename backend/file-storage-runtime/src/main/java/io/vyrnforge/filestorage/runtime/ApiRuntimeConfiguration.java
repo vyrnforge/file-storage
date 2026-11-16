@@ -16,7 +16,10 @@ import org.springframework.context.annotation.Import;
 @Import({ApiHttpConfiguration.class, PolicyAdminHttpConfiguration.class, BackendAdminHttpConfiguration.class})
 public class ApiRuntimeConfiguration {
     @Bean
-    SecuredFiles securedFiles(ApiRuntimeDependencies d, org.springframework.core.env.Environment environment) {
+    SecurityFailureCounters securityFailureCounters(){return new SecurityFailureCounters();}
+
+    @Bean
+    SecuredFiles securedFiles(ApiRuntimeDependencies d, org.springframework.core.env.Environment environment, SecurityFailureCounters observations) {
         if(d.databaseRoles()!=null){
             d.databaseRoles().requireReady();
             var roles=d.databaseRoles();
@@ -25,18 +28,19 @@ public class ApiRuntimeConfiguration {
                 roles.source(RuntimeDatabaseRoles.Role.METADATA),roles.source(RuntimeDatabaseRoles.Role.LOGICAL),
                 roles.source(RuntimeDatabaseRoles.Role.PURGE_PREPARATION),d.clock(),d.lease());
             return new SecuredFiles(d.trust(),d.verifier(),d.consumer().bindings(),d.membership(),d.entitlement(),
-                grants,transactions,d.clock(),d.sessionTtl());
+                grants,transactions,d.clock(),d.sessionTtl(),observations);
         }
         if(environment.getProperty("fs.require-separated-roles",Boolean.class,false))
             throw new IllegalStateException("separated database roles required");
-        return RuntimeComposition.secured(d.source(), d.trust(), d.verifier(), d.consumer().bindings(),
-                d.membership(), d.entitlement(), d.consumer().grants(), d.clock(), d.sessionTtl(), d.lease());
+        return new SecuredFiles(d.trust(),d.verifier(),d.consumer().bindings(),d.membership(),d.entitlement(),
+                d.consumer().grants(),new io.vyrnforge.filestorage.persistence.JdbcTransactions(d.source(),d.clock(),d.lease()),
+                d.clock(),d.sessionTtl(),observations);
     }
 
     @Bean
-    SecuredPolicyAdmin securedPolicyAdmin(ApiRuntimeDependencies d) {
+    SecuredPolicyAdmin securedPolicyAdmin(ApiRuntimeDependencies d, SecurityFailureCounters observations) {
         return new SecuredPolicyAdmin(d.trust(), d.verifier(), d.policy().bindings(),
-                d.membership(), d.entitlement(), d.policy().permissions(), d.clock());
+                d.membership(), d.entitlement(), d.policy().permissions(), d.clock(),observations);
     }
 
     @Bean
@@ -45,8 +49,8 @@ public class ApiRuntimeConfiguration {
     }
 
     @Bean
-    SecuredBackendAdmin securedBackendAdmin(ApiRuntimeDependencies d) {
-        return new SecuredBackendAdmin(d.trust(), d.verifier(), d.backend().bindings(), d.backend().permissions(), d.clock());
+    SecuredBackendAdmin securedBackendAdmin(ApiRuntimeDependencies d, SecurityFailureCounters observations) {
+        return new SecuredBackendAdmin(d.trust(), d.verifier(), d.backend().bindings(), d.backend().permissions(), d.clock(),observations);
     }
 
     @Bean

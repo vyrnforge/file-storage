@@ -189,3 +189,8 @@ Owner explicitly approved #109 and AQ-02; #109 squash merged `e16f016c20e3338d50
 ## FS-65 Q15 accepted; AQ-03 evidence candidate
 
 Owner approved #110 and AQ-03. Q15 squash merged `dd3feae440ee601259bd77af983cfaeedb842cd0`; CI 43913331781 and audit 43913331656, 229 tests and zero new substantive findings. AQ-03 first slice verifies separated staging durable catalog grants (empty legacy fallback), revocation and outage/recovery, IAM key-source outage, and extends disposable role drift evidence to sequence and routine/schema ownership. No runtime policy, migration, public API, or production ACL changes. CI/owner acceptance pending; Q10/Q11 remain open for full review; frontend hold remains.
+
+
+## FS-65 AQ-03A accepted; AQ-03B observability candidate
+
+Owner approved #111 and AQ-03B; #111 merged `2273545a64a0b1c6cceb5eae85d2edb73e751454`, 231 tests, zero new findings. AQ-03B adds bounded process-local failure observations in existing file/policy/backend authority boundaries, trusted key snapshot distinction, neutral public errors and observer fault isolation. No new routes, dependencies, migrations, grants or authorization policy. Candidate verification pending; broader SQL/target ACL audit and telemetry export remain open.

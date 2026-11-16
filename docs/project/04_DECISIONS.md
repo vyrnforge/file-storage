@@ -184,3 +184,8 @@ Owner explicitly approved Q16 and next AQ-02. #109 merged `e16f016c20e3338d50b3e
 ## FS-65 Q15 acceptance; AQ-03 evidence boundary
 
 Owner explicitly approved Q15 merge and next AQ-03. #110 merged `dd3feae440ee601259bd77af983cfaeedb842cd0` with 229 tests passing, no new substantive findings. First AQ-03 slice preserves existing authorization and role profiles, adds explicit staging catalog/usage/deleted grant and revocation/outage evidence, IAM failure recovery, and disposable ACL drift checks for sequences and routine/schema ownership. Readiness sentinel is not exhaustive ACL certification; no actual production ACL or deployment changes authorized. Q10 failure observability and remaining effective ACL/SQL review remain open.
+
+
+## FS-65 AQ-03B — proposed bounded failure observation
+
+Owner approved #111 merge and AQ-03B. Use fixed boundary/reason enum counters in trusted composition, not arbitrary labels, request context, logs, new public endpoint or durable audit writes. Authority lookup exceptions are observed before existing fail-closed mapping; key snapshot rejection is distinct from unknown kid/signature/claims. Observer RuntimeException cannot change authorization; no external sink on request path in runtime. Counts are observations, not unique requests. Export/alert policy and live verification require separate approval. No privilege changes; exact-head CI/quality evidence pending.

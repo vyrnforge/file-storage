@@ -10,6 +10,8 @@ import io.vyrnforge.platform.kernel.ports.*;
 import io.vyrnforge.platform.kernel.errors.KernelAccessException;
 import java.time.*;
 import java.util.*;
+import static io.vyrnforge.filestorage.security.SecurityObservation.Boundary.FILES;
+import static io.vyrnforge.filestorage.security.SecurityObservation.Reason.*;
 
 /**
  * Only the composition root may wire this boundary. Verifier, binding, membership,
@@ -22,7 +24,10 @@ public final class SecuredFiles {
     public enum SecurityCode { AUTHENTICATION_FAILED, ACCESS_DENIED }
     public static final class SecurityFailure extends RuntimeException {
         private final SecurityCode code;
-        public SecurityFailure(SecurityCode code){super(code.name());this.code=Objects.requireNonNull(code);}
+        private final SecurityObservation.Reason reason;
+        public SecurityFailure(SecurityCode code){this(code,code==SecurityCode.AUTHENTICATION_FAILED?AUTHENTICATION_FAILED:AUTHORIZATION_DENIED);}
+        SecurityFailure(SecurityCode code,SecurityObservation.Reason reason){super(code.name());this.code=Objects.requireNonNull(code);this.reason=Objects.requireNonNull(reason);}
+        SecurityObservation.Reason reason(){return reason;}
         public SecurityCode code(){return code;}
     }
     private static String text(String value){
@@ -79,9 +84,17 @@ public final class SecuredFiles {
     private final Transactions transactions;
     private final Clock clock;
     private final Duration ttl;
+    private final SecurityObservation observations;
 
     public SecuredFiles(Trust trust,Verifier verifier,Bindings bindings,TenantMembershipPort membership,
                         ModuleEntitlementPort entitlement,Grants grants,Transactions transactions,Clock clock,Duration ttl){
+        this(trust,verifier,bindings,membership,entitlement,grants,transactions,clock,ttl,SecurityObservation.NONE);
+    }
+
+    public SecuredFiles(Trust trust,Verifier verifier,Bindings bindings,TenantMembershipPort membership,
+                        ModuleEntitlementPort entitlement,Grants grants,Transactions transactions,Clock clock,Duration ttl,
+                        SecurityObservation observations){
+        this.observations=Objects.requireNonNull(observations);
         this.trust=Objects.requireNonNull(trust);this.verifier=Objects.requireNonNull(verifier);
         this.bindings=Objects.requireNonNull(bindings);this.membership=Objects.requireNonNull(membership);
         this.entitlement=Objects.requireNonNull(entitlement);this.grants=Objects.requireNonNull(grants);
@@ -147,7 +160,7 @@ public final class SecuredFiles {
     private List<CatalogGrant> resourceGrants(Caller caller,Action action){
         try{
             var now=clock.instant();
-            var current=List.copyOf(grants.current(caller));
+            var current=SecurityObservation.authority(observations,FILES,GRANT_SOURCE_UNAVAILABLE,()->List.copyOf(grants.current(caller)));
             if(current.size()>4096)throw new IllegalArgumentException("grant scope exceeds bound");
             var result=new ArrayList<CatalogGrant>();
             for(var g:current){
@@ -159,10 +172,10 @@ public final class SecuredFiles {
             }
             if(result.isEmpty())throw new IllegalArgumentException("no catalog grant");
             return List.copyOf(result);
-        }catch(RuntimeException ex){throw new SecurityFailure(SecurityCode.ACCESS_DENIED);}
+        }catch(RuntimeException ex){deny();throw new SecurityFailure(SecurityCode.ACCESS_DENIED);}
     }
     private VerifiedAccess authenticate(String bearer) {
-        return AccessAuthentication.verify(trust, verifier, clock, bearer);
+        return AccessAuthentication.verify(trust, verifier, clock, bearer,observations,FILES);
     }
     @FunctionalInterface
     private interface Operation<T> {
@@ -173,16 +186,17 @@ public final class SecuredFiles {
         VerifiedAccess v=authenticate(bearer);
         Binding b;
         try {
-            b=bindings.resolve(v.issuer(),v.subject(),trust.audience()).orElseThrow();
+            b=SecurityObservation.authority(observations,FILES,BINDING_UNAVAILABLE,()->Objects.requireNonNull(bindings.resolve(v.issuer(),v.subject(),trust.audience()))).orElseThrow();
             if(requested==null||!requested.equals(b.tenant())||b.actor().actorType()!=ActorType.USER)
                 throw new SecurityFailure(SecurityCode.ACCESS_DENIED);
-        }catch(RuntimeException ex){throw new SecurityFailure(SecurityCode.ACCESS_DENIED);}
+        }catch(RuntimeException ex){deny();throw new SecurityFailure(SecurityCode.ACCESS_DENIED);}
         Caller caller=new Caller(b.tenant(),b.actor().actorId(),b.consumer());
         Authorization auth=authorization(b,caller);
         var pipeline=new RequestContextPipeline<ValidatedIdentityCredential>(
-            new ValidatedIdentityAdapter(),membership,
+            new ValidatedIdentityAdapter(),(actor,tenant)->SecurityObservation.authority(observations,FILES,MEMBERSHIP_UNAVAILABLE,()->membership.isMember(actor,tenant)),
             (tenant,module)->{
-                ModuleEntitlement e=entitlement.getEntitlement(tenant,module);
+                ModuleEntitlement e=SecurityObservation.authority(observations,FILES,ENTITLEMENT_UNAVAILABLE,()->entitlement.getEntitlement(tenant,module));
+                if(e==null)SecurityObservation.emit(observations,FILES,ENTITLEMENT_UNAVAILABLE);
                 return e!=null && e.effectiveAt()!=null && clock.instant().isBefore(e.effectiveAt())?null:e;
             },
             (ctx,key,resource)->ctx.actor().equals(b.actor()) && ctx.tenant().tenantId().equals(b.tenant().value())
@@ -195,11 +209,12 @@ public final class SecuredFiles {
         try{
             resolved=pipeline.resolve(new RequestContextInput<>(credential,TenantContext.tenant(requested.value()),
                     correlation,EndpointPolicy.tenantModule("file-storage",action.name()),null));
-        }catch(RuntimeException e){throw new SecurityFailure(SecurityCode.ACCESS_DENIED);}
+        }catch(RuntimeException e){deny();throw new SecurityFailure(SecurityCode.ACCESS_DENIED);}
         // Application checks the authoritative file resource after tenant-scoped lookup.
         // The request-local authorization object cannot be reused for another caller.
         var app=new FileApplication(transactions,auth,clock,ttl);
-        return new Result<>(operation.apply(app,caller,resolved.correlation()),resolved.correlation());
+        try{return new Result<>(operation.apply(app,caller,resolved.correlation()),resolved.correlation());}
+        catch(Failure ex){if(ex.code()==Code.DENIED)deny();throw ex;}
     }
     private Authorization authorization(Binding binding,Caller expected){
         return new Authorization(){
@@ -213,6 +228,7 @@ public final class SecuredFiles {
             }
         };
     }
+    private void deny(){SecurityObservation.emit(observations,FILES,AUTHORIZATION_DENIED);}
     private boolean matches(Caller caller,Action action,String purpose,Resource resource){
         try{
             List<Grant> current = List.copyOf(grants.current(caller));
@@ -227,7 +243,7 @@ public final class SecuredFiles {
                     if(g.scope()==GrantScope.EXACT_FILE&&resource.file().equals(g.file()))return true;
                 }
             }
-            return false;
+            deny();return false;
         }catch(RuntimeException ex){return false;}
     }
 }
