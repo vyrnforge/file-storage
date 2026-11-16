@@ -151,3 +151,6 @@ FS-310A8 candidate PR #91: [implementation CI 43803914425](https://github.com/vy
 
 
 2026-11-16 (Asia/Jakarta): owner approved PR #97; squash merged `fb606a7698df1bbef789efd51732178867ebaa95`; [exact-head CI 43824603192](https://github.com/vyrnforge/file-storage/actions/runs/43824603192) passed 212 tests. FS-310A13 authorized: scoped metadata/transfer/backend administration profiles, V22 lock-only identities, extended privilege drift, isolated credential rotation and quarantined restore/dispatcher restart, staging approval package. [Contract](../architecture/42_RUNTIME_ROLE_ACTIVATION.md). CI and owner review pending. No production provisioning, historical backfill, production limits/durations, hold release, provider deletion or deployment; PR #87 excluded.
+
+
+2026-11-16 (Asia/Jakarta): owner approved PR #98; squash merged `8e48e5ad9c6789b8b7e11ca858b185f56eb92630`; [exact-head CI 43826187384](https://github.com/vyrnforge/file-storage/actions/runs/43826187384) passed 215 tests. FS-310A14 authorized: separated API/internal adapter sources, V3 scoped roles, V23 retention evidence lock identity, fail-closed identity/readiness and HTTP integration, staging go/no-go package. [Contract](../architecture/43_SEPARATED_RUNTIME_STAGING.md). CI and owner review pending. Staging deployment not approved; production gates closed; PR #87 excluded.

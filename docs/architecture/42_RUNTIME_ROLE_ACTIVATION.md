@@ -24,3 +24,6 @@ Disposable logical archive (no owner/ACL restore) into separate database owned b
 - Environment separation, IAM bindings and per-role data source wiring, secret references/rotation, provider test-only locations, network policy and scanner evidence; prevent production credentials/data and destructive operations.
 - Restore exercise with quarantine, outbox replay decision and event deduplication; monitoring, lock contention/load evidence, capacity/SLO and rollback/forward recovery runbook.
 - Owner reviews outstanding role paths, security and operations evidence, then separately approves isolated staging deployment. Production policy values, actual historical accounting execution, legal-hold release, physical deletion and production deployment require separate approvals. PR #87 excluded.
+
+
+2026-11-16 (Asia/Jakarta): owner approved PR #98; squash merged `8e48e5ad9c6789b8b7e11ca858b185f56eb92630`; [exact-head CI 43826187384](https://github.com/vyrnforge/file-storage/actions/runs/43826187384) passed 215 tests. FS-310A14 authorized: separated API/internal adapter sources, V3 scoped roles, V23 retention evidence lock identity, fail-closed identity/readiness and HTTP integration, staging go/no-go package. [Contract](43_SEPARATED_RUNTIME_STAGING.md). CI and owner review pending. Staging deployment not approved; production gates closed; PR #87 excluded.
