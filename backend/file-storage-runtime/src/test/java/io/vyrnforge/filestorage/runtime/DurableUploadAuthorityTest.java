@@ -351,6 +351,176 @@ class DurableUploadAuthorityTest {
         }
     }
 
+
+    @Test void stagingExactRevisionAdmissionPreservesHistoricalMinioAccessAndRevocation() throws Exception {
+        String user="test-"+UUID.randomUUID(),password=UUID.randomUUID().toString();
+        try(var server=new GenericContainer<>(DockerImageName.parse("file-storage-test/minio:2025-04-22-verified"))
+                .withImagePullPolicy(image->false).withEnv("MINIO_ROOT_USER",user).withEnv("MINIO_ROOT_PASSWORD",password)
+                .withCommand("server","/data").withExposedPorts(9000).withStartupAttempts(1)
+                .waitingFor(Wait.forHttp("/minio/health/ready").forPort(9000).withStartupTimeout(Duration.ofMinutes(2)))){
+            server.start();
+            try(var inspection=client(server,user,password)){
+                inspection.createBucket(request->request.bucket("fixture-bucket"));
+                exerciseStagingRevisionAdmission(TARGET,backend,new Location(location,backend,"fixture-bucket","private-prefix"),
+                    view,new CredentialRef("ref:fixture/v1"),new CredentialRef("ref:fixture/v2"),(target,loc,revision,credential)->{
+                        var sdk=client(server,user,password);
+                        S3StorageProvider adapter;
+                        try{adapter=new S3StorageProvider(sdk,Map.of(loc.id(),loc),spool,1024*1024,1,Duration.ofSeconds(15),128,Duration.ofMinutes(1));}
+                        catch(RuntimeException ex){sdk.close();throw ex;}
+                        try{adapter.validateUnversioned(new StorageProvider.Call(Duration.ofSeconds(10)));}
+                        catch(RuntimeException ex){adapter.close();throw ex;}
+                        return new TransferProviderResolver.Lease(){
+                            @Override public StorageProvider provider(){return adapter;}
+                            @Override public void close(){adapter.close();}
+                        };
+                    });
+            }
+        }
+    }
+
+    @Test void stagingExactRevisionAdmissionPreservesHistoricalNativeOssAccessAndRevocation() throws Exception {
+        var registry=new JdbcRegistry(source,CLOCK);
+        var config=new JdbcConfiguration(source,CLOCK);
+        var ctx=CorrelationContext.create();
+        var target=new Target(Provider.OSS,URI.create("https://oss.example.test"),"cn-hangzhou",Addressing.VIRTUAL_HOST);
+        var oldRef=new CredentialRef("ref:fixture/oss:v1");
+        var id=registry.registerBackend(ADMIN,ctx,target,oldRef);
+        var loc=registry.registerLocation(ADMIN,ctx,id,"fixture-oss","private-oss");
+        registry.validateDraft(ADMIN,ctx,id,1,Set.of(target),candidate->{
+            Map<LocationId,Set<BackendValidator.Check>> checks=new HashMap<>();
+            for(var item:candidate.locations())checks.put(item.id(),EnumSet.allOf(BackendValidator.Check.class));
+            return new BackendValidator.Report(candidate.backend(),candidate.revision(),checks);
+        });
+        config.activateBackend(ADMIN,ctx,id,0,1);
+        config.publishPolicy(ADMIN,ctx,SCOPE,1,List.of(new JdbcConfiguration.PolicyRule(loc,0,true)));
+        var old=secured.initiate("user",TENANT,null,new Initiate("attachment","old-oss.txt",5,"text/plain","oss-revision-old")).value();
+        try(var fixture=new OssWireFixture()){
+            // Explicit test-only mapping: logical virtual-host target to native SDK loopback fixture.
+            exerciseStagingRevisionAdmission(target,id,new Location(loc,id,"fixture-oss","private-oss"),old,oldRef,
+                new CredentialRef("ref:fixture/oss:v2"),(approved,placement,revision,credential)->{
+                    var sdk=fixture.client();
+                    OssStorageProvider adapter;
+                    try{adapter=new OssStorageProvider(sdk,Map.of(placement.id(),placement),spool,1024*1024,1,Duration.ofSeconds(15),128,Duration.ofMinutes(1),2);}
+                    catch(RuntimeException ex){sdk.shutdown();throw ex;}
+                    try{adapter.validateUnversioned(new StorageProvider.Call(Duration.ofSeconds(10)));}
+                    catch(RuntimeException ex){adapter.close();throw ex;}
+                    return new TransferProviderResolver.Lease(){
+                        @Override public StorageProvider provider(){return adapter;}
+                        @Override public void close(){adapter.close();}
+                    };
+                });
+        }
+    }
+
+    private void exerciseStagingRevisionAdmission(Target target,BackendId id,Location placement,View old,
+            CredentialRef oldRef,CredentialRef newRef,RegistryTransferProviderResolver.AdapterFactory<AutoCloseable> factory)throws Exception{
+        var registry=new JdbcRegistry(source,CLOCK);
+        var config=new JdbcConfiguration(source,CLOCK);
+        var ctx=CorrelationContext.create();
+        assertEquals(2,registry.reviseCredential(ADMIN,ctx,id,1,newRef));
+        registry.validateDraft(ADMIN,ctx,id,2,Set.of(target),candidate->{
+            Map<LocationId,Set<BackendValidator.Check>> checks=new HashMap<>();
+            for(var item:candidate.locations())checks.put(item.id(),EnumSet.allOf(BackendValidator.Check.class));
+            return new BackendValidator.Report(candidate.backend(),candidate.revision(),checks);
+        });
+        config.activateBackend(ADMIN,ctx,id,1,2);
+        var fresh=secured.initiate("user",TENANT,null,new Initiate("attachment","new.txt",5,"text/plain","revision-new")).value();
+        allow();grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);
+        var k1=new StagingRuntimeDependencies.PinKey(id,1,placement.id());
+        var k2=new StagingRuntimeDependencies.PinKey(id,2,placement.id());
+        var p1=new StagingRuntimeDependencies.Pin(target,placement,oldRef);
+        var p2=new StagingRuntimeDependencies.Pin(target,placement,newRef);
+        var pins=Map.of(k1,p1,k2,p2);
+        var requested=new ArrayList<CredentialRef>();
+        var revoked=new HashSet<CredentialRef>();
+        var closes=new AtomicInteger();var opens=new AtomicInteger();var adapterCloses=new AtomicInteger();
+        var failFactory=new java.util.concurrent.atomic.AtomicBoolean();
+        var limits=new TransferLimits(1024*1024,1,1024,Duration.ofSeconds(15));
+        io.vyrnforge.filestorage.application.CredentialResolver<AutoCloseable> credentials=ref->{
+            requested.add(ref);
+            if(revoked.contains(ref))throw new IllegalStateException("fixture revoked");
+            return new FixtureCredential(ref,closes);
+        };
+        Map<Provider,RegistryTransferProviderResolver.AdapterFactory<AutoCloseable>> factories=Map.of(target.provider(),
+            (approved,loc,revision,credential)->{
+                assertEquals(target,approved);assertEquals(placement,loc);
+                assertEquals(revision==1?oldRef:newRef,((FixtureCredential)credential).reference);
+                if(failFactory.get())throw new IllegalStateException("fixture factory failure");
+                var lease=factory.open(approved,loc,revision,credential);opens.incrementAndGet();
+                return new TransferProviderResolver.Lease(){
+                    @Override public StorageProvider provider(){return lease.provider();}
+                    @Override public void close(){try{lease.close();}finally{adapterCloses.incrementAndGet();}}
+                };
+            });
+        java.util.function.Function<Map<StagingRuntimeDependencies.PinKey,StagingRuntimeDependencies.Pin>,StagingRuntimeDependencies> dependencies=
+            admitted->new StagingRuntimeDependencies("staging",new Trust(ISS,AUD),admitted,credentials,factories,
+                scanner(Scan.CLEAN,"text/plain"),event->{},ADMIN,()->true,limits,Duration.ofMinutes(1),
+                Duration.ofSeconds(30),Duration.ZERO,3,10);
+        var admitted=dependencies.apply(pins);
+        var resolver=StagingOperations.resolver(registry,admitted,true);
+        var workerResolver=StagingOperations.resolver(registry,admitted,false);
+        var gateway=new PrivateTransferGateway(DurableDownloadAuthority.combine(authority(),downloads(CLOCK)),resolver,limits,CLOCK);
+        var scans=scans(CLOCK,3);
+        byte[] older="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] newer="world".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        for(var item:List.of(old,fresh)){
+            byte[] bytes=item==old?older:newer;
+            var handle=authority().issue("user",TENANT,item.session(),null).handle();
+            gateway.upload("user",handle,bytes.length,new java.io.ByteArrayInputStream(bytes));
+            assertTrue(verification(workerResolver).verify("user",TENANT,item.session(),sha256(bytes),null).integrityMatched());
+            new UploadCompletion(secured(CLOCK),scans).begin("user",TENANT,item.session(),null);
+            assertEquals(UploadScanWorker.Outcome.COMPLETED,worker(scans,workerResolver,scanner(Scan.CLEAN,"text/plain"),CLOCK).runOne());
+            assertEquals(VersionState.AVAILABLE,secured.session("user",TENANT,null,item.session()).value().versionState());
+            var download=downloads(CLOCK).issue("user",TENANT,new FileId(item.file().fileId()),item.version(),null).value();
+            var output=new java.io.ByteArrayOutputStream();
+            gateway.download("user",download.handle(),output);
+            assertArrayEquals(bytes,output.toByteArray());
+        }
+        assertEquals(List.of(oldRef,oldRef,oldRef,oldRef,newRef,newRef,newRef,newRef),requested);
+        assertEquals(8,opens.get());assertEquals(opens.get(),adapterCloses.get());assertEquals(8,closes.get());
+        // Test exact admission against an authorized historical instruction, not arbitrary external input.
+        var issued=downloads(CLOCK).issue("user",TENANT,new FileId(old.file().fileId()),old.version(),null).value();
+        assertThrows(TransferFailure.class,()->gateway.download("other-tenant",issued.handle(),new java.io.ByteArrayOutputStream()));
+        assertEquals(8,requested.size());
+        var instruction=downloads(CLOCK).claim("user",issued.handle(),TransferInstruction.Action.DOWNLOAD);
+        assertEquals(1,instruction.revision());
+        var wrongRef=new StagingRuntimeDependencies.Pin(target,placement,newRef);
+        var wrongLocation=new StagingRuntimeDependencies.Pin(target,
+                new Location(placement.id(),id,placement.bucket(),"other-prefix"),oldRef);
+        var wrongTarget=new StagingRuntimeDependencies.Pin(new Target(target.provider(),URI.create("https://other.example.test"),
+                target.region(),target.addressing()),placement,oldRef);
+        for(var bad:List.of(Map.of(k2,p2),Map.of(k1,wrongRef),Map.of(k1,wrongLocation),Map.of(k1,wrongTarget))){
+            var denied=StagingOperations.resolver(registry,dependencies.apply(bad),true);
+            assertThrows(TransferFailure.class,()->denied.resolve(instruction));
+        }
+        var outside=new TransferInstruction(instruction.tenant(),instruction.actorId(),instruction.application(),instruction.action(),
+            instruction.file(),instruction.version(),instruction.session(),id,1,new Locator(placement.id(),"outside-prefix/object",null),
+            instruction.size(),instruction.expiresAt(),instruction.sha256(),instruction.readerToken());
+        assertThrows(TransferFailure.class,()->resolver.resolve(outside));
+        assertEquals(8,requested.size(),"invalid admission must precede credential lookup");
+        failFactory.set(true);
+        assertThrows(TransferFailure.class,()->resolver.resolve(instruction));
+        assertEquals(9,closes.get());assertEquals(8,opens.get());
+        failFactory.set(false);
+        try(var lease=workerResolver.resolve(instruction)){
+            var call=new StorageProvider.Call(Duration.ofSeconds(5));
+            assertThrows(StorageProvider.StorageFailure.class,()->lease.provider().put(instruction.locator(),new java.io.ByteArrayInputStream(older),5,call));
+            assertThrows(StorageProvider.StorageFailure.class,()->lease.provider().delete(instruction.locator(),call));
+            assertThrows(StorageProvider.StorageFailure.class,()->lease.provider().list(placement.id(),placement.prefix(),null,1,call));
+        }
+        downloads(CLOCK).acknowledge(instruction);
+        assertEquals(10,closes.get());assertEquals(9,opens.get());assertEquals(opens.get(),adapterCloses.get());
+        revoked.add(oldRef);
+        var oldDownload=downloads(CLOCK).issue("user",TENANT,new FileId(old.file().fileId()),old.version(),null).value();
+        assertThrows(TransferFailure.class,()->gateway.download("user",oldDownload.handle(),new java.io.ByteArrayOutputStream()));
+        assertEquals(oldRef,requested.getLast());assertEquals(9,opens.get(),"revocation must not fall back");
+        var current=downloads(CLOCK).issue("user",TENANT,new FileId(fresh.file().fileId()),fresh.version(),null).value();
+        var output=new java.io.ByteArrayOutputStream();gateway.download("user",current.handle(),output);
+        assertArrayEquals(newer,output.toByteArray());assertEquals(newRef,requested.getLast());
+        assertEquals(10,opens.get());assertEquals(10,adapterCloses.get());assertEquals(11,closes.get());
+        assertEquals(2,scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE' AND backend_id=?",id.value()));
+    }
+
     private static String objectKeyUnchecked() {
         try { return objectKey(); } catch(SQLException ex) { throw new IllegalStateException("fixture lookup failed"); }
     }
