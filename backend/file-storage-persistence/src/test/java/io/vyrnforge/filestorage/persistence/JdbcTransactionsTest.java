@@ -61,7 +61,7 @@ class JdbcTransactionsTest {
         sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability) VALUES ('legacy_fixture',?,'legacy-actor','CAPTURE')", A.value());
         StorageMigrations.migrate(dataSource);
         StorageMigrations.migrate(dataSource);
-        assertEquals(1, scalar("SELECT count(*) FROM fs.accounting_manifest_principal WHERE login_role='legacy_fixture' AND execution_mode='REHEARSAL' AND actor='legacy-actor' AND capability='CAPTURE'"));
+        assertEquals(1, scalar("SELECT count(*) FROM fs.accounting_manifest_principal WHERE login_role='legacy_fixture' AND execution_mode='DISABLED' AND actor='legacy-actor' AND capability='CAPTURE'"));
         assertEquals(0, count("accounting_manifest_intent"));
         sql("DELETE FROM fs.accounting_manifest_principal WHERE login_role='legacy_fixture'");
         assertTrue(StorageMigrations.ready(dataSource));

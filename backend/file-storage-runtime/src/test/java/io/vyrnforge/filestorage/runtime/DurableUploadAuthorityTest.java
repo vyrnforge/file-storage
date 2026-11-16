@@ -2119,7 +2119,7 @@ class DurableUploadAuthorityTest {
             sql("GRANT EXECUTE ON FUNCTION fs.capture_accounting_manifest(uuid,uuid,bigint) TO a9_capture");
             sql("GRANT EXECUTE ON FUNCTION fs.review_accounting_manifest(uuid,uuid,bigint,text) TO a9_review");
             sql("GRANT EXECUTE ON FUNCTION fs.read_accounting_manifest(uuid,uuid) TO a9_capture,a9_review");
-            sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability) VALUES ('a9_capture',?,'capture-actor','CAPTURE'),('a9_review',?,'review-actor','REVIEW')",TENANT.value(),TENANT.value());
+            sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability,execution_mode) VALUES ('a9_capture',?,'capture-actor','CAPTURE','REHEARSAL'),('a9_review',?,'review-actor','REVIEW','REHEARSAL')",TENANT.value(),TENANT.value());
             var capture=manifestLogin("a9_capture");var review=manifestLogin("a9_review");
             String create="SELECT fs.capture_accounting_manifest(?,?,?)";
             String approve="SELECT fs.review_accounting_manifest(?,?,?,?)";
@@ -2412,6 +2412,9 @@ class DurableUploadAuthorityTest {
             assertEquals(0,scalar("SELECT count(*) FROM fs.accounting_manifest_review"));
             assertEquals(id,review.review(TENANT,id,revision,JdbcAccountingManifest.Disposition.ACKNOWLEDGED,corr));
             assertEquals(2,scalar("SELECT count(*) FROM fs.accounting_manifest_intent"));
+            sql("UPDATE fs.accounting_manifest_principal SET execution_mode='DISABLED' WHERE login_role='a11_capture'");
+            assertEquals("42501",assertThrows(SQLException.class,()->manifestCommand(captureLogin,"SELECT fs.capture_accounting_manifest(?,?,?)",TENANT.value(),id,revision)).getSQLState());
+            assertEquals(Code.DENIED,assertThrows(Failure.class,()->capture.capture(TENANT,id,revision,corr)).code());
             sql("UPDATE fs.accounting_manifest_principal SET execution_mode='REHEARSAL' WHERE login_role='a11_capture'");
             UUID raw=UUID.randomUUID();
             assertEquals(Code.DENIED,assertThrows(Failure.class,()->capture.capture(TENANT,raw,revision,corr)).code());

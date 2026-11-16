@@ -1,6 +1,90 @@
--- FS-310A11: preserve legacy mappings as rehearsal-only; explicit owner provisioning.
+-- FS-310A11: preserve legacy mappings disabled; explicit owner provisioning.
 ALTER TABLE fs.accounting_manifest_principal ADD COLUMN execution_mode text NOT NULL
- DEFAULT 'REHEARSAL' CHECK(execution_mode IN ('REHEARSAL','AUDITED'));
+ DEFAULT 'DISABLED' CHECK(execution_mode IN ('DISABLED','REHEARSAL','AUDITED'));
+
+-- Existing mappings fail closed until the owner explicitly chooses a mode.
+CREATE OR REPLACE FUNCTION fs.capture_accounting_manifest(t uuid,mid uuid,rev bigint) RETURNS uuid
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET lock_timeout='2s' SET timezone='UTC' AS $
+DECLARE principal fs.accounting_manifest_principal%ROWTYPE; existing fs.accounting_manifest%ROWTYPE;
+ n integer; ttl bigint; captured timestamptz; source_epoch bigint;
+BEGIN
+ SELECT * INTO principal FROM fs.accounting_manifest_principal
+ WHERE login_role=session_user AND tenant_id=t AND capability='CAPTURE' AND execution_mode IN ('REHEARSAL','AUDITED') FOR SHARE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'manifest access denied' USING ERRCODE='42501'; END IF;
+ IF mid IS NULL OR rev IS NULL THEN RAISE EXCEPTION 'manifest identity required' USING ERRCODE='PQU01'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(mid::text,3109));
+ PERFORM fs.lock_accounting_sources();
+ SELECT * INTO existing FROM fs.accounting_manifest WHERE manifest_id=mid;
+ IF FOUND THEN
+  IF existing.tenant_id=t AND existing.policy_revision=rev AND existing.requester=principal.actor THEN RETURN mid; END IF;
+  RAISE EXCEPTION 'manifest conflict' USING ERRCODE='PQU01';
+ END IF;
+ ttl:=fs.accounting_policy_ttl(t,rev);
+ SELECT count(*) INTO n FROM (SELECT 1 FROM fs.upload_session WHERE tenant_id=t LIMIT 1001) s;
+ IF n>1000 OR (SELECT count(*) FROM (SELECT 1 FROM fs.file_version WHERE tenant_id=t LIMIT 1001) v)>1000
+ THEN RAISE EXCEPTION 'manifest exceeds rehearsal bound' USING ERRCODE='PQU01'; END IF;
+ INSERT INTO fs.accounting_source_epoch(tenant_id) VALUES(t) ON CONFLICT(tenant_id) DO NOTHING;
+ SELECT epoch INTO STRICT source_epoch FROM fs.accounting_source_epoch WHERE tenant_id=t;
+ captured:=clock_timestamp();
+ INSERT INTO fs.accounting_manifest VALUES(mid,t,rev,source_epoch,principal.actor,captured,
+  captured+make_interval(secs=>ttl::double precision),n,fs.accounting_untracked(t));
+ INSERT INTO fs.accounting_manifest_entry
+ SELECT t,mid,rev,s.session_id,s.evidence FROM fs.accounting_source_entries(t) s;
+ RETURN mid;
+END; $;
+
+CREATE OR REPLACE FUNCTION fs.review_accounting_manifest(t uuid,mid uuid,rev bigint,decision text) RETURNS uuid
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET lock_timeout='2s' SET timezone='UTC' AS $
+DECLARE principal fs.accounting_manifest_principal%ROWTYPE; m fs.accounting_manifest%ROWTYPE;
+ prior fs.accounting_manifest_review%ROWTYPE;
+BEGIN
+ SELECT * INTO principal FROM fs.accounting_manifest_principal
+ WHERE login_role=session_user AND tenant_id=t AND capability='REVIEW' AND execution_mode IN ('REHEARSAL','AUDITED') FOR SHARE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'manifest access denied' USING ERRCODE='42501'; END IF;
+ IF mid IS NULL OR rev IS NULL THEN RAISE EXCEPTION 'manifest identity required' USING ERRCODE='PQU01'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(mid::text,3109));
+ PERFORM fs.lock_accounting_sources();
+ SELECT * INTO m FROM fs.accounting_manifest WHERE tenant_id=t AND manifest_id=mid AND policy_revision=rev;
+ IF NOT FOUND OR m.requester=principal.actor OR decision IS NULL OR decision NOT IN ('ACKNOWLEDGED','NEEDS_INVESTIGATION')
+ THEN RAISE EXCEPTION 'invalid independent manifest review' USING ERRCODE='PQU01'; END IF;
+ SELECT * INTO prior FROM fs.accounting_manifest_review WHERE manifest_id=mid;
+ IF FOUND THEN
+  IF prior.reviewer=principal.actor AND prior.disposition=decision THEN RETURN mid; END IF;
+  RAISE EXCEPTION 'manifest review conflict' USING ERRCODE='PQU01';
+ END IF;
+ PERFORM fs.accounting_policy_ttl(t,rev);
+ IF m.valid_until<=clock_timestamp() OR m.source_epoch IS DISTINCT FROM
+ (SELECT epoch FROM fs.accounting_source_epoch WHERE tenant_id=t)
+ OR m.untracked_versions IS DISTINCT FROM fs.accounting_untracked(t)
+ OR EXISTS(
+  (SELECT s.session_id,s.evidence FROM fs.accounting_source_entries(t) s
+   EXCEPT SELECT e.session_id,e.evidence FROM fs.accounting_manifest_entry e WHERE e.manifest_id=mid)
+  UNION ALL
+  (SELECT e.session_id,e.evidence FROM fs.accounting_manifest_entry e WHERE e.manifest_id=mid
+   EXCEPT SELECT s.session_id,s.evidence FROM fs.accounting_source_entries(t) s)
+ ) THEN RAISE EXCEPTION 'stale accounting manifest' USING ERRCODE='PQU01'; END IF;
+ INSERT INTO fs.accounting_manifest_review VALUES(t,mid,rev,principal.actor,clock_timestamp(),decision);
+ RETURN mid;
+END; $;
+
+CREATE OR REPLACE FUNCTION fs.read_accounting_manifest(t uuid,mid uuid) RETURNS jsonb
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET timezone='UTC' AS $
+DECLARE result jsonb;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM fs.accounting_manifest_principal
+  WHERE login_role=session_user AND tenant_id=t AND execution_mode IN ('REHEARSAL','AUDITED')) THEN
+  RAISE EXCEPTION 'manifest access denied' USING ERRCODE='42501';
+ END IF;
+ SELECT jsonb_build_object('manifest',to_jsonb(m),'entries',
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('sessionId',e.session_id,'evidence',e.evidence) ORDER BY e.session_id)
+    FROM fs.accounting_manifest_entry e WHERE e.manifest_id=m.manifest_id),'[]'::jsonb),
+  'review',(SELECT to_jsonb(r) FROM fs.accounting_manifest_review r WHERE r.manifest_id=m.manifest_id),
+  'current',m.valid_until>clock_timestamp() AND m.source_epoch=(SELECT epoch FROM fs.accounting_source_epoch x WHERE x.tenant_id=t))
+ INTO result FROM fs.accounting_manifest m WHERE m.tenant_id=t AND m.manifest_id=mid;
+ IF result IS NULL THEN RAISE EXCEPTION 'manifest not found' USING ERRCODE='PQU01'; END IF;
+ RETURN result;
+END; $;
+
 CREATE OR REPLACE FUNCTION fs.audited_accounting_manifest(t uuid,mid uuid,rev bigint,cmd text,decision text,
  aid uuid,eid uuid,cid uuid) RETURNS TABLE(actor_id text,created boolean)
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,fs,pg_temp SET lock_timeout='2s' AS $a10$
