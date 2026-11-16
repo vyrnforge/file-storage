@@ -1341,6 +1341,137 @@ class DurableUploadAuthorityTest {
         assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='CLEANUP_UPLOAD'"));
     }
 
+    @Test void purgePreparationIsAuthorizedPinnedAndNeverExecutable() throws Exception {
+        available();
+        for(String action:List.of("DELETE_FILE","RESTORE_FILE","DOWNLOAD_TRANSFER"))
+            grant("fixture-user","asset",action,"OWNED_FILE",null);
+        var d=downloads(CLOCK);var handle=d.issue("user",TENANT,fileId(),view.version(),null).value();
+        d.claim("user",handle.handle(),TransferInstruction.Action.DOWNLOAD);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        var request=new PurgeRequest(fileId(),view.version(),1,1);
+        assertThrows(RuntimeException.class,()->secured.preparePurge("user",TENANT,null,request));
+        grant("fixture-user","asset","PREPARE_PURGE","OWNED_FILE",null);
+        assertEquals(Code.CONFLICT,assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request)).code());
+        seedPurgeEvidence(1,1,"UNKNOWN",NOW);
+        assertEquals(Code.CONFLICT,assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request)).code());
+        sql("UPDATE fs.file_retention_evidence SET hold_state='HELD'");
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        sql("UPDATE fs.file_retention_evidence SET hold_state='CLEAR',retain_until=NULL");
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        sql("UPDATE fs.file_retention_evidence SET retain_until=?",NOW.plusSeconds(1).atOffset(ZoneOffset.UTC));
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        sql("UPDATE fs.file_retention_evidence SET retain_until=?",NOW.atOffset(ZoneOffset.UTC));
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,2)));
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),new VersionId(UUID.randomUUID()),1,1)));
+        assertThrows(RuntimeException.class,()->secured.preparePurge("other",TENANT,null,request));
+        assertThrows(RuntimeException.class,()->secured.preparePurge("other-app",TENANT,null,request));
+        assertThrows(RuntimeException.class,()->secured.preparePurge("other-tenant",TENANT,null,request));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.purge_preparation"));
+        var external=RuntimeComposition.secured(source,new Trust(ISS,AUD),proof->new VerifiedAccess(ISS,"user",Set.of(AUD),TokenKind.ACCESS,NOW,NOW.plusSeconds(300),NOW),
+            (issuer,subject,audience)->Optional.of(new Binding(USER,TENANT,"asset",Set.of(Action.PREPARE_PURGE))),
+            (actor,tenant)->true,(tenant,module)->new ModuleEntitlement(TENANT.value(),"file-storage",true,NOW),
+            caller->List.of(new Grant(TENANT,USER.actorId(),"asset",Action.PREPARE_PURGE,"attachment",GrantScope.EXACT_FILE,
+                fileId(),NOW,NOW.plusSeconds(300),false)),CLOCK,Duration.ofMinutes(5),Duration.ofSeconds(30));
+        sql("UPDATE fs.file_grant SET revoked=true WHERE action='PREPARE_PURGE'");
+        assertEquals(Code.NOT_FOUND,assertThrows(Failure.class,()->external.preparePurge("user",TENANT,null,request)).code());
+        sql("UPDATE fs.file_grant SET revoked=false WHERE action='PREPARE_PURGE'");
+        var prepared=external.preparePurge("user",TENANT,null,request).value();
+        assertEquals(PurgeDisposition.REVIEW_REQUIRED,prepared.disposition());
+        assertEquals(view.file(),prepared.file());assertEquals(view.version(),prepared.version());
+        assertEquals(prepared,secured.preparePurge("user",TENANT,null,request).value());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_preparation WHERE prior_download_claim AND reader_safety='UNVERIFIED' AND disposition='REVIEW_REQUIRED'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_preparation p JOIN fs.file_version v ON p.version_id=v.version_id WHERE p.location_id=v.location_id"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.file.purge-prepared'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.file.purge-prepared'"));
+        grant("fixture-other","asset","PREPARE_PURGE","EXACT_FILE",fileId().value());
+        assertThrows(Failure.class,()->secured.preparePurge("other",TENANT,null,request));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.purge_preparation SET reader_safety='VERIFIED'"));
+        assertThrows(SQLException.class,()->sql("DELETE FROM fs.purge_preparation"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.file SET state='PURGE_PENDING'"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.file SET state='PURGED'"));
+        var ops=new JdbcOperations(source,CLOCK,Duration.ofSeconds(10),Duration.ZERO,4);
+        var work=new JdbcOperations.Request(TENANT,fileId(),view.version(),location,JdbcOperations.Kind.PURGE_VERSION,
+            prepared.operationId().toString(),CorrelationContext.create().correlationId(),1);
+        try(var c=source.getConnection()){
+            c.setAutoCommit(false);
+            assertEquals(Code.DENIED,assertThrows(Failure.class,()->ops.enqueue(c,work)).code());
+            c.rollback();
+        }
+        assertThrows(SQLException.class,()->sql("""
+            INSERT INTO fs.storage_operation(operation_id,tenant_id,file_id,version_id,location_id,kind,operation_key,correlation_id,max_attempts,available_at,created_at)
+            VALUES (?,?,?,?,?,'PURGE_VERSION',?,?,1,?,?)
+            """,UUID.randomUUID(),TENANT.value(),fileId().value(),view.version().value(),location.value(),
+            prepared.operationId().toString(),CorrelationContext.create().correlationId(),NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC)));
+        assertTrue(ops.claim(JdbcOperations.Kind.PURGE_VERSION,1).claims().isEmpty());
+        sql("UPDATE fs.file_retention_evidence SET hold_state='HELD'");
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_preparation"));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,1);
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,2);
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        var next=new PurgeRequest(fileId(),view.version(),3,1);
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,next));
+        seedPurgeEvidence(3,1,"CLEAR",NOW);
+        var newPreparation=secured.preparePurge("user",TENANT,null,next).value();
+        assertNotEquals(prepared.operationId(),newPreparation.operationId());
+        assertEquals(2,scalar("SELECT count(*) FROM fs.purge_preparation"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'"));
+    }
+
+    @Test void purgePreparationConcurrentRetryAndIntentRollback() throws Exception {
+        available();
+        grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","RESTORE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","PREPARE_PURGE","OWNED_FILE",null);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        seedPurgeEvidence(1,1,"CLEAR",NOW);
+        var request=new PurgeRequest(fileId(),view.version(),1,1);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_purge_preparation CHECK (event_type <> 'file-storage.file.purge-prepared') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->secured.preparePurge("user",TENANT,null,request));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.purge_preparation"));
+            assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.file.purge-prepared'"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_purge_preparation");}
+        var start=new CountDownLatch(1);
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+            Callable<PurgePreparation> prepare=()->{start.await();return secured(CLOCK).preparePurge("user",TENANT,null,request).value();};
+            var a=executor.submit(prepare);var b=executor.submit(prepare);start.countDown();
+            assertEquals(a.get(10,TimeUnit.SECONDS),b.get(10,TimeUnit.SECONDS));
+        }
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_preparation"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.file.purge-prepared'"));
+        assertThrows(Failure.class,()->secured(Clock.fixed(NOW.plusSeconds(60),ZoneOffset.UTC)).preparePurge("user",TENANT,null,request));
+        sql("UPDATE fs.file_retention_evidence SET policy_revision=2");
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,2)));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_preparation"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.purge_preparation WHERE prior_download_claim"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_preparation WHERE reader_safety='UNVERIFIED'"));
+        sql("UPDATE fs.file_retention_evidence SET policy_revision=1");
+        // Both operations serialize on the file row; restoration never depends on preparation.
+        var race=new CountDownLatch(1);
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+            var prepare=executor.submit(()->{race.await();try{return secured.preparePurge("user",TENANT,null,request).value();}
+                catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());return null;}});
+            var restore=executor.submit(()->{race.await();return secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,1).value();});
+            race.countDown();prepare.get(10,TimeUnit.SECONDS);
+            assertEquals(FileState.ACTIVE,restore.get(10,TimeUnit.SECONDS).fileState());
+        }
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_preparation"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+    }
+
+    private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
+        sql("""
+            INSERT INTO fs.file_retention_evidence(tenant_id,file_id,lifecycle_revision,policy_revision,hold_state,retain_until,observed_at,valid_until)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,TENANT.value(),fileId().value(),generation,policy,hold,retainUntil.atOffset(ZoneOffset.UTC),
+            NOW.minusSeconds(1).atOffset(ZoneOffset.UTC),NOW.plusSeconds(60).atOffset(ZoneOffset.UTC));
+    }
+
     private static HttpRequest lifecycleRequest(String uri){
         return HttpRequest.newBuilder(URI.create(uri)).header("Authorization","Bearer user")
             .header("X-Tenant-Id",TENANT.value().toString()).POST(HttpRequest.BodyPublishers.noBody()).build();

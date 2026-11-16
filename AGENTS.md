@@ -51,3 +51,5 @@ FS-210A: internal trusted commands only; #16 actual secret manager/identity sele
 2026-11-15: PR #80 accepted/merged 02814b4 (180 tests, CI 43709875026). Owner authorized #36 FS-310A1 reversible logical lifecycle only; #35 deleted-file denial remains in review. No physical purge, quota, retention policy or deployment.
 
 2026-11-15: PR #81 accepted/merged 660f14b (183 tests, CI 43710854973). Owner authorized FS-310A2 #36 safety/recovery and fail-closed retention assessment; no actual policy writer, physical purge, quota or deployment.
+
+2026-11-16: PR #82 accepted/merged a1fd681 (185 tests, CI 43712395352). Owner authorized FS-310A3 #36 purge preparation only; immutable review request and exact evidence/pin, no executable purge, provider deletion, production policy/quota or deployment.

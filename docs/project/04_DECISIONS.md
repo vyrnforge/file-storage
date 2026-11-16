@@ -108,3 +108,7 @@ Implementation choice: monotonic lifecycle CAS, explicit DELETE_FILE/RESTORE_FIL
 
 2026-11-15: PR #81 accepted/squash merged `660f14b84c3a6f2bbf15b7d2157189cf5d865fb4`; exact-head CI 43710854973 passed 183 tests. Owner authorized #36 FS-310A2 independent safety/recovery and conservative retention assessment only. V12 candidate; [contract](../architecture/31_LIFECYCLE_SAFETY.md). No production policy, physical purge, quota or deployment.
 Engineering choice: explicit LIST_DELETED_METADATA and distinct recovery endpoint; generation-scoped optional retention evidence, unknown/expired/held blocked, even elapsed retention returns REVIEW_REQUIRED. No policy writer, purge authority or production policy.
+
+
+2026-11-16 (Asia/Jakarta): PR #82 accepted/squash merged `a1fd681bd0dab49f13f14418082b9d365a2a86ee`; exact-head CI 43712395352 passed 185 tests. Owner authorized #36 FS-310A3 durable purge preparation only; V13 candidate, [contract](../architecture/32_PURGE_PREPARATION.md). Actual provider deletion, production retention/hold/quota policy and deployment remain gated.
+Engineering choice: internal PREPARE_PURGE grant, immutable per-deletion-generation review ledger; exact pin and retention evidence snapshot, all reader safety UNVERIFIED, V13 executable PURGE_VERSION disabled at database and enqueue boundary. One request per generation; evidence change invalidates replay; no reapproval writer or worker.
