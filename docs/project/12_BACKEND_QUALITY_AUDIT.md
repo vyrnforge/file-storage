@@ -53,3 +53,8 @@ See [individual analyzer triage, actual XML metrics and prioritized work breakdo
 ## Owner-approved Q16 merge
 
 PR #109 squash merged `e16f016c20e3338d50b3e78b15512b0eab549a87` after explicit owner approval. Exact-head CI 43897905525 and audit 43897905425 passed 226 tests, zero failures/errors/skips; audit artifact 14241095966 independently verified. 67 unchanged SpotBugs findings. Q16 accepted at isolated software scope; Q15 authorized next; #65 remains open. No release/deployment or frontend resumption.
+
+
+## Q15 owner acceptance
+
+PR #110 squash merged `dd3feae440ee601259bd77af983cfaeedb842cd0` after explicit owner approval; 229 tests, CI 43913331781 and audit 43913331656 passed, artifact 14248503712 verified, 67 findings with zero new substantive findings. AQ-03 authorized next; Q10/Q11/Q17 evidence-first, no full audit acceptance or frontend resumption.

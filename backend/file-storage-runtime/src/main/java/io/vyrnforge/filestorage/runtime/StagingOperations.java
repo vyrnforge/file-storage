@@ -43,8 +43,8 @@ public final class StagingOperations {
         var scans=new JdbcUploadScan(workerTransfers,operations,config.worker(),config.attempts());
         var work=new JdbcCompletionWork(workerTransfers,operations,scans,config.attempts());
         commands=new CompletionCommands(secured,transfers,work);
-        var transferResolver=resolver(new JdbcRegistry(roles.source(RuntimeDatabaseRoles.Role.TRANSFER),clock),true);
-        var workerResolver=resolver(new JdbcRegistry(workerSource,clock),false);
+        var transferResolver=resolver(new JdbcRegistry(roles.source(RuntimeDatabaseRoles.Role.TRANSFER),clock),config,true);
+        var workerResolver=resolver(new JdbcRegistry(workerSource,clock),config,false);
         gateway=new PrivateTransferGateway(DurableDownloadAuthority.combine(upload,downloads),transferResolver,config.limits(),clock);
         verify=new UploadVerificationWorker(work,workerResolver,config.limits(),clock);
         scan=new UploadScanWorker(scans,workerResolver,config.scanner(),config.limits(),clock);
@@ -76,24 +76,30 @@ public final class StagingOperations {
     private static void attempt(Runnable work,String duty){
         try{work.run();}catch(RuntimeException ex){LOG.warn("Staging {} tick failed; durable recovery applies",duty);}
     }
-    private TransferProviderResolver resolver(JdbcRegistry registry,boolean writable){
+    static TransferProviderResolver resolver(JdbcRegistry registry,StagingRuntimeDependencies config,boolean writable){
         return instruction->{
-            var pin=config.locations().get(instruction.locator().location());
-            if(pin==null||!pin.location().backend().equals(instruction.backend())||!config.readiness().ready())
+            var key=new StagingRuntimeDependencies.PinKey(instruction.backend(),instruction.revision(),instruction.locator().location());
+            var pin=config.locations().get(key);
+            if(pin==null||!config.readiness().ready())
                 throw new TransferFailure(TransferFailure.Code.DENIED);
             var resolver=new RegistryTransferProviderResolver<AutoCloseable>(registry,ref->{
                 if(!pin.credential().equals(ref))throw new TransferFailure(TransferFailure.Code.DENIED);
                 return config.credentials().resolve(ref);
             },Set.of(pin.target()),Map.of(pin.target().provider(),(target,location,revision,credential)->{
-                if(!pin.location().equals(location))throw new TransferFailure(TransferFailure.Code.DENIED);
+                if(!pin.location().equals(location)||revision!=key.revision())throw new TransferFailure(TransferFailure.Code.DENIED);
                 var lease=config.factories().get(target.provider()).open(target,location,revision,credential);
                 return new TransferProviderResolver.Lease(){
                     @Override public StorageProvider provider(){return restricted(lease.provider(),instruction.locator(),writable&&instruction.action()==TransferInstruction.Action.UPLOAD);}
                     @Override public void close(){lease.close();}
                 };
-            }));
+            }), (target,location,reference)->pin.target().equals(target)&&pin.location().equals(location)
+                    &&pin.credential().equals(reference)&&within(location.prefix(),instruction.locator().objectKey()));
             return resolver.resolve(instruction);
         };
+    }
+    private static boolean within(String prefix,String key){
+        String root=prefix.endsWith("/")?prefix:prefix+"/";
+        return key.startsWith(root)&&key.length()>root.length();
     }
     private static StorageProvider restricted(StorageProvider delegate,Locator pin,boolean writable){
         return new StorageProvider(){
