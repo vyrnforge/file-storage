@@ -34,3 +34,20 @@ jobs:
         run: make ci
       - name: Inventory staging runtime package
         run: python3 scripts/staging-build-evidence.py backend/file-storage-runtime/target/file-storage-runtime-0.0.1-SNAPSHOT.jar backend/file-storage-runtime/target/staging-inventory.json
+      - name: Offline Maven vulnerability review evidence
+        run: python3 scripts/staging-osv-scan.py backend/file-storage-runtime/target
+      - name: Bind CycloneDX and packaged runtime review evidence
+        run: python3 scripts/staging-release-evidence.py backend/file-storage-runtime/target
+      - name: Retain candidate evidence only
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: staging-release-evidence
+          path: |
+            backend/file-storage-runtime/target/bom.json
+            backend/file-storage-runtime/target/staging-inventory.json
+            backend/file-storage-runtime/target/staging-provenance.json
+            backend/file-storage-runtime/target/staging-release-review.json
+            backend/file-storage-runtime/target/staging-osv.json
+            backend/file-storage-runtime/target/staging-osv-meta.json
+          if-no-files-found: error
+          retention-days: 14
