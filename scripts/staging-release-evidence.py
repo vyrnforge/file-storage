@@ -27,6 +27,19 @@ inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
 bom = json.loads(bom_path.read_text(encoding="utf-8"))
 if inventory["sha256"] != digest(jar) or bom.get("bomFormat") != "CycloneDX" or bom.get("specVersion") != "1.6":
     raise SystemExit("release evidence mismatch")
+scan_meta = json.loads((target / "staging-osv-meta.json").read_text(encoding="utf-8"))
+scan_path = target / "staging-osv.json"
+if scan_meta["bomSha256"] != digest(bom_path) or scan_meta["reportSha256"] != digest(scan_path):
+    raise SystemExit("vulnerability evidence mismatch")
+scan = json.loads(scan_path.read_text(encoding="utf-8"))
+scanned = {}
+if scan_meta["status"] != "UNAVAILABLE":
+    for result in scan.get("results", []):
+        for row in result.get("packages", []):
+            p = row["package"]
+            if p.get("ecosystem") == "Maven":
+                key = (p.get("name"), p.get("version"))
+                scanned.setdefault(key, set()).update(v["id"] for v in row.get("vulnerabilities", []) if v.get("id"))
 components = bom.get("components", [])
 if not components or not bom.get("dependencies"):
     raise SystemExit("empty CycloneDX dependency graph")
@@ -46,8 +59,11 @@ with zipfile.ZipFile(jar) as z:
             raise SystemExit("packaged library checksum mismatch")
         matches = by_file.get(name, [])
         component = matches[0] if len(matches) == 1 else {}
+        key = (f"{component.get('group')}:{component.get('name')}", component.get("version"))
         entries.append({**lib, "bomRef": component.get("bom-ref"), "purl": component.get("purl"),
                         "licenseMetadata": component.get("licenses", []),
+                        "vulnerabilityScanCoverage": "MATCHED" if key in scanned else "NOT_MATCHED",
+                        "advisoryIds": sorted(scanned.get(key, [])),
                         "vulnerabilityDisposition": "UNREVIEWED", "licenseDisposition": "UNREVIEWED"})
 unmapped = [e["path"] for e in entries if not e["bomRef"]]
 used = {e["bomRef"] for e in entries if e["bomRef"]}
@@ -61,13 +77,17 @@ provenance = {"format": "file-storage-build-evidence-v1", "attestation": "UNSIGN
               "pullRequestHead": pr.get("head", {}).get("sha"), "pullRequestBase": pr.get("base", {}).get("sha"),
               "workflowRun": os.environ.get("GITHUB_RUN_ID"), "workflowAttempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
               "artifact": jar.name, "artifactSha256": digest(jar), "inventorySha256": digest(inventory_path),
-              "cycloneDxSha256": digest(bom_path), "buildCommand": "make ci"}
+              "cycloneDxSha256": digest(bom_path), "osvEvidenceSha256": digest(target / "staging-osv-meta.json"), "buildCommand": "make ci"}
 write("staging-provenance.json", provenance)
 write("staging-release-review.json", {"format": "file-storage-release-review-v1",
     "decision": "NO-GO", "artifactSha256": digest(jar), "cycloneDxSha256": digest(bom_path),
     "packageLibraryCount": len(entries), "bomComponentCount": len(components),
     "unmappedPackagedLibraries": unmapped, "unmappedBomComponents": extra,
-    "vulnerabilityScan": "NOT_RUN", "licenseReview": "UNREVIEWED", "signature": "NOT_SIGNED",
+    "vulnerabilityScan": scan_meta["status"], "vulnerabilityEvidence": scan_meta,
+    "scanMatchedPackagedLibraries": sum(e["vulnerabilityScanCoverage"] == "MATCHED" for e in entries),
+    "librariesWithoutLicenseMetadata": [e["path"] for e in entries if not e["licenseMetadata"]],
+    "licenseReview": "UNREVIEWED", "signature": "NOT_SIGNED",
     "libraries": entries})
 print(f"Release evidence: {len(entries)} packaged libraries, {len(components)} BOM components; {len(unmapped)} unmapped libraries, {len(extra)} unmatched BOM components; NO-GO pending review")
+print(f"Scan matched {sum(e['vulnerabilityScanCoverage'] == 'MATCHED' for e in entries)} packaged libraries; {sum(not e['licenseMetadata'] for e in entries)} libraries lack license metadata")
 print(f"CycloneDX SHA256 {digest(bom_path)}; checkout {provenance['checkoutCommit']}; provenance unsigned")

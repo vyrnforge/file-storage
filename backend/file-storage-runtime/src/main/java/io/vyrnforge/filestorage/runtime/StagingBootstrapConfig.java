@@ -91,7 +91,7 @@ public final class StagingBootstrapConfig {
         var p=new Properties(){
             @Override public synchronized Object put(Object k,Object v){if(containsKey(k))throw invalid();return super.put(k,v);}
         };
-        try(var reader=new InputStreamReader(new ByteArrayInputStream(bytes),StandardCharsets.UTF_8)){p.load(reader);}
+        try(var reader=new InputStreamReader(new ByteArrayInputStream(bytes),StandardCharsets.UTF_8.newDecoder())){p.load(reader);}
         return p;
     }
     static String take(Properties p,String key){

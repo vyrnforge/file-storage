@@ -5,9 +5,8 @@
 BEGIN;
 DO $a16$
 BEGIN
- IF current_database() <> 'fs_staging' OR NOT EXISTS (
-   SELECT 1 FROM fs.flyway_schema_history WHERE version='23' AND success
- ) THEN RAISE EXCEPTION 'wrong staging database or migration state'; END IF;
+ IF current_database() <> 'fs_staging' OR (SELECT version FROM fs.flyway_schema_history WHERE version IS NOT NULL AND success
+       ORDER BY installed_rank DESC LIMIT 1) IS DISTINCT FROM '23' THEN RAISE EXCEPTION 'wrong staging database or migration state'; END IF;
 END;
 $a16$;
 
