@@ -31,7 +31,7 @@ BEGIN
  IF NEW.expected_active<>COALESCE((SELECT max(revision) FROM fs.isolated_policy_activation WHERE tenant_id=NEW.tenant_id),0)
     OR NEW.revision IS DISTINCT FROM (SELECT max(revision) FROM fs.retention_policy_draft WHERE tenant_id=NEW.tenant_id)
     OR NOT EXISTS(SELECT 1 FROM fs.retention_policy_draft d WHERE d.tenant_id=NEW.tenant_id AND d.revision=NEW.revision
-      AND d.quota_mode='CHARGE_UNTIL_VERIFIED_PURGE' AND d.drafted_at<=NEW.drafted_at)
+      AND d.quota_mode='CHARGE_UNTIL_VERIFIED_PURGE' AND d.created_at<=NEW.drafted_at)
  THEN RAISE EXCEPTION 'stale quota policy draft' USING ERRCODE='PQU01'; END IF;
  RETURN NEW;
 END; $$;
