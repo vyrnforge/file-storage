@@ -82,6 +82,8 @@ public final class JdbcOperations {
     public UUID enqueue(Connection connection, Request request) throws SQLException {
         Objects.requireNonNull(connection);
         Objects.requireNonNull(request);
+        // Reserved kind must not become executable before a separately approved handler and migration.
+        if (request.kind()==Kind.PURGE_VERSION) throw new Failure(Code.DENIED);
         if (connection.getAutoCommit()) {
             throw new IllegalArgumentException("transaction required");
         }

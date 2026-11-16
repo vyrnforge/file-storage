@@ -116,3 +116,6 @@ Owner approved DEC-FS012 on 2026-11-15: independent transfer gateway and separat
 
 
 2026-11-15: PR #81 accepted/squash merged `660f14b84c3a6f2bbf15b7d2157189cf5d865fb4`; exact-head CI 43710854973 passed 183 tests. Owner authorized #36 FS-310A2 independent safety/recovery and conservative retention assessment only. V12 candidate; [contract](../architecture/31_LIFECYCLE_SAFETY.md). No production policy, physical purge, quota or deployment.
+
+
+2026-11-16 (Asia/Jakarta): PR #82 accepted/squash merged `a1fd681bd0dab49f13f14418082b9d365a2a86ee`; exact-head CI 43712395352 passed 185 tests. Owner authorized #36 FS-310A3 durable purge preparation only; V13 candidate, [contract](../architecture/32_PURGE_PREPARATION.md). Actual provider deletion, production retention/hold/quota policy and deployment remain gated.

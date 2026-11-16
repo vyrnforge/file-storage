@@ -94,3 +94,5 @@ PR #79 accepted/merged b8450b3 (177 tests). [Metadata catalog and usage](docs/ar
 PR #80 accepted/merged 02814b4 (180 tests). [FS-310A1 reversible logical lifecycle](docs/architecture/30_LOGICAL_FILE_LIFECYCLE.md) — #36 V11 candidate in review; physical purge remains gated.
 
 PR #81 accepted/merged 660f14b (183 tests). [FS-310A2 lifecycle safety](docs/architecture/31_LIFECYCLE_SAFETY.md) — V12 recovery catalog and retention assessment in review; physical purge disabled.
+
+PR #82 accepted/merged a1fd681 (185 tests). [FS-310A3 purge preparation](docs/architecture/32_PURGE_PREPARATION.md) — V13 candidate; executable purge disabled.

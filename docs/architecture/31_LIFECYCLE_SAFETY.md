@@ -1,6 +1,6 @@
 # FS-310A2 — Lifecycle safety and recovery
 
-Status: owner-authorized isolated candidate. Baseline PR #81 merged 660f14b, exact-head CI 43710854973 passed 183 tests. #36 and #35. No production migration/deployment.
+Status: accepted/merged PR #82 at a1fd681, 185 tests verified (CI 43712395352). Baseline PR #81 merged 660f14b, exact-head CI 43710854973 passed 183 tests. #36 and #35. No production migration/deployment.
 
 ## Recovery catalog
 
@@ -13,3 +13,5 @@ V12 adds optional internal file_retention_evidence keyed by tenant, logical ID a
 ## Verification scope
 
 PostgreSQL and HTTP recovery catalog, overlap and scope intersection, revocation, pagination, redaction, restored disappearance; retention missing/unknown/held/unresolved/active/expired/stale/new generation and DB purge denial. Extend real MinIO and native OSS loopback combined HTTP upload/download tests with deletion/restore: denied old handle, no provider opening, fresh handle byte equality. Actual cloud staging and live authority remain gated. Exact CI recorded on PR after execution.
+
+The [FS-310A3 review ledger](32_PURGE_PREPARATION.md) builds on this assessment without enabling execution.
