@@ -1738,6 +1738,11 @@ class DurableUploadAuthorityTest {
             io.vyrnforge.filestorage.application.LifecycleGovernance.QuotaMode.CHARGE_UNTIL_VERIFIED_PURGE),CorrelationContext.create());
         g.review(POLICY_REVIEWER,TENANT,rev,CorrelationContext.create());return rev;
     }
+    private void reviewQuotaValues(JdbcIsolatedPolicyQuota q,long expected,long revision,long limit,long ttl){
+        var corr=CorrelationContext.create();
+        q.draftQuota(ADMIN,TENANT,new JdbcIsolatedPolicyQuota.QuotaDraft(expected,revision,limit,ttl),corr);
+        q.reviewQuota(POLICY_REVIEWER,TENANT,revision,corr);
+    }
     @Test void isolatedPolicyActivationAndRetentionObservationAreRevisionFenced() throws Exception {
         available();
         var q=isolatedQuota(CLOCK);var g=policyGovernance(CLOCK);var correlation=CorrelationContext.create();
@@ -1746,10 +1751,12 @@ class DurableUploadAuthorityTest {
         long rev=g.draft(ADMIN,TENANT,draft,correlation);
         assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,correlation));
         g.review(POLICY_REVIEWER,TENANT,rev,correlation);
+        assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,correlation));
+        reviewQuotaValues(q,0,rev,10,60);
         assertThrows(Failure.class,()->q.activate(ADMIN,TENANT,0,rev,10,60,correlation));
         assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,OTHER,0,rev,10,60,correlation));
         assertThrows(Failure.class,()->q.resolve(ADMIN,TENANT,rev));
-        var policy=q.activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,correlation);
+        var policy=q.activateReviewed(POLICY_ACTIVATOR,TENANT,0,rev,correlation);
         assertEquals(policy,q.resolve(ADMIN,TENANT,rev));assertEquals(10,policy.retentionSeconds());
         assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,correlation));
         assertThrows(Failure.class,()->q.observe(ADMIN,TENANT,fileId(),1,rev,correlation));
@@ -1766,7 +1773,8 @@ class DurableUploadAuthorityTest {
         var later=Clock.fixed(NOW.plusSeconds(11),ZoneOffset.UTC);
         var q2=isolatedQuota(later);
         long next=reviewedPolicy(later,1,20);
-        q2.activate(POLICY_ACTIVATOR,TENANT,1,next,10,60,correlation);
+        reviewQuotaValues(q2,1,next,10,60);
+        q2.activateReviewed(POLICY_ACTIVATOR,TENANT,1,next,correlation);
         assertThrows(Failure.class,()->q2.resolve(ADMIN,TENANT,1));
         assertThrows(Failure.class,()->q2.observe(ADMIN,TENANT,fileId(),1,1,correlation));
         policyGovernance(later).assertHold(ADMIN,TENANT,fileId(),"a".repeat(64),correlation);
@@ -1776,14 +1784,16 @@ class DurableUploadAuthorityTest {
         assertEquals(2,scalar("SELECT count(*) FROM fs.isolated_retention_observation"));
         assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,next)));
         long shorter=reviewedPolicy(later,2,5);
-        assertThrows(Failure.class,()->q2.activate(POLICY_ACTIVATOR,TENANT,2,shorter,10,60,correlation));
+        reviewQuotaValues(q2,2,shorter,10,60);
+        assertThrows(Failure.class,()->q2.activateReviewed(POLICY_ACTIVATOR,TENANT,2,shorter,correlation));
         assertEquals(next,q2.resolve(ADMIN,TENANT,next).revision());
         assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
     }
 
     @Test void isolatedQuotaConcurrentReservationAndVerifiedChargeAreAtomic() throws Exception {
         long rev=reviewedPolicy(CLOCK,0,10);var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
-        q.activate(POLICY_ACTIVATOR,TENANT,0,rev,5,60,corr);
+        reviewQuotaValues(q,0,rev,5,60);
+        q.activateReviewed(POLICY_ACTIVATOR,TENANT,0,rev,corr);
         var second=secured.initiate("user",TENANT,null,new Initiate("attachment","second.txt",5,"text/plain","quota-second")).value();
         var start=new CountDownLatch(1);
         try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
@@ -1801,8 +1811,11 @@ class DurableUploadAuthorityTest {
         assertThrows(Failure.class,()->q.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.CHARGED,corr));
         assertThrows(Failure.class,()->q.settle(ADMIN,TENANT,view.session(),JdbcIsolatedPolicyQuota.Status.RELEASED,corr));
         long next=reviewedPolicy(CLOCK,rev,20);
-        assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,rev,next,4,60,corr));
-        q.activate(POLICY_ACTIVATOR,TENANT,rev,next,5,60,corr);
+        reviewQuotaValues(q,rev,next,4,60);
+        assertThrows(Failure.class,()->q.activateReviewed(POLICY_ACTIVATOR,TENANT,rev,next,corr));
+        long replacement=reviewedPolicy(CLOCK,next,20);
+        reviewQuotaValues(q,rev,replacement,5,60);
+        q.activateReviewed(POLICY_ACTIVATOR,TENANT,rev,replacement,corr);
         available();
         sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_quota_settle CHECK (event_type <> 'file-storage.quota.isolated-settled') NOT VALID");
         try{
@@ -1824,7 +1837,8 @@ class DurableUploadAuthorityTest {
 
     @Test void isolatedQuotaReleasesOnlyUnclaimedTerminalSessions() throws Exception {
         long rev=reviewedPolicy(CLOCK,0,10);var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
-        q.activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,corr);
+        reviewQuotaValues(q,0,rev,10,60);
+        q.activateReviewed(POLICY_ACTIVATOR,TENANT,0,rev,corr);
         var other=secured.initiate("user",TENANT,null,new Initiate("attachment","other.txt",5,"text/plain","quota-other")).value();
         q.reserve(ADMIN,TENANT,view.session(),rev,corr);q.reserve(ADMIN,TENANT,other.session(),rev,corr);
         allow();var handle=authority().issue("user",TENANT,other.session(),null);
@@ -1854,7 +1868,8 @@ class DurableUploadAuthorityTest {
         var assessment=new JdbcRetentionSafety(source,CLOCK);
         assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.REVIEW_REQUIRED,assessment.assess(TENANT,fileId()));
         long rev=reviewedPolicy(CLOCK,0,10);
-        isolatedQuota(CLOCK).activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,CorrelationContext.create());
+        var quota=isolatedQuota(CLOCK);reviewQuotaValues(quota,0,rev,10,60);
+        quota.activateReviewed(POLICY_ACTIVATOR,TENANT,0,rev,CorrelationContext.create());
         assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.EVIDENCE_STALE,assessment.assess(TENANT,fileId()));
         assertThrows(Failure.class,()->simulation.complete(old));
         assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
@@ -1872,7 +1887,9 @@ class DurableUploadAuthorityTest {
 
     private long enableIntegratedQuota(long limit) throws Exception {
         long rev=reviewedPolicy(CLOCK,0,10);var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
-        q.activate(POLICY_ACTIVATOR,TENANT,0,rev,limit,60,corr);
+        assertThrows(Failure.class,()->q.activate(POLICY_ACTIVATOR,TENANT,0,rev,limit,60,corr));
+        reviewQuotaValues(q,0,rev,limit,60);
+        q.activateReviewed(POLICY_ACTIVATOR,TENANT,0,rev,corr);
         assertEquals(1,q.reconcile(ADMIN,TENANT).missingReservations());
         assertThrows(Failure.class,()->q.enableIntegration(ADMIN,TENANT,rev,corr));
         assertThrows(Failure.class,()->q.enableIntegration(ADMIN,OTHER,rev,corr));

@@ -52,13 +52,10 @@ CREATE TRIGGER quota_policy_review_guard BEFORE INSERT ON fs.isolated_quota_poli
  FOR EACH ROW EXECUTE FUNCTION fs.guard_quota_policy_review();
 
 -- Runs after V17's integrated_quota_activation_fence, which acquires the durable fence.
--- Preserve pre-A8 non-integrated test fixtures only; every integrated replacement
--- and every tenant with a quota draft must use independently reviewed exact values.
+-- All new activations require reviewed exact values. Existing V16/V17 rows are
+-- retained as history, never silently upgraded to reviewed policy.
 CREATE FUNCTION fs.guard_reviewed_quota_activation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
- IF NOT EXISTS(SELECT 1 FROM fs.isolated_quota_policy_draft WHERE tenant_id=NEW.tenant_id)
-    AND NOT EXISTS(SELECT 1 FROM fs.isolated_quota_fence WHERE tenant_id=NEW.tenant_id AND enabled_revision IS NOT NULL)
- THEN RETURN NEW; END IF;
  IF NOT EXISTS(
    SELECT 1 FROM fs.isolated_quota_policy_draft q JOIN fs.isolated_quota_policy_review qr USING(tenant_id,revision)
    JOIN fs.retention_policy_draft d USING(tenant_id,revision) JOIN fs.retention_policy_review dr USING(tenant_id,revision)
@@ -77,6 +74,26 @@ BEGIN
 END; $$;
 CREATE TRIGGER reviewed_quota_activation_guard BEFORE INSERT ON fs.isolated_policy_activation
  FOR EACH ROW EXECUTE FUNCTION fs.guard_reviewed_quota_activation();
+
+-- New integration enablement must bind to a reviewed current activation; old enabled rows
+-- are preserved, but a legacy non-integrated activation cannot be used to opt in.
+CREATE FUNCTION fs.guard_reviewed_quota_enablement() RETURNS trigger LANGUAGE plpgsql AS $
+BEGIN
+ IF NEW.enabled_revision IS NULL THEN RETURN NEW; END IF;
+ IF TG_OP='UPDATE' THEN
+  IF NEW.enabled_revision IS NOT DISTINCT FROM OLD.enabled_revision THEN RETURN NEW; END IF;
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM fs.isolated_policy_activation a
+    JOIN fs.isolated_quota_policy_draft q USING(tenant_id,revision)
+    JOIN fs.isolated_quota_policy_review r USING(tenant_id,revision)
+    WHERE a.tenant_id=NEW.tenant_id AND a.revision=NEW.enabled_revision
+      AND a.quota_limit=q.quota_limit AND a.evidence_ttl_seconds=q.evidence_ttl_seconds
+      AND a.actor<>q.author AND a.actor<>r.reviewer AND a.activated_at>=r.reviewed_at)
+ THEN RAISE EXCEPTION 'reviewed quota enablement required' USING ERRCODE='PQU01'; END IF;
+ RETURN NEW;
+END; $;
+CREATE TRIGGER reviewed_quota_enablement_guard BEFORE INSERT OR UPDATE ON fs.isolated_quota_fence
+ FOR EACH ROW EXECUTE FUNCTION fs.guard_reviewed_quota_enablement();
 
 -- Immutable snapshot facts; dry-run estimates are metadata only, never provider proof.
 CREATE TABLE fs.isolated_quota_finding (
@@ -117,4 +134,4 @@ CREATE TRIGGER quota_finding_review_guard BEFORE INSERT ON fs.isolated_quota_fin
 REVOKE ALL ON fs.isolated_quota_policy_draft,fs.isolated_quota_policy_review,
  fs.isolated_quota_finding,fs.isolated_quota_finding_review FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION fs.touch_quota_fence(uuid),fs.guard_quota_policy_draft(),fs.guard_quota_policy_review(),
- fs.guard_reviewed_quota_activation(),fs.guard_quota_finding_review() FROM PUBLIC;
+ fs.guard_reviewed_quota_activation(),fs.guard_reviewed_quota_enablement(),fs.guard_quota_finding_review() FROM PUBLIC;
