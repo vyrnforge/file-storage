@@ -1,6 +1,6 @@
 # FS-310A18 — Release assurance and staging handoff
 
-Status: **candidate; NO-GO**. Owner authorized A17 merge and A18 continuation 2026-11-16 (Asia/Jakarta). A17 PR #104 squash merged eb98f1ea2f259e6a345c77117ada9f2237edb1c2 at the approved head; A18 PR #105 rebased onto that main commit. Signing execution, publication, provisioning and deployment remain separately gated. Refs #13/#16/#33/#35/#36. PR #87 excluded.
+Status: **owner-approved engineering baseline; release NO-GO**. Owner authorized A17 merge and A18 continuation 2026-11-16 (Asia/Jakarta). A17 PR #104 squash merged eb98f1ea2f259e6a345c77117ada9f2237edb1c2 at the approved head; A18 PR #105 rebased onto that main commit. Signing execution, publication, provisioning and deployment remain separately gated. Refs #13/#16/#33/#35/#36. PR #87 excluded.
 
 ## 1. Evidence checkpoint (A17, not a release)
 
@@ -74,7 +74,7 @@ No staging activation until actual values/refs reviewed, integration code review
 |---|---|
 | A17 candidate CI / security remediation | Verified as recorded; live CI success confirmed |
 | A17 merge | Approved and merged eb98f1ea |
-| A18 preparation | Rebased candidate; full CI and owner review pending |
+| A18 preparation | Approved and merged c6713d6; exact-head CI 43846856194 passed |
 | Per-component license disposition / final notice bundle | Pending exact-text review and scope-specific approval |
 | Signed main provenance and SBOM | Not executed; separate authorization required |
 | Actual staging inputs and integration evidence | Not supplied / not verified |
@@ -82,3 +82,6 @@ No staging activation until actual values/refs reviewed, integration code review
 | Release publication, production policy/limits, historical accounting backfill, legal-hold release, physical provider deletion | Not authorized |
 
 No runtime, migration, provider or ecosystem changes in this preparation. Executable changes are release-evidence generation and manual attestation verification only. CI runs distribution integrity self-tests and statement-policy self-tests; the signing job additionally binds the build run attempt. Exact-head CI and authorized manual execution remain pending. Schema V23 retained. Approval of this document is not approval of any uncompleted gate. Owner decisions needed: A18 merge after CI, scoped license distribution approval and exact-main attestation authorization, approved non-production environment inputs, then separate staging admission. Record the actor, scope, exact commit/artifact/environment identifiers and evidence for each approval. Do not close master delivery trackers on a draft.
+
+
+2026-11-16 (Asia/Jakarta): owner approved A18 PR #105 at exact head `9eca4ced4b2e66717ab484bfe58c36c1487845a2`; squash merged `c6713d6088a61ff67fae0dc16c16afd4da971c43`. CI 43846856194 passed 224 Java tests, ten distribution and six statement checks, 133/133 SBOM and 127/127 packaged Maven components, zero reported advisories. A19 authorized for remaining license dispositions and staging acceptance preparation only; [A19 contract](48_LICENSE_DISPOSITIONS_STAGING_ACCEPTANCE.md). V23 retained. No distribution approval, signing, publication, provisioning, deployment, production policy, historical backfill, legal-hold release or physical provider deletion. PR #87 excluded. A19 candidate CI and owner review pending.
