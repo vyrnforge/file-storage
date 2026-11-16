@@ -68,7 +68,7 @@ class DurableUploadAuthorityTest {
     @AfterAll static void stop() { DB.stop(); }
 
     @BeforeEach void seed() throws Exception {
-        sql("TRUNCATE fs.backend,fs.policy_revision,fs.retention_policy_draft,fs.file,fs.file_grant,fs_kernel.platform_idempotency,fs_kernel.platform_audit_event,fs_kernel.platform_event_outbox CASCADE");
+        sql("TRUNCATE fs.backend,fs.policy_revision,fs.retention_policy_draft,fs.file,fs.file_grant,fs.accounting_source_epoch,fs.accounting_manifest_principal,fs_kernel.platform_idempotency,fs_kernel.platform_audit_event,fs_kernel.platform_event_outbox CASCADE");
         var registry = new JdbcRegistry(source, CLOCK);
         var config = new JdbcConfiguration(source, CLOCK);
         var correlation = CorrelationContext.create();
@@ -88,7 +88,11 @@ class DurableUploadAuthorityTest {
     }
 
     private SecuredFiles secured(Clock clock) {
-        return RuntimeComposition.secured(source, new Trust(ISS,AUD), bearer -> {
+        return secured(clock,source);
+    }
+
+    private SecuredFiles secured(Clock clock,PGSimpleDataSource database) {
+        return RuntimeComposition.secured(database, new Trust(ISS,AUD), bearer -> {
             if (!Set.of("user","other","other-app","other-tenant").contains(bearer)) throw new IllegalArgumentException("private verifier detail");
             return new VerifiedAccess(ISS,bearer,Set.of(AUD),TokenKind.ACCESS,NOW,NOW.plusSeconds(3600),NOW);
         }, (issuer, subject, audience) -> Optional.of(new Binding(
@@ -97,7 +101,7 @@ class DurableUploadAuthorityTest {
                 "other-app".equals(subject) ? "itsm" : "asset", Set.of(Action.values()))),
                 (actor, tenant) -> true,
                 (tenant,module) -> new ModuleEntitlement(TENANT.value(),"file-storage",true,NOW),
-                new JdbcGrants(source,clock,100,5), clock,Duration.ofMinutes(5),Duration.ofSeconds(30));
+                new JdbcGrants(database,clock,100,5), clock,Duration.ofMinutes(5),Duration.ofSeconds(30));
     }
 
     private DurableUploadAuthority authority() { return authority(CLOCK); }
@@ -2085,6 +2089,176 @@ class DurableUploadAuthorityTest {
         view=secured.initiate("user",TENANT,null,cmd).value();
         assertEquals(view.session(),secured.initiate("user",TENANT,null,cmd).value().session());
         assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
+    }
+
+
+    private static PGSimpleDataSource manifestLogin(String role) {
+        var login=new PGSimpleDataSource();
+        login.setURL(DB.getJdbcUrl());login.setUser(role);login.setPassword("fixture-only-a9");
+        login.setConnectTimeout(3);login.setSocketTimeout(8);
+        return login;
+    }
+
+    private static UUID manifestCommand(PGSimpleDataSource login,String statement,Object... values) throws SQLException {
+        try(var c=login.getConnection();var ps=c.prepareStatement(statement)){
+            ps.setQueryTimeout(6);
+            for(int i=0;i<values.length;i++)ps.setObject(i+1,values[i]);
+            try(var rows=ps.executeQuery()){assertTrue(rows.next());return rows.getObject(1,UUID.class);}
+        }
+    }
+
+    @Test void historicalManifestRestrictedLoginReviewSnapshotAndBoundedContention() throws Exception {
+        long revision=reviewedPolicy(CLOCK,0,10);
+        var quota=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        reviewQuotaValues(quota,0,revision,100,300);
+        quota.activateReviewed(POLICY_ACTIVATOR,TENANT,0,revision,corr);
+        sql("CREATE ROLE a9_capture LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        sql("CREATE ROLE a9_review LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try {
+            sql("GRANT USAGE ON SCHEMA fs TO a9_capture,a9_review");
+            sql("GRANT EXECUTE ON FUNCTION fs.capture_accounting_manifest(uuid,uuid,bigint) TO a9_capture");
+            sql("GRANT EXECUTE ON FUNCTION fs.review_accounting_manifest(uuid,uuid,bigint,text) TO a9_review");
+            sql("GRANT EXECUTE ON FUNCTION fs.read_accounting_manifest(uuid,uuid) TO a9_capture,a9_review");
+            sql("INSERT INTO fs.accounting_manifest_principal VALUES ('a9_capture',?,'capture-actor','CAPTURE'),('a9_review',?,'review-actor','REVIEW')",TENANT.value(),TENANT.value());
+            var capture=manifestLogin("a9_capture");var review=manifestLogin("a9_review");
+            String create="SELECT fs.capture_accounting_manifest(?,?,?)";
+            String approve="SELECT fs.review_accounting_manifest(?,?,?,?)";
+            var first=UUID.randomUUID();var second=UUID.randomUUID();
+            assertEquals(first,manifestCommand(capture,create,TENANT.value(),first,revision));
+            assertEquals(first,manifestCommand(capture,create,TENANT.value(),first,revision));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=? AND evidence->>'candidate'='RESERVED'",first));
+            assertEquals("42501",assertThrows(SQLException.class,()->manifestCommand(capture,create,OTHER.value(),UUID.randomUUID(),revision)).getSQLState());
+            assertEquals("42501",assertThrows(SQLException.class,()->manifestCommand(capture,approve,TENANT.value(),first,revision,"ACKNOWLEDGED")).getSQLState());
+            try(var c=review.getConnection();var st=c.createStatement()){
+                for(String denied:List.of("SELECT * FROM fs.accounting_manifest_entry","DELETE FROM fs.isolated_quota_reservation",
+                    "UPDATE fs.accounting_manifest SET session_count=0","DELETE FROM fs.accounting_manifest_principal",
+                    "SELECT fs.touch_quota_fence('"+TENANT.value()+"'::uuid)")){
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
+                }
+                try(var ps=c.prepareStatement("SELECT fs.read_accounting_manifest(?,?)->'entries'->0->'evidence'->>'candidate'")){
+                    ps.setObject(1,TENANT.value());ps.setObject(2,first);
+                    try(var rows=ps.executeQuery()){assertTrue(rows.next());assertEquals("RESERVED",rows.getString(1));}
+                }
+            }
+            assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),first,revision+1,"ACKNOWLEDGED")).getSQLState());
+            // Independent actor check is enforced even if an owner misconfigures separate roles.
+            sql("UPDATE fs.accounting_manifest_principal SET actor='capture-actor' WHERE login_role='a9_review'");
+            assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),first,revision,"ACKNOWLEDGED")).getSQLState());
+            sql("UPDATE fs.accounting_manifest_principal SET actor='review-actor' WHERE login_role='a9_review'");
+            // A committed change followed by a revert still invalidates exact revision evidence.
+            sql("UPDATE fs.initiation_request SET expected_size=6 WHERE session_id=?",view.session().value());
+            sql("UPDATE fs.initiation_request SET expected_size=5 WHERE session_id=?",view.session().value());
+            assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),first,revision,"ACKNOWLEDGED")).getSQLState());
+            var beforeNew=UUID.randomUUID();
+            assertEquals(beforeNew,manifestCommand(capture,create,TENANT.value(),beforeNew,revision));
+            // A new session changes the snapshot; prior manifest remains immutable.
+            secured.initiate("user",TENANT,null,new Initiate("attachment","a9-next.txt",5,"text/plain","a9-next"));
+            assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),beforeNew,revision,"ACKNOWLEDGED")).getSQLState());
+            try(var c=source.getConnection();var st=c.createStatement()){
+                c.setAutoCommit(false);
+                st.execute("LOCK TABLE fs.upload_session IN ROW EXCLUSIVE MODE");
+                try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                    var future=executor.submit(()->assertThrows(SQLException.class,()->manifestCommand(capture,create,TENANT.value(),second,revision)).getSQLState());
+                    assertEquals("55P03",future.get(8,TimeUnit.SECONDS));
+                }finally{c.rollback();}
+            }
+            assertEquals(0,scalar("SELECT count(*) FROM fs.accounting_manifest WHERE manifest_id=?",second));
+            try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                var one=executor.submit(()->manifestCommand(capture,create,TENANT.value(),second,revision));
+                var two=executor.submit(()->manifestCommand(capture,create,TENANT.value(),second,revision));
+                assertEquals(second,one.get(8,TimeUnit.SECONDS));assertEquals(second,two.get(8,TimeUnit.SECONDS));
+            }
+            assertEquals(2,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=?",second));
+            // A concurrent source write rolls back; review times out, then retries successfully.
+            try(var c=source.getConnection();var st=c.createStatement()){
+                c.setAutoCommit(false);
+                st.execute("UPDATE fs.initiation_request SET expected_size=expected_size+1");
+                try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                    var future=executor.submit(()->assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),second,revision,"ACKNOWLEDGED")).getSQLState());
+                    assertEquals("55P03",future.get(8,TimeUnit.SECONDS));
+                }finally{c.rollback();}
+            }
+            assertEquals(0,scalar("SELECT count(*) FROM fs.accounting_manifest_review WHERE manifest_id=?",second));
+            assertEquals(second,manifestCommand(review,approve,TENANT.value(),second,revision,"ACKNOWLEDGED"));
+            assertEquals(second,manifestCommand(review,approve,TENANT.value(),second,revision,"ACKNOWLEDGED"));
+            assertEquals("PQU01",assertThrows(SQLException.class,()->manifestCommand(review,approve,TENANT.value(),second,revision,"NEEDS_INVESTIGATION")).getSQLState());
+            assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_review WHERE manifest_id=?",second));
+            assertThrows(SQLException.class,()->sql("UPDATE fs.accounting_manifest_entry SET evidence='{}' WHERE manifest_id=?",second));
+            // Manifest classification agrees with A8, with exact clean scan and terminal evidence.
+            available();
+            var claimed=secured.initiate("user",TENANT,null,new Initiate("attachment","a9-claimed.txt",5,"text/plain","a9-claimed")).value();
+            var handle=authority().issue("user",TENANT,claimed.session(),null);
+            authority().claim("user",handle.handle(),TransferInstruction.Action.UPLOAD);
+            var recovery=recovery(Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC));
+            assertTrue(recovery.runOne());assertTrue(recovery.runOne());assertFalse(recovery.runOne());
+            var terminal=UUID.randomUUID();
+            assertEquals(terminal,manifestCommand(capture,create,TENANT.value(),terminal,revision));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=? AND evidence->>'candidate'='CHARGED' AND evidence->>'scanVerdict'='CLEAN'",terminal));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=? AND evidence->>'candidate'='RELEASED' AND evidence->>'recoveryReason'='SESSION_EXPIRED'",terminal));
+            assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_entry WHERE manifest_id=? AND evidence->>'candidate'='UNRESOLVED' AND evidence->>'claimed'='true'",terminal));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
+        }finally{
+            sql("DELETE FROM fs.accounting_manifest_principal WHERE login_role IN ('a9_capture','a9_review')");
+            sql("DROP OWNED BY a9_capture,a9_review");
+            sql("DROP ROLE a9_capture,a9_review");
+        }
+    }
+
+
+    @Test void isolatedNonOwnerInitiationUsesExplicitQuotaAndKernelPrivileges() throws Exception {
+        long revision=enableIntegratedQuota(5);
+        sql("CREATE ROLE a9_initiator LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try{
+            sql("GRANT USAGE ON SCHEMA fs,fs_kernel TO a9_initiator");
+            sql("""
+                GRANT SELECT ON fs.backend,fs.backend_revision,fs.storage_location,fs.active_policy,fs.policy_rule,fs.policy_revision,
+                  fs.file,fs.file_version,fs.upload_session,fs.initiation_request,fs.file_grant,fs.upload_scan_evidence,
+                  fs.upload_transfer_handle,fs.isolated_quota_fence,fs.isolated_quota_reservation,fs.isolated_policy_activation
+                TO a9_initiator
+                """);
+            // V4 FOR SHARE requires an UPDATE privilege. The physical identity trigger
+            // rejects a changed endpoint; no configuration revision write privilege is granted.
+            sql("GRANT UPDATE(endpoint) ON fs.backend TO a9_initiator");
+            sql("GRANT INSERT ON fs.file,fs.file_version,fs.upload_session,fs.initiation_request,fs.isolated_quota_reservation TO a9_initiator");
+            sql("GRANT INSERT(tenant_id),UPDATE(epoch) ON fs.isolated_quota_fence TO a9_initiator");
+            sql("GRANT EXECUTE ON FUNCTION fs.touch_quota_fence(uuid) TO a9_initiator");
+            sql("GRANT SELECT,INSERT,UPDATE,DELETE ON fs_kernel.platform_idempotency TO a9_initiator");
+            sql("GRANT SELECT,INSERT ON fs_kernel.platform_audit_event,fs_kernel.platform_event_outbox TO a9_initiator");
+            // Kernel v0.3.2 event replay uses ON CONFLICT DO UPDATE SET event_id=EXCLUDED.event_id.
+            // Permit only the identity column, not payload, delivery status or deletion.
+            sql("GRANT UPDATE(event_id) ON fs_kernel.platform_event_outbox TO a9_initiator");
+            var login=manifestLogin("a9_initiator");
+            try(var c=login.getConnection();var st=c.createStatement()){
+                try(var rows=st.executeQuery("SELECT session_user,current_user")){assertTrue(rows.next());assertEquals("a9_initiator",rows.getString(1));assertEquals("a9_initiator",rows.getString(2));}
+                for(String denied:List.of("DELETE FROM fs.isolated_quota_reservation","UPDATE fs.isolated_policy_activation SET quota_limit=99",
+                    "UPDATE fs.isolated_quota_fence SET enabled_revision=NULL","TRUNCATE fs.upload_session","SELECT * FROM fs.accounting_manifest_principal","UPDATE fs_kernel.platform_event_outbox SET status='PUBLISHED'","UPDATE fs_kernel.platform_event_outbox SET payload_json='{}'","DELETE FROM fs_kernel.platform_event_outbox","UPDATE fs_kernel.platform_audit_event SET action='changed'")){
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
+                }
+                assertEquals("23514",assertThrows(SQLException.class,()->st.execute("UPDATE fs.backend SET endpoint='https://changed.example.test'")).getSQLState());
+            }
+            var client=secured(CLOCK,login);
+            var cmd=new Initiate("attachment","restricted.txt",5,"text/plain","a9-restricted");
+            long auditBefore=scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.upload.initiated'");
+            long eventBefore=scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.initiated'");
+            sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_a9_initiate CHECK (event_type <> 'file-storage.upload.initiated') NOT VALID");
+            try{
+                assertThrows(RuntimeException.class,()->client.initiate("user",TENANT,null,cmd));
+                assertEquals(0,scalar("SELECT count(*) FROM fs.upload_session"));
+                assertEquals(0,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
+                assertEquals(auditBefore,scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.upload.initiated'"));
+                assertEquals(eventBefore,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.initiated'"));
+            }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_a9_initiate");}
+            var created=client.initiate("user",TENANT,null,cmd).value();
+            assertEquals(created.session(),client.initiate("user",TENANT,null,cmd).value().session());
+            assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE session_id=? AND policy_revision=? AND status='RESERVED' AND bytes=5",created.session().value(),revision));
+            assertEquals(Code.CONFLICT,assertThrows(Failure.class,()->client.initiate("user",TENANT,null,new Initiate("attachment","too-many.txt",1,"text/plain","a9-too-many"))).code());
+            assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session"));
+            assertEquals(auditBefore+1,scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.upload.initiated'"));
+            assertEquals(eventBefore+1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.initiated'"));
+        }finally{
+            sql("DROP OWNED BY a9_initiator");
+            sql("DROP ROLE a9_initiator");
+        }
     }
 
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
