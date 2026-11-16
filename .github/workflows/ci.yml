@@ -45,6 +45,10 @@ jobs:
           python3 scripts/staging-distribution-review.py --self-test
           python3 scripts/staging-distribution-review.py backend/file-storage-runtime/target --supplemental-sources
           python3 scripts/staging-attestation-statements.py --self-test
+      - name: Prepare scoped license dispositions and staging acceptance
+        run: |
+          python3 scripts/staging-license-dispositions.py --self-test
+          python3 scripts/staging-license-dispositions.py backend/file-storage-runtime/target
       - name: Retain candidate evidence only
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -60,6 +64,9 @@ jobs:
             backend/file-storage-runtime/target/staging-license-notices.zip
             backend/file-storage-runtime/target/staging-distribution-review.json
             backend/file-storage-runtime/target/staging-distribution-notices.zip
+            backend/file-storage-runtime/target/staging-license-dispositions.json
+            backend/file-storage-runtime/target/staging-license-disposition-evidence.zip
+            backend/file-storage-runtime/target/staging-acceptance-preparation.json
           if-no-files-found: error
           retention-days: 14
       - name: A17 security regression gate

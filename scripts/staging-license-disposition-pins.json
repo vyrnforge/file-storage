@@ -1,0 +1,97 @@
+{
+  "format": "file-storage-license-disposition-pins-v1",
+  "baseline": "A18 CI 43846856194 artifact 14215931521",
+  "sourcePins": [
+    {
+      "bomRef": "pkg:maven/com.aliyun/aliyun-java-core@0.2.11-beta?type=jar",
+      "group": "com.aliyun",
+      "artifact": "aliyun-java-core",
+      "version": "0.2.11-beta",
+      "sourceSha256": "575aad9b43c2a067567ac78fd5677bf013841d84c6e70ab9593622f9e4cefd43"
+    },
+    {
+      "bomRef": "pkg:maven/com.aliyun/aliyun-java-sdk-core@4.7.8?type=jar",
+      "group": "com.aliyun",
+      "artifact": "aliyun-java-sdk-core",
+      "version": "4.7.8",
+      "sourceSha256": "a031be8a09d189c458e296071040727850928f81ffe487b5831c12f4cf14fd6f"
+    },
+    {
+      "bomRef": "pkg:maven/com.aliyun/aliyun-java-sdk-kms@2.11.0?type=jar",
+      "group": "com.aliyun",
+      "artifact": "aliyun-java-sdk-kms",
+      "version": "2.11.0",
+      "sourceSha256": "5a20c96c8224fa331e04d37e544630dd4375e2248e3f7c6e5450567b95b8f5ec"
+    },
+    {
+      "bomRef": "pkg:maven/com.aliyun/aliyun-java-sdk-ram@3.1.0?type=jar",
+      "group": "com.aliyun",
+      "artifact": "aliyun-java-sdk-ram",
+      "version": "3.1.0",
+      "sourceSha256": "adc599c7f1f8b14f2bea616721bf6670e10bd075c6d0f8dd12e460b5a072f6ca"
+    },
+    {
+      "bomRef": "pkg:maven/com.aliyun.oss/aliyun-sdk-oss@3.18.4?type=jar",
+      "group": "com.aliyun.oss",
+      "artifact": "aliyun-sdk-oss",
+      "version": "3.18.4",
+      "sourceSha256": "97c64dfc3153c73d646879fcaa97748bf6cd3b2410a0f7bd482701a81c825ada"
+    },
+    {
+      "bomRef": "pkg:maven/com.aliyun/java-trace-api@0.2.11-beta?type=jar",
+      "group": "com.aliyun",
+      "artifact": "java-trace-api",
+      "version": "0.2.11-beta",
+      "sourceSha256": "940b2145dc91b468e2bef2c53d82d979bfb6b736d07d666557f6faca7dedc7b2"
+    },
+    {
+      "bomRef": "pkg:maven/ch.qos.logback/logback-classic@1.5.38?type=jar",
+      "group": "ch.qos.logback",
+      "artifact": "logback-classic",
+      "version": "1.5.38",
+      "sourceSha256": "7f0a30657cb7b63379686419924e73851fa7e5159e0c3d7c653646030a142643"
+    },
+    {
+      "bomRef": "pkg:maven/ch.qos.logback/logback-core@1.5.38?type=jar",
+      "group": "ch.qos.logback",
+      "artifact": "logback-core",
+      "version": "1.5.38",
+      "sourceSha256": "682355ce7b96b8c6350ae20df86fe13ea262ef6b5d863833f26da1f700d6800a"
+    },
+    {
+      "bomRef": "pkg:maven/com.nimbusds/nimbus-jose-jwt@10.10?type=jar",
+      "group": "com.nimbusds",
+      "artifact": "nimbus-jose-jwt",
+      "version": "10.10",
+      "sourceSha256": "4863003b264dc950e38d4e89bb300aafd0044cdd1a0972a9829b07197b56db54"
+    },
+    {
+      "bomRef": "pkg:maven/org.yaml/snakeyaml@2.6?type=jar",
+      "group": "org.yaml",
+      "artifact": "snakeyaml",
+      "version": "2.6",
+      "sourceSha256": "cd719ff3e52eec48ef7c541ba4f178c2eff0f6719fd0abe4f4e44bde41138ca2"
+    }
+  ],
+  "standardTerms": {
+    "repository": "spdx/license-list-data",
+    "commit": "d46e94e2c78ceede1cfc63cfa0396472d2798d4c",
+    "documents": [
+      {
+        "id": "Apache-2.0",
+        "path": "text/Apache-2.0.txt",
+        "gitBlobSha": "137069b823873b8bcf42979bcf8e9371052d26a2"
+      },
+      {
+        "id": "EPL-2.0",
+        "path": "text/EPL-2.0.txt",
+        "gitBlobSha": "78756b5e9abc8f5109aeba5e8cd84b44ebcb7ada"
+      },
+      {
+        "id": "LGPL-2.1-only",
+        "path": "text/LGPL-2.1-only.txt",
+        "gitBlobSha": "c6487f4fdf701640ac0f559eb0130cdf76c5d3f4"
+      }
+    ]
+  }
+}
