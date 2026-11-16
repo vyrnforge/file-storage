@@ -84,6 +84,7 @@ final class StagingBootstrapTest {
             provider.1.region=example-region
             provider.1.addressing=PATH
             provider.1.backend=00000000-0000-4000-8000-000000000001
+            provider.1.revision=1
             provider.1.location=00000000-0000-4000-8000-000000000002
             provider.1.bucket=example-s3-staging
             provider.1.prefix=fixture/
@@ -93,6 +94,7 @@ final class StagingBootstrapTest {
             provider.2.region=cn-example
             provider.2.addressing=VIRTUAL_HOST
             provider.2.backend=00000000-0000-4000-8000-000000000003
+            provider.2.revision=1
             provider.2.location=00000000-0000-4000-8000-000000000004
             provider.2.bucket=example-oss-staging
             provider.2.prefix=fixture/
@@ -127,6 +129,28 @@ final class StagingBootstrapTest {
         var failure=assertThrows(IllegalArgumentException.class,()->StagingBootstrapConfig.load(config));
         assertEquals("invalid staging configuration",failure.getMessage());
         assertNull(failure.getCause());
+    }
+    @Test void exactRevisionPropertiesPermitHistoricalAndCurrentPinsButRejectConflicts()throws Exception{
+        String old=content.substring(content.indexOf("provider.1.kind="),content.indexOf("provider.2.kind="));
+        String next=old.replace("provider.1.","provider.3.").replace("revision=1","revision=2")
+                .replace("ref:staging/file-storage/s3","ref:staging/file-storage/s3-v2");
+        String both=content.replace("provider.count=2","provider.count=3")+"\n"+next;
+        writePrivate(config,both);
+        var admitted=StagingBootstrapConfig.load(config);
+        assertEquals(3,admitted.locations.size());
+        var first=admitted.locations.entrySet().stream().filter(e->e.getKey().revision()==2).findFirst().orElseThrow();
+        var oldKey=new StagingRuntimeDependencies.PinKey(first.getKey().backend(),1,first.getKey().location());
+        assertEquals(admitted.locations.get(oldKey).location(),first.getValue().location());
+        assertNotEquals(admitted.locations.get(oldKey).credential(),first.getValue().credential());
+        for(String bad:List.of(both.replace("provider.3.revision=2","provider.3.revision=1"),
+                both.replace("provider.3.revision=2","provider.3.revision=0"),
+                both.replace("provider.3.revision=2\n",""),
+                both.replace("provider.3.bucket=example-s3-staging","provider.3.bucket=wrong-bucket"),
+                both.replace("provider.3.endpoint=https://s3.staging.example.invalid","provider.3.endpoint=https://other.example.invalid"),
+                both.replace("provider.3.ref=ref:staging/file-storage/s3-v2","provider.3.ref=ref:staging/file-storage/db-worker"))){
+            writePrivate(config,bad);
+            assertThrows(IllegalArgumentException.class,()->StagingBootstrapConfig.load(config));
+        }
     }
     @Test void mountedSecretsRejectTraversalSymlinksPermissionsAndUnexpectedFields()throws Exception{
         var secrets=new MountedStagingSecrets(root);

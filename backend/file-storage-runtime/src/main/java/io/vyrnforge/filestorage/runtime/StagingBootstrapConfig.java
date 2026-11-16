@@ -22,7 +22,7 @@ public final class StagingBootstrapConfig {
     final TransferLimits limits;
     final boolean enabled,dispatch;
     final Map<RuntimeDatabaseRoles.Role,DbRole> roles;
-    final Map<LocationId,StagingRuntimeDependencies.Pin> locations;
+    final Map<StagingRuntimeDependencies.PinKey,StagingRuntimeDependencies.Pin> locations;
     private StagingBootstrapConfig(Properties p){
         if(!"staging".equals(take(p,"environment")))throw invalid();
         host=take(p,"db.host");database=take(p,"db.name");
@@ -52,7 +52,7 @@ public final class StagingBootstrapConfig {
         }
         roles=Map.copyOf(map);
         int count=number(p,"provider.count",1,32);
-        var pins=new HashMap<LocationId,StagingRuntimeDependencies.Pin>();
+        var pins=new HashMap<StagingRuntimeDependencies.PinKey,StagingRuntimeDependencies.Pin>();
         for(int i=1;i<=count;i++){
             String k="provider."+i+".";
             var provider=Provider.valueOf(take(p,k+"kind"));
@@ -63,11 +63,15 @@ public final class StagingBootstrapConfig {
                 ||(provider==Provider.OSS&&target.addressing()!=Addressing.VIRTUAL_HOST))throw invalid();
             var id=new LocationId(UUID.fromString(take(p,k+"location")));
             var backend=new BackendId(UUID.fromString(take(p,k+"backend")));
+            String revisionValue=take(p,k+"revision");
+            if(!revisionValue.matches("[1-9][0-9]{0,18}"))throw invalid();
+            long revision=Long.parseLong(revisionValue);
             String bucket=take(p,k+"bucket"),prefix=take(p,k+"prefix"),ref=reference(take(p,k+"ref"));
             if(!bucket.matches("[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]")||!prefix.matches("[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*/")
                 ||prefix.length()>512||!refs.add(ref))throw invalid();
-            if(pins.put(id,new StagingRuntimeDependencies.Pin(target,new Location(id,backend,bucket,prefix),new CredentialRef(ref)))!=null)throw invalid();
+            if(pins.put(new StagingRuntimeDependencies.PinKey(backend,revision,id),new StagingRuntimeDependencies.Pin(target,new Location(id,backend,bucket,prefix),new CredentialRef(ref)))!=null)throw invalid();
         }
+        StagingRuntimeDependencies.validatePins(pins);
         locations=Map.copyOf(pins);
         if(!p.isEmpty())throw invalid();
     }

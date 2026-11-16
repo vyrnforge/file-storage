@@ -179,3 +179,8 @@ FS-310A8 candidate PR #91: [implementation CI 43803914425](https://github.com/vy
 ## FS-65 Q16 remediation candidate (2026-11-16)
 
 A19 main `8ac934670967658ef8efc114bd06b730fd0e06f2`. Proposed staging OSS addressing consistency: properties, typed pins and native staging factory reject CNAME, matching the existing registry and initial OSS profile. Virtual-host OSS and S3 modes remain unchanged. Two targeted regressions; full CI/audit and owner acceptance pending. No public API, migration, credential admission expansion, deployment or release change. See #65 and PR #108.
+
+
+## FS-65 Q16 accepted; Q15 candidate
+
+Owner explicitly approved #109 and AQ-02; #109 squash merged `e16f016c20e3338d50b3e78b15512b0eab549a87`, 226 tests, CI 43897905525 and audit 43897905425 passed; 67 unchanged findings. Q15 proposes bounded explicit backend/revision/location admission and complete persisted pin check before secret lookup. No consumer API/schema/migration changes, no deployment. Candidate CI/owner review pending; #65 and frontend hold remain.

@@ -25,22 +25,31 @@ public final class RegistryTransferProviderResolver<C extends AutoCloseable> imp
     private final CredentialResolver<C> credentials;
     private final Set<Target> approvedTargets;
     private final Map<Provider, AdapterFactory<C>> factories;
+    private final JdbcRegistry.PinAdmission admission;
 
     public RegistryTransferProviderResolver(JdbcRegistry registry, CredentialResolver<C> credentials,
             Set<Target> approvedTargets, Map<Provider, AdapterFactory<C>> factories) {
+        this(registry, credentials, approvedTargets, factories, (target, location, reference) -> true);
+    }
+
+    public RegistryTransferProviderResolver(JdbcRegistry registry, CredentialResolver<C> credentials,
+            Set<Target> approvedTargets, Map<Provider, AdapterFactory<C>> factories,
+            JdbcRegistry.PinAdmission admission) {
         this.registry = Objects.requireNonNull(registry);
         this.credentials = Objects.requireNonNull(credentials);
         this.approvedTargets = Set.copyOf(approvedTargets);
         this.factories = Map.copyOf(factories);
+        this.admission = Objects.requireNonNull(admission);
     }
 
     @Override public Lease resolve(TransferInstruction instruction) {
         Objects.requireNonNull(instruction);
         JdbcRegistry.Resolved<C> resolved;
         try {
-            resolved = registry.resolveExisting(instruction.backend(), instruction.revision(),
-                    instruction.locator().location(), target -> approvedTargets.contains(target)
-                            && factories.containsKey(target.provider()), credentials);
+            resolved = registry.resolveExistingAdmitted(instruction.backend(), instruction.revision(),
+                    instruction.locator().location(), (target, location, reference) -> approvedTargets.contains(target)
+                            && factories.containsKey(target.provider())
+                            && admission.allows(target, location, reference), credentials);
         } catch (RuntimeException ex) {
             throw new TransferFailure(TransferFailure.Code.UNAVAILABLE);
         }
