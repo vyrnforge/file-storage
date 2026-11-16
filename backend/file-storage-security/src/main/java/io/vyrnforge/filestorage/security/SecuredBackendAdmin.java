@@ -10,8 +10,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import static io.vyrnforge.filestorage.security.SecurityObservation.Boundary.BACKEND_ADMIN;
-import static io.vyrnforge.filestorage.security.SecurityObservation.Reason.*;
+import io.vyrnforge.filestorage.security.SecurityObservation.Boundary;
+import io.vyrnforge.filestorage.security.SecurityObservation.Reason;
 
 /** Platform-level authority, deliberately independent of tenant policy administration. */
 public final class SecuredBackendAdmin {
@@ -52,18 +52,18 @@ public final class SecuredBackendAdmin {
     }
 
     public Authorized authorize(String bearer, UUID correlationId, Action action, BackendId backend) {
-        var verified = AccessAuthentication.verify(trust, verifier, clock, bearer,observations,BACKEND_ADMIN);
+        var verified = AccessAuthentication.verify(trust, verifier, clock, bearer,observations,Boundary.BACKEND_ADMIN);
         try {
             Objects.requireNonNull(action);
             boolean global = action == Action.LIST || action == Action.REGISTER;
             if (global != (backend == null)) throw new SecurityFailure(SecurityCode.ACCESS_DENIED);
-            var actor = SecurityObservation.authority(observations,BACKEND_ADMIN,BINDING_UNAVAILABLE,()->Objects.requireNonNull(bindings.resolve(verified.issuer(),verified.subject(),trust.audience()))).orElseThrow();
+            var actor = SecurityObservation.authority(observations,Boundary.BACKEND_ADMIN,Reason.BINDING_UNAVAILABLE,()->Objects.requireNonNull(bindings.resolve(verified.issuer(),verified.subject(),trust.audience()))).orElseThrow();
             if (actor.actorType() != ActorType.USER) throw new SecurityFailure(SecurityCode.ACCESS_DENIED);
             // Kernel explicitly establishes tenantless context; tenant membership cannot confer this privilege.
             var pipeline = new RequestContextPipeline<ValidatedIdentityCredential>(
                     new ValidatedIdentityAdapter(), (a, t) -> false, (t, m) -> null,
                     (ctx, key, resource) -> ctx.actor().equals(actor) && !ctx.tenant().isTenantScoped()
-                            && action.name().equals(key) && SecurityObservation.authority(observations,BACKEND_ADMIN,PERMISSION_UNAVAILABLE,()->permissions.permits(actor,action,backend)), clock);
+                            && action.name().equals(key) && SecurityObservation.authority(observations,Boundary.BACKEND_ADMIN,Reason.PERMISSION_UNAVAILABLE,()->permissions.permits(actor,action,backend)), clock);
             var credential = new ValidatedIdentityCredential(actor, AuthorizationProjection.empty(),
                     new AuthenticationContext(verified.authenticatedAt(), Set.of()));
             var correlation = correlationId == null ? CorrelationContext.create() : CorrelationContext.create(correlationId);
@@ -71,7 +71,7 @@ public final class SecuredBackendAdmin {
                     correlation, EndpointPolicy.tenantless(action.name()), null));
             return new Authorized(actor, resolved.correlation());
         } catch (RuntimeException ex) {
-            SecurityObservation.emit(observations,BACKEND_ADMIN,AUTHORIZATION_DENIED);
+            SecurityObservation.emit(observations,Boundary.BACKEND_ADMIN,Reason.AUTHORIZATION_DENIED);
             throw new SecurityFailure(SecurityCode.ACCESS_DENIED);
         }
     }

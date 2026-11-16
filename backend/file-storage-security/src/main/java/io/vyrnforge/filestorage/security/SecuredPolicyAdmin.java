@@ -12,8 +12,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import static io.vyrnforge.filestorage.security.SecurityObservation.Boundary.POLICY_ADMIN;
-import static io.vyrnforge.filestorage.security.SecurityObservation.Reason.*;
+import io.vyrnforge.filestorage.security.SecurityObservation.Boundary;
+import io.vyrnforge.filestorage.security.SecurityObservation.Reason;
 
 /** Trusted policy administration boundary; consumer grants do not confer admin actions. */
 public final class SecuredPolicyAdmin {
@@ -62,23 +62,23 @@ public final class SecuredPolicyAdmin {
     }
 
     public Authorized authorize(String bearer, Scope scope, UUID correlationId, Action action) {
-        var verified = AccessAuthentication.verify(trust, verifier, clock, bearer,observations,POLICY_ADMIN);
+        var verified = AccessAuthentication.verify(trust, verifier, clock, bearer,observations,Boundary.POLICY_ADMIN);
         try {
             Objects.requireNonNull(scope);
             Objects.requireNonNull(action);
-            var actor = SecurityObservation.authority(observations,POLICY_ADMIN,BINDING_UNAVAILABLE,()->Objects.requireNonNull(bindings.resolve(verified.issuer(), verified.subject(), trust.audience(), scope.tenant())))
+            var actor = SecurityObservation.authority(observations,Boundary.POLICY_ADMIN,Reason.BINDING_UNAVAILABLE,()->Objects.requireNonNull(bindings.resolve(verified.issuer(), verified.subject(), trust.audience(), scope.tenant())))
                     .orElseThrow();
             if (actor.actorType() != ActorType.USER) throw new SecurityFailure(SecurityCode.ACCESS_DENIED);
             var pipeline = new RequestContextPipeline<ValidatedIdentityCredential>(
-                    new ValidatedIdentityAdapter(), (a,t)->SecurityObservation.authority(observations,POLICY_ADMIN,MEMBERSHIP_UNAVAILABLE,()->membership.isMember(a,t)),
+                    new ValidatedIdentityAdapter(), (a,t)->SecurityObservation.authority(observations,Boundary.POLICY_ADMIN,Reason.MEMBERSHIP_UNAVAILABLE,()->membership.isMember(a,t)),
                     (tenant, module) -> {
-                        ModuleEntitlement e = SecurityObservation.authority(observations,POLICY_ADMIN,ENTITLEMENT_UNAVAILABLE,()->entitlement.getEntitlement(tenant,module));
-                        if(e==null)SecurityObservation.emit(observations,POLICY_ADMIN,ENTITLEMENT_UNAVAILABLE);
+                        ModuleEntitlement e = SecurityObservation.authority(observations,Boundary.POLICY_ADMIN,Reason.ENTITLEMENT_UNAVAILABLE,()->entitlement.getEntitlement(tenant,module));
+                        if(e==null)SecurityObservation.emit(observations,Boundary.POLICY_ADMIN,Reason.ENTITLEMENT_UNAVAILABLE);
                         return e != null && e.effectiveAt() != null && clock.instant().isBefore(e.effectiveAt()) ? null : e;
                     },
                     (ctx, key, resource) -> ctx.actor().equals(actor)
                             && ctx.tenant().tenantId().equals(scope.tenant().value())
-                            && action.name().equals(key) && SecurityObservation.authority(observations,POLICY_ADMIN,PERMISSION_UNAVAILABLE,()->permissions.permits(actor,scope,action)));
+                            && action.name().equals(key) && SecurityObservation.authority(observations,Boundary.POLICY_ADMIN,Reason.PERMISSION_UNAVAILABLE,()->permissions.permits(actor,scope,action)));
             var credential = new ValidatedIdentityCredential(actor, AuthorizationProjection.empty(),
                     new AuthenticationContext(verified.authenticatedAt(), Set.of()));
             var correlation = correlationId == null ? CorrelationContext.create() : CorrelationContext.create(correlationId);
@@ -87,7 +87,7 @@ public final class SecuredPolicyAdmin {
                     EndpointPolicy.tenantModule("file-storage", action.name()), null));
             return new Authorized(actor, resolved.correlation());
         } catch (RuntimeException ex) {
-            SecurityObservation.emit(observations,POLICY_ADMIN,AUTHORIZATION_DENIED);
+            SecurityObservation.emit(observations,Boundary.POLICY_ADMIN,Reason.AUTHORIZATION_DENIED);
             throw new SecurityFailure(SecurityCode.ACCESS_DENIED);
         }
     }
