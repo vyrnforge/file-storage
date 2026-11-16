@@ -79,7 +79,7 @@ public final class JdbcIsolatedPolicyQuota {
             try(var ps=tx.statement(c,"SELECT 1 FROM fs.governed_legal_hold WHERE tenant_id=? AND file_id=? LIMIT 1",
                 tenant.value(),file.value());var rows=ps.executeQuery()){if(rows.next())hold=Hold.HELD;}
             // Never shorten previously observed retention, including earlier generations.
-            try(var ps=tx.statement(c,"SELECT max(retain_until) FROM fs.isolated_retention_observation WHERE tenant_id=? AND file_id=?",
+            try(var ps=tx.statement(c,"SELECT max(retain_until) FROM fs.file_retention_evidence WHERE tenant_id=? AND file_id=?",
                 tenant.value(),file.value());var rows=ps.executeQuery()){
                 rows.next();var previous=rows.getObject(1,OffsetDateTime.class);if(previous!=null&&previous.toInstant().isAfter(retain))retain=previous.toInstant();
             }
@@ -150,14 +150,17 @@ public final class JdbcIsolatedPolicyQuota {
     }
     private Session session(Connection c,TenantId tenant,SessionId session)throws SQLException{
         try(var ps=tx.statement(c,"""
-            SELECT s.file_id,s.version_id,s.location_id,s.consumer,r.expected_size,s.state,s.expires_at,
-              EXISTS(SELECT 1 FROM fs.upload_transfer_handle h WHERE h.session_id=s.session_id AND h.claimed_at IS NOT NULL)
+            SELECT s.file_id,s.version_id,s.location_id,s.consumer,r.expected_size,s.state,s.expires_at
             FROM fs.upload_session s JOIN fs.initiation_request r ON r.session_id=s.session_id AND r.tenant_id=s.tenant_id
             WHERE s.tenant_id=? AND s.session_id=? FOR UPDATE OF s
             """,tenant.value(),session.value());var rows=ps.executeQuery()){
             if(!rows.next())throw missing();
+            // Read claim status in a fresh statement after acquiring the session lock.
+            boolean claimed;
+            try(var p=tx.statement(c,"SELECT 1 FROM fs.upload_transfer_handle WHERE session_id=? AND claimed_at IS NOT NULL LIMIT 1",
+                session.value());var claims=p.executeQuery()){claimed=claims.next();}
             return new Session(new FileId(rows.getString(1)),new VersionId(rows.getObject(2,UUID.class)),new LocationId(rows.getObject(3,UUID.class)),
-                rows.getString(4),rows.getLong(5),rows.getString(6),rows.getObject(7,OffsetDateTime.class).toInstant(),rows.getBoolean(8));
+                rows.getString(4),rows.getLong(5),rows.getString(6),rows.getObject(7,OffsetDateTime.class).toInstant(),claimed);
         }
     }
     private Reservation reservation(Connection c,TenantId tenant,SessionId session)throws SQLException{

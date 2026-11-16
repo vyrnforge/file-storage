@@ -57,3 +57,5 @@ FS-210A: internal trusted commands only; #16 actual secret manager/identity sele
 2026-11-16: PR #83 accepted/merged 65b6ec4 (187 tests, CI 43779802955). Owner authorized FS-310A4 #36 durable reader safety and simulation only; expiry never proves drain; no actual purge, production policy/quota or deployment.
 
 2026-11-16: PR #84 accepted/merged 0d0cc02 (190 tests, CI 43781101800). Owner authorized FS-310A5 governance/reconciliation only; no production policy activation, provider deletion or deployment.
+
+2026-11-16: PR #85 accepted/merged 8ea998f (193 tests, CI 43782219424). Owner authorized FS-310A6 isolated policy/quota primitives; no production policy activation, hold release, physical purge or deployment.

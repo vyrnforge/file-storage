@@ -14,3 +14,5 @@ Status: proposed, not approved. #16/#33/#36. No production values or authorizati
 | Purge authority | Separate approved execution role, policy/hold recheck and reader drain; exact version/placement; absent object verification, retries, audit and quota finalization. | Open |
 
 Boundary examples: retention deadline equal to now does not itself permit purge; a hold spanning restore/re-delete still blocks; a changed policy invalidates old preparation; a crashed reader with expired lease remains unresolved; logical deletion does not prove physical bytes are freed. Tenant A cannot authorize tenant B. No provider deletion, production policy activation or deployment authorized by this review.
+
+A6 candidate: isolated tenant-only policy activation, explicit quota limit, nondecreasing retention and CHARGE_UNTIL_VERIFIED_PURGE ledger primitives are engineering fixtures only. No production decision changed. See [V16 contract](../architecture/35_ISOLATED_POLICY_QUOTA.md). Production scope overrides, effective-date/deletion pin rules, hold release, limits, accounting integration/backfill, reader proof and purge remain open.
