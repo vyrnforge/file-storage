@@ -146,3 +146,6 @@ FS-310A8 candidate PR #91: [implementation CI 43803914425](https://github.com/vy
 
 
 2026-11-16 (Asia/Jakarta): owner approved PR #92; squash merged `1419360d456079f3ffe3510babdab6eb721302f1`; [exact-head CI 43806355043](https://github.com/vyrnforge/file-storage/actions/runs/43806355043) passed 205 tests. FS-310A10 selected as next isolated increment: restricted lifecycle completion/recovery and atomic Kernel manifest command receipts. [Contract](../architecture/39_RESTRICTED_LIFECYCLE_AUDIT.md). CI and owner review pending. Production retention/limits, legal-hold release, actual historical backfill, provider deletion and deployment remain gated; PR #87 excluded.
+
+
+2026-11-16 (Asia/Jakarta): owner approved PR #94; squash merged `69c77b2803f239e255baef6a1ba652f00616ff40`; [exact-head CI 43821134184](https://github.com/vyrnforge/file-storage/actions/runs/43821134184) passed 207 tests. FS-310A11 authorized isolated execution-boundary hardening: V21 audited principal mode and deferred raw-bypass protection, lock-only identity guards, narrower worker settlement privileges and concurrent completion/recovery regression. [Contract](../architecture/40_EXECUTION_BOUNDARY.md). CI and owner review pending. No actual historical backfill, production retention/limits, hold release, provider deletion or deployment; PR #87 excluded.
