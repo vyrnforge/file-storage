@@ -2478,6 +2478,194 @@ class DurableUploadAuthorityTest {
         }finally{sql("DROP OWNED BY a11_worker");sql("DROP ROLE a11_worker");}
     }
 
+
+    @Test void versionedRoleProfilesProvisionDetectDriftRevokeAndDispatch() throws Exception {
+        var kinds=IsolatedRoleProfiles.Kind.values();
+        var profiles=new ArrayList<IsolatedRoleProfiles>();
+        for(var kind:kinds)profiles.add(new IsolatedRoleProfiles(kind));
+        try{
+            for(int i=0;i<kinds.length;i++){
+                String group="a12_group_"+i,login="a12_login_"+i;
+                profiles.get(i).provision(source,group);
+                sql("CREATE ROLE "+login+" LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+                sql("GRANT "+group+" TO "+login);
+                profiles.get(i).verify(source,login,group);
+            }
+            // Direct column grant, inherited grant, and non-inheriting SET ROLE edge.
+            sql("GRANT UPDATE(epoch) ON fs.isolated_quota_fence TO a12_login_1");
+            assertTrue(profiles.get(1).drift(source,"a12_login_1","a12_group_1").stream().anyMatch(x->x.contains("isolated_quota_fence.epoch")));
+            sql("REVOKE UPDATE(epoch) ON fs.isolated_quota_fence FROM a12_login_1");
+            sql("GRANT a12_group_0 TO a12_group_1 WITH INHERIT FALSE");
+            assertFalse(profiles.get(1).drift(source,"a12_login_1","a12_group_1").isEmpty());
+            sql("REVOKE a12_group_0 FROM a12_group_1");
+            sql("GRANT EXECUTE ON FUNCTION fs.capture_accounting_manifest(uuid,uuid,bigint) TO a12_group_2");
+            assertTrue(profiles.get(2).drift(source,"a12_login_2","a12_group_2").stream().anyMatch(x->x.contains("capture_accounting_manifest")));
+            sql("REVOKE EXECUTE ON FUNCTION fs.capture_accounting_manifest(uuid,uuid,bigint) FROM a12_group_2");
+            for(int i=0;i<kinds.length;i++)profiles.get(i).verify(source,"a12_login_"+i,"a12_group_"+i);
+
+            // Actual Kernel publisher with restricted delivery-column grants and no FS access.
+            var dispatcher=manifestLogin("a12_login_3");dispatcher.setCurrentSchema("fs_kernel");
+            var delivered=new ArrayList<UUID>();
+            var publisher=new io.vyrnforge.platform.kernel.persistence.jdbc.JdbcOutboxPublisher(dispatcher,
+                new io.vyrnforge.platform.kernel.persistence.jdbc.JacksonRecordCodec(),
+                event->delivered.add(event.eventId()),CLOCK,3,Duration.ZERO,Duration.ofSeconds(30));
+            long pending=scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PENDING'");
+            assertTrue(pending>0&&pending<100);
+            publisher.publishBatch(100);
+            assertEquals(pending,delivered.size());
+            assertEquals(pending,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PUBLISHED'"));
+            try(var c=dispatcher.getConnection();var st=c.createStatement()){
+                for(String denied:List.of("UPDATE platform_event_outbox SET payload_json='{}'","DELETE FROM platform_event_outbox",
+                    "SELECT * FROM fs.file","SELECT * FROM platform_audit_event"))
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
+                sql("REVOKE a12_group_3 FROM a12_login_3");
+                assertEquals("42501",assertThrows(SQLException.class,()->st.execute("SELECT * FROM fs_kernel.platform_event_outbox")).getSQLState());
+            }
+            assertFalse(profiles.get(3).drift(source,"a12_login_3","a12_group_3").isEmpty());
+            sql("GRANT a12_group_3 TO a12_login_3");
+            profiles.get(3).verify(source,"a12_login_3","a12_group_3");
+        }finally{
+            // Roles are created only in disposable PostgreSQL; clean up even on assertion failure.
+            for(int i=kinds.length-1;i>=0;i--){
+                String login="a12_login_"+i,group="a12_group_"+i;
+                if(scalar("SELECT count(*) FROM pg_roles WHERE rolname=?",login)>0){sql("DROP OWNED BY "+login);sql("DROP ROLE "+login);}
+                if(scalar("SELECT count(*) FROM pg_roles WHERE rolname=?",group)>0){sql("DROP OWNED BY "+group);sql("DROP ROLE "+group);}
+            }
+        }
+    }
+
+    @Test void versionedProfilesBoundConcurrentQuotaWorkloadAndSettlementContention() throws Exception {
+        enableIntegratedQuota(15);
+        var init=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.INITIATOR);
+        var worker=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.LIFECYCLE);
+        init.provision(source,"a12_init_group");worker.provision(source,"a12_worker_group");
+        sql("CREATE ROLE a12_init LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        sql("CREATE ROLE a12_worker LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try{
+            sql("GRANT a12_init_group TO a12_init");sql("GRANT a12_worker_group TO a12_worker");
+            init.verify(source,"a12_init","a12_init_group");worker.verify(source,"a12_worker","a12_worker_group");
+            var client=secured(CLOCK,manifestLogin("a12_init"));
+            var start=new CountDownLatch(1);
+            try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                var results=new ArrayList<Future<Boolean>>();
+                for(int i=0;i<6;i++){
+                    final int index=i;
+                    results.add(executor.submit(()->{start.await();
+                        try{client.initiate("user",TENANT,null,new Initiate("attachment","a12-"+index+".txt",5,"text/plain","a12-"+index));return true;}
+                        catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());return false;}
+                    }));
+                }
+                start.countDown();int accepted=0;
+                for(var result:results)if(result.get(15,TimeUnit.SECONDS))accepted++;
+                // Repeatable-read contention may reject otherwise admissible commands; retry below.
+                assertTrue(accepted>=1&&accepted<=3);
+            }
+            for(int i=0;i<6;i++){
+                try{client.initiate("user",TENANT,null,new Initiate("attachment","a12-"+i+".txt",5,"text/plain","a12-"+i));}
+                catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());}
+            }
+            assertEquals(3,scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE status='RESERVED'"));
+            assertEquals(15,scalar("SELECT sum(bytes) FROM fs.isolated_quota_reservation WHERE status='RESERVED'"));
+            var future=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);
+            var recovery=new JdbcUploadRecovery(new JdbcUploadTransfers(manifestLogin("a12_worker"),future,Duration.ofMinutes(1),5),ADMIN);
+            try(var c=source.getConnection();var st=c.createStatement()){
+                c.setAutoCommit(false);
+                st.execute("SELECT fs.touch_quota_fence('"+TENANT.value()+"'::uuid)");
+                try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                    var blocked=executor.submit(()->assertThrows(RuntimeException.class,recovery::runOne));
+                    blocked.get(8,TimeUnit.SECONDS);
+                }finally{c.rollback();}
+            }
+            assertEquals(3,scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE status='RESERVED'"));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.upload_terminal_recovery"));
+            assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.recovered'"));
+            try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                var results=new ArrayList<Future<Boolean>>();
+                for(int i=0;i<3;i++)results.add(executor.submit(recovery::runOne));
+                for(var result:results)assertTrue(result.get(10,TimeUnit.SECONDS));
+            }
+            assertFalse(recovery.runOne());
+            assertEquals(3,scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE status='RELEASED'"));
+            assertEquals(3,scalar("SELECT count(*) FROM fs.upload_terminal_recovery"));
+            assertEquals(3,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.recovered'"));
+        }finally{
+            for(String role:List.of("a12_init","a12_worker","a12_init_group","a12_worker_group")){
+                sql("DROP OWNED BY "+role);sql("DROP ROLE "+role);
+            }
+        }
+    }
+
+    @Test void auditedManifestProfileBoundedCaptureRevocationAndRestore() throws Exception {
+        long revision=reviewedPolicy(CLOCK,0,10);
+        var quota=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        reviewQuotaValues(quota,0,revision,100,300);
+        quota.activateReviewed(POLICY_ACTIVATOR,TENANT,0,revision,corr);
+        var profile=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.MANIFEST);
+        profile.provision(source,"a12_manifest_group");
+        sql("CREATE ROLE a12_manifest LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try{
+            sql("GRANT a12_manifest_group TO a12_manifest");
+            sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability,execution_mode) VALUES ('a12_manifest',?,'a12-actor','CAPTURE','AUDITED')",TENANT.value());
+            profile.verify(source,"a12_manifest","a12_manifest_group");
+            var login=manifestLogin("a12_manifest");var capture=new JdbcAccountingManifest(login,CLOCK);
+            UUID blocked=UUID.randomUUID();
+            try(var c=source.getConnection();var st=c.createStatement()){
+                c.setAutoCommit(false);st.execute("LOCK TABLE fs.upload_session IN ROW EXCLUSIVE MODE");
+                try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                    var result=executor.submit(()->assertThrows(RuntimeException.class,()->capture.capture(TENANT,blocked,revision,corr)));
+                    result.get(8,TimeUnit.SECONDS);
+                }finally{c.rollback();}
+            }
+            assertEquals(0,scalar("SELECT count(*) FROM fs.accounting_manifest"));
+            var ids=List.of(blocked,UUID.randomUUID(),UUID.randomUUID());
+            try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+                var results=new ArrayList<Future<UUID>>();
+                for(UUID id:ids)results.add(executor.submit(()->capture.capture(TENANT,id,revision,corr)));
+                for(int i=0;i<ids.size();i++)assertEquals(ids.get(i),results.get(i).get(10,TimeUnit.SECONDS));
+            }
+            assertEquals(3,scalar("SELECT count(*) FROM fs.accounting_manifest_intent"));
+            sql("UPDATE fs.accounting_manifest_principal SET execution_mode='DISABLED' WHERE login_role='a12_manifest'");
+            assertEquals(Code.DENIED,assertThrows(Failure.class,()->capture.capture(TENANT,blocked,revision,corr)).code());
+            sql("REVOKE a12_manifest_group FROM a12_manifest");
+            assertEquals(Code.DENIED,assertThrows(Failure.class,()->capture.capture(TENANT,blocked,revision,corr)).code());
+            // Real logical backup/restore into another database in the same disposable container.
+            // No role grants or ownership are restored; no external transport/provider operations.
+            var dump=DB.execInContainer("pg_dump","-U",DB.getUsername(),"-d",DB.getDatabaseName(),
+                "-Fc","--no-owner","--no-privileges","-f","/tmp/a12-rehearsal.dump");
+            assertEquals(0,dump.getExitCode());
+            assertEquals(0,DB.execInContainer("createdb","-U",DB.getUsername(),"a12_restore").getExitCode());
+            try{
+                assertEquals(0,DB.execInContainer("pg_restore","-U",DB.getUsername(),"-d","a12_restore",
+                    "--no-owner","--no-privileges","--exit-on-error","/tmp/a12-rehearsal.dump").getExitCode());
+                var restored=new PGSimpleDataSource();restored.setURL(DB.getJdbcUrl());restored.setDatabaseName("a12_restore");
+                restored.setUser(DB.getUsername());restored.setPassword(DB.getPassword());
+                RuntimeComposition.migrate(restored);
+                assertTrue(StorageMigrations.ready(restored));
+                try(var c=restored.getConnection();var st=c.createStatement()){
+                    try(var rs=st.executeQuery("SELECT count(*) FROM fs.accounting_manifest_intent i JOIN fs_kernel.platform_audit_event a ON a.audit_id=i.audit_id JOIN fs_kernel.platform_event_outbox e ON e.event_id=i.event_id")){
+                        assertTrue(rs.next());assertEquals(3,rs.getLong(1));
+                    }
+                    try(var rs=st.executeQuery("SELECT count(*) FROM fs.accounting_manifest_principal WHERE execution_mode='DISABLED'")){
+                        assertTrue(rs.next());assertEquals(1,rs.getLong(1));
+                    }
+                    try(var rs=st.executeQuery("SELECT count(*) FROM fs.upload_session")){
+                        assertTrue(rs.next());assertEquals(1,rs.getLong(1));
+                    }
+                    try(var rs=st.executeQuery("SELECT count(*) FROM fs.isolated_quota_reservation")){
+                        assertTrue(rs.next());assertEquals(0,rs.getLong(1));
+                    }
+                }
+            }finally{
+                assertEquals(0,DB.execInContainer("dropdb","-U",DB.getUsername(),"a12_restore").getExitCode());
+                DB.execInContainer("rm","-f","/tmp/a12-rehearsal.dump");
+            }
+        }finally{
+            sql("DELETE FROM fs.accounting_manifest_principal WHERE login_role='a12_manifest'");
+            sql("DROP OWNED BY a12_manifest");sql("DROP ROLE a12_manifest");
+            sql("DROP OWNED BY a12_manifest_group");sql("DROP ROLE a12_manifest_group");
+        }
+    }
+
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
         sql("""
             INSERT INTO fs.file_retention_evidence(tenant_id,file_id,lifecycle_revision,policy_revision,hold_state,retain_until,observed_at,valid_until)

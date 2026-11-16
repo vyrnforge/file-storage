@@ -121,14 +121,14 @@ final class IsolatedRoleProfiles {
                         result.add("schema "+rows.getString(1));}
             }
             try(var ps=c.prepareStatement("""
-                SELECT n.nspname||'.'||r.relname,p.priv,has_table_privilege(?,r.oid,p.priv)
+                SELECT n.nspname||'.'||r.relname,p.priv,has_table_privilege(?,r.oid,p.priv),has_table_privilege(?,r.oid,p.priv||' WITH GRANT OPTION')
                 FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace
                 CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) p(priv)
                 WHERE n.nspname IN ('fs','fs_kernel') AND r.relkind IN ('r','p','v','m','f')
                 """)){
-                ps.setString(1,login);
+                ps.setString(1,login);ps.setString(2,login);
                 try(var rows=ps.executeQuery()){while(rows.next())
-                    if(rows.getBoolean(3)!=allowed(rows.getString(1),rows.getString(2),null))
+                    if(rows.getBoolean(3)!=allowed(rows.getString(1),rows.getString(2),null)||rows.getBoolean(4))
                         result.add("table "+rows.getString(1)+" "+rows.getString(2));}
             }
             try(var ps=c.prepareStatement("""
@@ -151,7 +151,11 @@ final class IsolatedRoleProfiles {
                 WHERE n.nspname IN ('fs','fs_kernel') AND p.prorettype<> 'trigger'::regtype
                 """)){
                 ps.setString(1,login);var expected=new HashSet<Long>();
-                for(String f:functions)try(var q=c.prepareStatement("SELECT ?::regprocedure::oid")){q.setString(1,f);try(var row=q.executeQuery()){row.next();expected.add(row.getLong(1));}}
+                var baseline=new HashSet<>(functions);
+                // V4 legacy PUBLIC invoker helper; it has no elevated privileges and
+                // callers still need schema/table access. Track it explicitly, not a wildcard.
+                baseline.add("fs.backend_retirement_blocked(uuid)");
+                for(String f:baseline)try(var q=c.prepareStatement("SELECT ?::regprocedure::oid")){q.setString(1,f);try(var row=q.executeQuery()){row.next();expected.add(row.getLong(1));}}
                 try(var rows=ps.executeQuery()){while(rows.next())
                     if(rows.getBoolean(3)!=expected.contains(rows.getLong(1)))
                         result.add("function "+rows.getString(2));}
