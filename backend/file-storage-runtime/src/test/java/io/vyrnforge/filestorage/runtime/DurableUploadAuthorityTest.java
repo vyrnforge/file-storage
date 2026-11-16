@@ -1870,6 +1870,87 @@ class DurableUploadAuthorityTest {
         assertEquals(0,scalar("SELECT count(*) FROM fs.purge_simulation WHERE status='SIMULATED'"));
     }
 
+    private long enableIntegratedQuota(long limit) throws Exception {
+        long rev=reviewedPolicy(CLOCK,0,10);var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        q.activate(POLICY_ACTIVATOR,TENANT,0,rev,limit,60,corr);
+        assertEquals(1,q.reconcile(ADMIN,TENANT).missingReservations());
+        assertThrows(Failure.class,()->q.enableIntegration(ADMIN,TENANT,rev,corr));
+        assertThrows(Failure.class,()->q.enableIntegration(ADMIN,OTHER,rev,corr));
+        // Reset disposable fixture only; never a runtime backfill or deletion path.
+        sql("TRUNCATE fs.file,fs_kernel.platform_idempotency CASCADE");
+        grant("fixture-user","asset","INITIATE","INITIATE_PURPOSE",null);
+        grant("fixture-user","asset","READ_SESSION","OWNED_FILE",null);
+        q.enableIntegration(ADMIN,TENANT,rev,corr);
+        assertThrows(Failure.class,()->q.enableIntegration(ADMIN,TENANT,rev,corr));
+        assertTrue(q.reconcile(ADMIN,TENANT).integrated());
+        return rev;
+    }
+
+    @Test void integratedQuotaConcurrentInitiationAndReplay() throws Exception {
+        long rev=enableIntegratedQuota(5);var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        var left=new Initiate("attachment","left.txt",5,"text/plain","left-key");
+        var right=new Initiate("attachment","right.txt",5,"text/plain","right-key");
+        var start=new CountDownLatch(1);
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+            Callable<Boolean> first=()->{start.await();try{secured.initiate("user",TENANT,null,left);return true;}catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());return false;}};
+            Callable<Boolean> second=()->{start.await();try{secured.initiate("user",TENANT,null,right);return true;}catch(Failure ex){assertEquals(Code.CONFLICT,ex.code());return false;}};
+            var one=executor.submit(first);var two=executor.submit(second);start.countDown();
+            boolean won=one.get(10,TimeUnit.SECONDS);assertNotEquals(won,two.get(10,TimeUnit.SECONDS));
+            view=secured.initiate("user",TENANT,null,won?left:right).value();
+            assertEquals(view.session(),secured.initiate("user",TENANT,null,won?left:right).value().session());
+            assertThrows(Failure.class,()->secured.initiate("user",TENANT,null,won?right:left));
+        }
+        assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
+        assertEquals(5,q.usage(ADMIN,TENANT).reserved().longValueExact());
+        assertThrows(Failure.class,()->q.reserve(ADMIN,TENANT,view.session(),rev,corr));
+        assertThrows(Failure.class,()->q.reconcile(ADMIN,OTHER));
+        assertEquals(0,q.reconcile(ADMIN,TENANT).missingReservations());
+        assertEquals(0,q.reconcile(ADMIN,TENANT).mismatchedReservations());
+        assertThrows(SQLException.class,()->sql("UPDATE fs.initiation_request SET expected_size=0"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.isolated_quota_fence SET enabled_revision=NULL WHERE tenant_id=?",TENANT.value()));
+    }
+
+    @Test void integratedQuotaCompletionAndRecoveryRollback() throws Exception {
+        long rev=enableIntegratedQuota(15);var q=isolatedQuota(CLOCK);var corr=CorrelationContext.create();
+        var cmd=new Initiate("attachment","sample.txt",5,"text/plain","integrated-key");
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_integrated_initiate CHECK (event_type <> 'file-storage.upload.initiated') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->secured.initiate("user",TENANT,null,cmd));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.upload_session"));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_integrated_initiate");}
+        view=secured.initiate("user",TENANT,null,cmd).value();
+        var fixture=matched();var scans=scans(CLOCK,3);
+        new UploadCompletion(secured,scans).begin("user",TENANT,view.session(),null);
+        var claim=scans.claim(1).claims().getFirst();var job=scans.load(claim);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_integrated_completion CHECK (event_type <> 'file-storage.upload.completed') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->scans.finish(job,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN));
+            assertEquals(5,q.usage(ADMIN,TENANT).reserved().longValueExact());
+            assertEquals(0,q.usage(ADMIN,TENANT).charged().longValueExact());
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_integrated_completion");}
+        scans.finish(job,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN);
+        assertEquals(5,q.usage(ADMIN,TENANT).charged().longValueExact());
+        assertThrows(Failure.class,()->scans.finish(job,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN));
+        var unclaimed=secured.initiate("user",TENANT,null,new Initiate("attachment","unclaimed.txt",5,"text/plain","unclaimed-key")).value();
+        var claimed=secured.initiate("user",TENANT,null,new Initiate("attachment","claimed.txt",5,"text/plain","claimed-key")).value();
+        var handle=authority().issue("user",TENANT,claimed.session(),null);
+        authority().claim("user",handle.handle(),TransferInstruction.Action.UPLOAD);
+        var future=Clock.fixed(NOW.plusSeconds(301),ZoneOffset.UTC);var recovery=recovery(future);
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_integrated_recovery CHECK (event_type <> 'file-storage.upload.recovered') NOT VALID");
+        try{assertThrows(RuntimeException.class,recovery::runOne);assertEquals(10,q.usage(ADMIN,TENANT).reserved().longValueExact());}
+        finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_integrated_recovery");}
+        assertTrue(recovery.runOne());assertTrue(recovery.runOne());assertFalse(recovery.runOne());
+        assertEquals(5,q.usage(ADMIN,TENANT).reserved().longValueExact());
+        assertEquals(5,q.usage(ADMIN,TENANT).charged().longValueExact());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE session_id=? AND status='RELEASED'",unclaimed.session().value()));
+        assertEquals(1,q.reconcile(ADMIN,TENANT).uncertainTerminalReservations());
+        assertEquals(0,q.reconcile(ADMIN,TENANT).mismatchedReservations());
+        assertThrows(Failure.class,()->q.settle(ADMIN,TENANT,claimed.session(),JdbcIsolatedPolicyQuota.Status.RELEASED,corr));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+    }
+
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
         sql("""
             INSERT INTO fs.file_retention_evidence(tenant_id,file_id,lifecycle_revision,policy_revision,hold_state,retain_until,observed_at,valid_until)

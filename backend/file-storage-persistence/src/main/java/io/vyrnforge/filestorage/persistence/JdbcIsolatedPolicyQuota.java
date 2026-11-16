@@ -104,10 +104,65 @@ public final class JdbcIsolatedPolicyQuota {
             return new Evidence(generation,policy.revision(),hold,retain,now,until);
         });
     }
+    /** Irreversible opt-in for a fresh, explicitly isolated tenant. No backfill. */
+    public void enableIntegration(ActorReference actor,TenantId tenant,long expected,CorrelationContext correlation){
+        require(actor,tenant,null,Action.ENABLE_ISOLATED_QUOTA_INTEGRATION);
+        tx.execute((c,events,audits)->{
+            lockTenant(c,tenant);current(c,tenant,expected);
+            if(integrated(c,tenant))throw conflict();
+            try(var ps=tx.statement(c,"SELECT fs.touch_quota_fence(?)",tenant.value());var rows=ps.executeQuery()){rows.next();}
+            try(var ps=tx.statement(c,"SELECT 1 FROM fs.file WHERE tenant_id=? LIMIT 1",tenant.value());var rows=ps.executeQuery()){
+                if(rows.next())throw conflict();
+            }
+            try(var ps=tx.statement(c,"UPDATE fs.isolated_quota_fence SET enabled_revision=? WHERE tenant_id=? AND enabled_revision IS NULL",expected,tenant.value())){
+                if(ps.executeUpdate()!=1)throw conflict();
+            }
+            MutationIntents.record(events,audits,clock,correlation,actor,tenant.value(),"file-storage.quota.isolated-integration-enabled",
+                "file-storage.retention-policy",tenant.value().toString(),Map.of("revision",expected,"environment","ISOLATED"));
+            return null;
+        });
+    }
+
+    /** One snapshot, counts only; never repairs or backfills historical data. */
+    public record Reconciliation(boolean integrated,long missingReservations,long mismatchedReservations,
+                                 long untrackedVersions,long uncertainTerminalReservations){}
+    public Reconciliation reconcile(ActorReference actor,TenantId tenant){
+        require(actor,tenant,null,Action.RECONCILE_ISOLATED_QUOTA);
+        return tx.execute((c,events,audits)->{
+            try(var ps=tx.statement(c,"""
+                WITH sessions AS (
+                  SELECT s.*,r.expected_size,q.session_id AS reserved_id,q.bytes,q.status,
+                    q.file_id AS qfile,q.version_id AS qversion,q.location_id AS qlocation,q.consumer AS qconsumer,
+                    EXISTS(SELECT 1 FROM fs.upload_transfer_handle h WHERE h.session_id=s.session_id AND h.claimed_at IS NOT NULL) AS claimed
+                  FROM fs.upload_session s
+                  LEFT JOIN fs.initiation_request r ON r.session_id=s.session_id AND r.tenant_id=s.tenant_id
+                  LEFT JOIN fs.isolated_quota_reservation q ON q.session_id=s.session_id AND q.tenant_id=s.tenant_id
+                  WHERE s.tenant_id=?
+                )
+                SELECT EXISTS(SELECT 1 FROM fs.isolated_quota_fence WHERE tenant_id=? AND enabled_revision IS NOT NULL),
+                  count(*) FILTER(WHERE reserved_id IS NULL),
+                  count(*) FILTER(WHERE reserved_id IS NOT NULL AND
+                    (ROW(file_id,version_id,location_id,consumer,expected_size) IS DISTINCT FROM ROW(qfile,qversion,qlocation,qconsumer,bytes)
+                     OR status IS DISTINCT FROM CASE WHEN state='COMPLETED' THEN 'CHARGED'
+                          WHEN state IN ('FAILED','EXPIRED') AND NOT claimed THEN 'RELEASED' ELSE 'RESERVED' END)),
+                  (SELECT count(*) FROM fs.file_version v WHERE v.tenant_id=? AND NOT EXISTS
+                    (SELECT 1 FROM fs.upload_session s WHERE s.tenant_id=v.tenant_id AND s.version_id=v.version_id)),
+                  count(*) FILTER(WHERE state IN ('FAILED','EXPIRED') AND claimed AND status='RESERVED')
+                FROM sessions
+                """,tenant.value(),tenant.value(),tenant.value());var rows=ps.executeQuery()){
+                rows.next();return new Reconciliation(rows.getBoolean(1),rows.getLong(2),rows.getLong(3),rows.getLong(4),rows.getLong(5));
+            }
+        });
+    }
+    private boolean integrated(Connection c,TenantId tenant)throws SQLException{
+        try(var ps=tx.statement(c,"SELECT 1 FROM fs.isolated_quota_fence WHERE tenant_id=? AND enabled_revision IS NOT NULL",tenant.value());var rows=ps.executeQuery()){
+            return rows.next();
+        }
+    }
     public Reservation reserve(ActorReference actor,TenantId tenant,SessionId session,long expectedPolicy,CorrelationContext correlation){
         require(actor,tenant,null,Action.ACCOUNT_ISOLATED_QUOTA);
         return tx.execute((c,events,audits)->{
-            lockTenant(c,tenant);var existing=reservation(c,tenant,session);
+            lockTenant(c,tenant);if(integrated(c,tenant))throw conflict();var existing=reservation(c,tenant,session);
             if(existing!=null){if(existing.policyRevision()!=expectedPolicy)throw conflict();return existing;}
             var policy=current(c,tenant,expectedPolicy);var s=session(c,tenant,session);
             if(!"INITIATED".equals(s.state())||s.claimed()||!s.expiresAt().isAfter(tx.now()))throw conflict();
@@ -123,7 +178,7 @@ public final class JdbcIsolatedPolicyQuota {
         require(actor,tenant,null,Action.ACCOUNT_ISOLATED_QUOTA);
         if(target==null||target==Status.RESERVED)throw invalid();
         return tx.execute((c,events,audits)->{
-            lockTenant(c,tenant);var existing=reservation(c,tenant,session);
+            lockTenant(c,tenant);if(integrated(c,tenant))throw conflict();var existing=reservation(c,tenant,session);
             if(existing==null)throw missing();
             if(existing.status()==target)return existing;
             if(existing.status()!=Status.RESERVED)throw conflict();

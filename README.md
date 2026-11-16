@@ -102,3 +102,11 @@ PR #83 accepted/merged 65b6ec4 (187 tests). [FS-310A4 reader safety and simulati
 PR #84 accepted/merged 0d0cc02 (190 tests). [FS-310A5 governed lifecycle](docs/architecture/34_GOVERNED_LIFECYCLE.md) — V15 candidate; physical purge disabled.
 
 PR #85 accepted/merged 8ea998f (193 tests). [FS-310A6 isolated policy and quota](docs/architecture/35_ISOLATED_POLICY_QUOTA.md) — V16 candidate; production policy and physical purge disabled.
+
+
+2026-11-16 (Asia/Jakarta): PR #86 accepted/squash merged 4af51dd819498d323345475d4a9cc3bf16d28288; exact-head CI 43785045045 passed 197 tests. Owner authorized FS-310A7 isolated transactional quota integration and reconciliation (#13/#16/#33/#35/#36). No production policy, historical backfill, hold release, actual provider deletion or deployment. PR #87 excluded.
+
+- [FS-310A7 isolated transactional quota integration](docs/architecture/36_ISOLATED_QUOTA_INTEGRATION.md) — V17 candidate; implementation CI passed, owner review pending.
+
+
+FS-310A7 candidate PR #88: [full CI 43801908520](https://github.com/vyrnforge/file-storage/actions/runs/43801908520) passed 199 tests (zero failures/errors/skips) at implementation head `74d22283d2254d482254b19fb68e92e3c8803dcf`; V17 repeatability and two new PostgreSQL regressions. Owner review/merge pending. Final review head verification is recorded on PR #88. Engineering choices: explicit empty isolated tenant, durable tenant fence even for non-enabled initiation (contention/load evidence deferred), transaction-triggered ledger changes and read-only reconciliation. No production activation or deployment.
