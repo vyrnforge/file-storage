@@ -1,0 +1,17 @@
+# FS-310A9 historical accounting manifest and restricted execution
+
+Status: implementation candidate; CI and owner review pending. Refs #13 #16 #33 #35 #36.
+
+V19 adds immutable manifest headers, per-session entries, and independent review. A current independently reviewed quota activation is required for a non-integrated tenant. The manifest retains exact metadata inputs (logical IDs, private internal placement IDs, session/version/file state, request bytes, claim and matching integrity evidence, existing ledger pins/status); untracked versions are enumerated separately. Candidate RESERVED/CHARGED/RELEASED/UNRESOLVED/ALREADY_ACCOUNTED are estimates, not provider truth or executable instructions. A completed session requires matching durable integrity evidence for a candidate charge. Claimed terminal failure remains unresolved. The manifest does not change quota, accounting, lifecycle, provider data or integration.
+
+## Execution boundary
+
+Two explicit login-role mappings associate a tenant, trusted actor and CAPTURE or REVIEW capability. Owner-controlled isolated provisioning grants schema USAGE and only the appropriate SECURITY DEFINER command and scoped read function. Commands use session_user (not supplied actor or SET ROLE), fixed search_path and UTC, explicit tenant equality, and revoked PUBLIC execution. No production role or automatic grants are created. No direct source-table or manifest-table grants are required. The migration owner remains privileged; trusted role provisioning and credential lifecycle require separate review. This is a restricted historical manifest execution foundation, not full application runtime role conversion or RLS. Database owner and superuser are outside the threat boundary. The manifest/review rows are the durable evidence; Kernel audit/outbox integration for these commands is deferred.
+
+## Snapshot and review
+
+Capture and review use READ COMMITTED and SHARE table locks on all enumerated source tables; this intentionally coarse isolated rehearsal fence also covers non-integrated writers. Lock timeout is two seconds per lock; callers must bound the entire statement/transaction. Capture is capped at 1000 sessions and versions, rejects an integrated tenant, binds the exact current reviewed policy revision and its evidence TTL, and commits header/entries atomically. Review requires a different mapped actor, same revision, non-expired evidence and exact set comparison against current entries/untracked versions. Same-ID identical command replay returns the prior immutable result; replay never refreshes evidence or grants execution. Concurrent duplicate inserts can conflict and require retry. Snapshot comparison is current-state equality, not a permanent change journal: transient changes that revert before review are not detected, nor is post-review mutation fenced. Any future execution would require an independently approved fresh transactional revalidation design. Global locks are unsuitable for production throughput without load and design review.
+
+## Rehearsal and verification
+
+Disposable PostgreSQL V18 populated upload upgrade to V19 and repeat migration, existing session/idempotency preservation, non-owner login capture/read/review, cross-tenant and direct DML denial, independent actor and revision rejection, changed session-set rejection, bounded contention and retry. Full CI evidence pending. No actual historical backfill, production duration/limit, legal-hold release, provider deletion or deployment. PR #87 excluded.

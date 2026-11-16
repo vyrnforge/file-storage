@@ -46,7 +46,20 @@ class JdbcTransactionsTest {
         sql("INSERT INTO fs.policy_revision VALUES (?, 'asset', 'attachment', 1)", A.value());
         sql("INSERT INTO fs.policy_rule VALUES (?, 'asset', 'attachment', 1, ?, 0, true)", A.value(), OL);
         sql("INSERT INTO fs.active_policy VALUES (?, 'asset', 'attachment', 1)", A.value());
+        org.flywaydb.core.Flyway.configure().dataSource(dataSource)
+                .schemas("fs").defaultSchema("fs").locations("classpath:db/filestorage")
+                .target("18").load().migrate();
+        org.flywaydb.core.Flyway.configure().dataSource(dataSource)
+                .schemas("fs_kernel").defaultSchema("fs_kernel").locations("classpath:db/migration").load().migrate();
+        var historical = application().initiate(ALICE, command("v18-populated-rehearsal"));
+        assertEquals(1, count("upload_session"));
         StorageMigrations.migrate(dataSource);
+        StorageMigrations.migrate(dataSource);
+        assertTrue(StorageMigrations.ready(dataSource));
+        assertEquals(historical, application().initiate(ALICE, command("v18-populated-rehearsal")));
+        assertEquals(1, count("upload_session"));
+        assertEquals(0, count("isolated_quota_reservation"));
+        assertEquals(0, count("accounting_manifest"));
         assertEquals(1, scalar("SELECT count(*) FROM fs.policy_revision WHERE sealed"));
         assertEquals(1, scalar("SELECT policy_revision FROM fs.active_policy"));
         assertEquals(1, scalar("SELECT config_revision FROM fs.backend_revision WHERE status='ACTIVE'"));
