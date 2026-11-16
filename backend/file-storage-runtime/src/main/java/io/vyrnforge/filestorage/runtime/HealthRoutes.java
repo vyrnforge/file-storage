@@ -13,9 +13,12 @@ public final class HealthRoutes {
     private final RuntimeRole role;
     private final ObjectProvider<RuntimeReadiness> readiness;
 
-    public HealthRoutes(@Value("${fs.role}") String role, ObjectProvider<RuntimeReadiness> readiness) {
+    private final ObjectProvider<StagingOperations> staging;
+
+    public HealthRoutes(@Value("${fs.role}") String role, ObjectProvider<RuntimeReadiness> readiness, ObjectProvider<StagingOperations> staging) {
         this.role = RuntimeRole.parse(role);
         this.readiness = readiness;
+        this.staging=staging;
     }
 
     @GetMapping("/health/live")
@@ -32,6 +35,9 @@ public final class HealthRoutes {
                 var probe = readiness.getIfAvailable();
                 ready = probe != null && probe.ready();
             } catch (RuntimeException ignored) { /* fail closed */ }
+        }
+        if(role==RuntimeRole.COMBINED){
+            try{var ops=staging.getIfAvailable();ready=ops!=null&&ops.ready();}catch(RuntimeException ignored){/* fail closed */}
         }
         return health(ready);
     }

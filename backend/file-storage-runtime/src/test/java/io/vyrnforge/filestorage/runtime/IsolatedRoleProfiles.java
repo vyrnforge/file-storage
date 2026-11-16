@@ -5,9 +5,9 @@ import java.util.*;
 import javax.sql.DataSource;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Version 3 candidate profiles: disposable rehearsal only, never invoked by runtime or Flyway. */
+/** Version 4 candidate profiles: disposable rehearsal only, never invoked by runtime or Flyway. */
 final class IsolatedRoleProfiles {
-    static final int VERSION=3;
+    static final int VERSION=4;
     enum Kind { INITIATOR, LIFECYCLE, MANIFEST, DISPATCHER, METADATA_API, TRANSFER, BACKEND_ADMIN, LOGICAL, PURGE_PREPARATION, PLACEMENT, BACKEND_ONLY, GRANT_READ, READINESS, GOVERNANCE, COMPLETION_WORKER }
     record Grant(String object,String privilege,List<String> columns) {}
     private final Kind kind;
@@ -142,7 +142,7 @@ final class IsolatedRoleProfiles {
     private void table(String p,String... tables){for(String t:tables)grants.add(new Grant(t,p,List.of()));}
     private void column(String p,String t,String... c){grants.add(new Grant(t,p,List.of(c)));}
     private static String safe(String name){
-        if(!name.matches("a1[234]_[a-z0-9_]+"))throw new IllegalArgumentException("fixture role required");
+        if(!name.matches("a1[2345]_[a-z0-9_]+"))throw new IllegalArgumentException("fixture role required");
         return name;
     }
     static void exec(DataSource owner,String sql)throws SQLException{
