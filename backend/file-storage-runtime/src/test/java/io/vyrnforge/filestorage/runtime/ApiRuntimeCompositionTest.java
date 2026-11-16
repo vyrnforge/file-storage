@@ -338,4 +338,134 @@ class ApiRuntimeCompositionTest {
         }
     }
 
+    static final class StagingFixture {
+        volatile byte[] bytes;
+        volatile boolean ready=true;
+        final java.util.concurrent.atomic.AtomicInteger opens=new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicInteger closes=new java.util.concurrent.atomic.AtomicInteger();
+        final List<UUID> delivered=new java.util.concurrent.CopyOnWriteArrayList<>();
+        io.vyrnforge.filestorage.runtime.transfer.TransferProviderResolver.Lease open(){
+            opens.incrementAndGet();
+            return new io.vyrnforge.filestorage.runtime.transfer.TransferProviderResolver.Lease(){
+                public io.vyrnforge.filestorage.spi.StorageProvider provider(){
+                    return new io.vyrnforge.filestorage.spi.StorageProvider(){
+                        public Set<Capability> capabilities(){return Set.of();}
+                        public Metadata put(Locator key,java.io.InputStream input,long size,Call call){
+                            try{byte[] data=input.readAllBytes();if(data.length!=size||bytes!=null)throw new StorageFailure(ErrorCode.CONFLICT);
+                                bytes=data;return new Metadata(data.length,null,"text/plain");}
+                            catch(java.io.IOException ex){throw new StorageFailure(ErrorCode.TRANSIENT);}
+                        }
+                        public java.io.InputStream get(Locator key,Call call){return new java.io.ByteArrayInputStream(Objects.requireNonNull(bytes));}
+                        public Metadata head(Locator key,Call call){return new Metadata(Objects.requireNonNull(bytes).length,null,"text/plain");}
+                        public void delete(Locator key,Call call){throw new AssertionError("no physical deletion");}
+                        public Page list(LocationId loc,String prefix,String cursor,int limit,Call call){throw new AssertionError("no listing");}
+                    };
+                }
+                public void close(){closes.incrementAndGet();}
+            };
+        }
+    }
+    private static StagingRuntimeDependencies stagingDependencies;
+    @Configuration(proxyBeanMethods=false)
+    @Import({TestConfiguration.class,StagingRuntimeConfiguration.class})
+    static class StagingConfiguration {
+        @Bean StagingRuntimeDependencies staging(){return Objects.requireNonNull(stagingDependencies);}
+    }
+    private static ConfigurableApplicationContext staging(boolean dispatch){
+        return RuntimeApplication.application(StagingConfiguration.class).run("--server.port=0","--fs.role=COMBINED",
+            "--fs.require-separated-roles=true","--fs.staging.enabled=true","--fs.staging.delay-ms=100",
+            "--fs.staging.dispatch-enabled="+dispatch);
+    }
+    private static void awaitCount(String query,long count)throws Exception{
+        long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(15);
+        while(scalar(query)!=count&&System.nanoTime()<deadline)Thread.sleep(50);
+        assertEquals(count,scalar(query));
+    }
+    @Test void stagingCompositionRunsGatewayWorkersAndOptInDispatcherWithoutOwnerCredentials()throws Exception{
+        RuntimeComposition.migrate(source);seed();
+        var roles=RuntimeDatabaseRoles.Role.values();
+        var kinds=List.of(IsolatedRoleProfiles.Kind.METADATA_API,IsolatedRoleProfiles.Kind.LOGICAL,
+            IsolatedRoleProfiles.Kind.PURGE_PREPARATION,IsolatedRoleProfiles.Kind.PLACEMENT,IsolatedRoleProfiles.Kind.BACKEND_ONLY,
+            IsolatedRoleProfiles.Kind.GRANT_READ,IsolatedRoleProfiles.Kind.READINESS,IsolatedRoleProfiles.Kind.TRANSFER,
+            IsolatedRoleProfiles.Kind.COMPLETION_WORKER,IsolatedRoleProfiles.Kind.GOVERNANCE,IsolatedRoleProfiles.Kind.DISPATCHER);
+        var bindings=new EnumMap<RuntimeDatabaseRoles.Role,RuntimeDatabaseRoles.Binding>(RuntimeDatabaseRoles.Role.class);
+        var fixture=new StagingFixture();
+        try{
+            for(int i=0;i<roles.length;i++){
+                String group="a15_group_"+i,name="a15_login_"+i;
+                var profile=new IsolatedRoleProfiles(kinds.get(i));profile.provision(source,group);
+                sql("CREATE ROLE "+name+" LOGIN PASSWORD 'fixture-only-a14' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+                sql("GRANT "+group+" TO "+name);profile.verify(source,name,group);
+                bindings.put(roles[i],new RuntimeDatabaseRoles.Binding(name,login(name)));
+            }
+            separated=new RuntimeDatabaseRoles(bindings);assertTrue(separated.ready());
+            Location location;
+            try(var c=source.getConnection();var st=c.createStatement();var rs=st.executeQuery("SELECT location_id,backend_id,bucket,prefix FROM fs.storage_location")){
+                assertTrue(rs.next());location=new Location(new LocationId(rs.getObject(1,UUID.class)),new BackendId(rs.getObject(2,UUID.class)),rs.getString(3),rs.getString(4));
+            }
+            stagingDependencies=new StagingRuntimeDependencies("staging",new Trust(ISS,AUD),
+                Map.of(location.id(),new StagingRuntimeDependencies.Pin(TARGET,location,new CredentialRef("ref:fixture/v1"))),
+                ref->{assertEquals(new CredentialRef("ref:fixture/v1"),ref);return ()->{};},
+                Map.of(Provider.S3,(target,loc,revision,credential)->{assertEquals(TARGET,target);assertEquals(location,loc);assertEquals(1,revision);return fixture.open();}),
+                (input,size,remaining)->{try{assertEquals(size,input.readAllBytes().length);return new io.vyrnforge.filestorage.runtime.transfer.ContentScanner.Verdict(Scan.CLEAN,"text/plain");}
+                    catch(java.io.IOException ex){throw new IllegalStateException("fixture scan");}},
+                event->fixture.delivered.add(event.eventId()),ADMIN,()->fixture.ready,
+                new io.vyrnforge.filestorage.runtime.transfer.TransferLimits(1024,1,1024,Duration.ofSeconds(5)),Duration.ofMinutes(1),
+                Duration.ofSeconds(30),Duration.ZERO,3,10);
+            fixtureGrant("INITIATE","INITIATE_PURPOSE");
+            for(String action:List.of("READ_SESSION","READ_METADATA","UPLOAD_TRANSFER","DOWNLOAD_TRANSFER"))fixtureGrant(action,"OWNED_FILE");
+            try(var ctx=staging(false)){
+                status(200,call(ctx,"GET","/health/ready",null,false,null));
+                var created=call(ctx,"POST","/v1/uploads","user",true,BODY);status(200,created);
+                String session=field(created.body(),"sessionId"),file=field(created.body(),"fileId"),version=field(created.body(),"versionId");
+                var issued=call(ctx,"POST","/v1/uploads/"+session+"/transfer-handle","user",true,"{}");status(200,issued);
+                String handle=field(issued.body(),"handle");
+                String base="http://127.0.0.1:"+ctx.getEnvironment().getProperty("local.server.port");
+                byte[] bytes="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                try(var http=HttpClient.newHttpClient()){
+                    var upload=HttpRequest.newBuilder(URI.create(base+"/transfer/v1/upload")).header("Authorization","Bearer user")
+                        .header("X-Transfer-Handle",handle).header("Content-Type","application/octet-stream").PUT(HttpRequest.BodyPublishers.ofByteArray(bytes)).build();
+                    assertEquals(204,http.send(upload,HttpResponse.BodyHandlers.discarding()).statusCode());
+                }
+                String digest=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+                fixture.ready=false;
+                status(503,call(ctx,"GET","/health/ready",null,false,null));
+                status(202,call(ctx,"POST","/v1/uploads/"+session+"/complete","user",true,"{\"sha256\":\""+digest+"\"}"));
+                ctx.getBean(StagingOperations.class).tick();
+                assertEquals(0,scalar("SELECT count(*) FROM fs.upload_integrity_verification WHERE verified_at IS NOT NULL"));
+                fixture.ready=true;
+                awaitCount("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'",1);
+                status(200,call(ctx,"GET","/health/ready",null,false,null));
+                var download=call(ctx,"POST","/v1/files/"+file+"/versions/"+version+"/download-handle","user",true,"{}");status(200,download);
+                try(var http=HttpClient.newHttpClient()){
+                    var request=HttpRequest.newBuilder(URI.create(base+"/transfer/v1/download")).header("Authorization","Bearer user")
+                        .header("X-Transfer-Handle",field(download.body(),"handle")).GET().build();
+                    var response=http.send(request,HttpResponse.BodyHandlers.ofByteArray());assertEquals(200,response.statusCode());assertArrayEquals(bytes,response.body());
+                }
+                assertEquals(1,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL"));
+                assertEquals(0,fixture.delivered.size());
+                assertEquals(0,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PUBLISHED'"));
+            }
+            long pending=scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PENDING'");
+            assertTrue(pending>0);
+            try(var ctx=staging(true)){
+                awaitCount("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PUBLISHED'",pending);
+                assertEquals(pending,fixture.delivered.size());assertEquals(pending,new HashSet<>(fixture.delivered).size());
+                assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind IN ('PURGE_VERSION','MIGRATE_VERSION','CLEANUP_UPLOAD')"));
+                assertEquals(fixture.opens.get(),fixture.closes.get());
+                assertTrue(fixture.opens.get()>=4);
+                sql("REVOKE a15_group_10 FROM a15_login_10");
+                status(503,call(ctx,"GET","/health/ready",null,false,null));
+                sql("GRANT a15_group_10 TO a15_login_10");
+            }
+            assertThrows(RuntimeException.class,()->{try(var ignored=RuntimeApplication.application(StagingConfiguration.class)
+                .run("--server.port=0","--fs.role=COMBINED","--fs.require-separated-roles=true","--fs.staging.delay-ms=100")){
+                    fail("staging requires explicit activation");}});
+        }finally{
+            separated=null;stagingDependencies=null;
+            for(int i=roles.length-1;i>=0;i--)for(String role:List.of("a15_login_"+i,"a15_group_"+i))
+                if(scalar("SELECT count(*) FROM pg_roles WHERE rolname='"+role+"'")>0){sql("DROP OWNED BY "+role);sql("DROP ROLE "+role);}
+        }
+    }
+
 }
