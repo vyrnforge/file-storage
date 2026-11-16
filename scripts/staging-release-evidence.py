@@ -77,6 +77,18 @@ expected_starters = {"spring-boot-starter", "spring-boot-starter-jackson", "spri
 if any(c.get("group") != "org.springframework.boot" or c.get("name") not in expected_starters
        for c in components if c.get("bom-ref") not in used):
     raise SystemExit(f"unexpected graph-only CycloneDX components: {extra}")
+license_path = target / "staging-license-evidence.json"
+license_evidence = json.loads(license_path.read_text(encoding="utf-8"))
+if license_evidence["artifactSha256"] != digest(jar) or license_evidence["bomSha256"] != digest(bom_path):
+    raise SystemExit("license evidence mismatch")
+license_by_path = {row["path"]: row for row in license_evidence["libraries"]}
+if set(license_by_path) != {row["path"] for row in entries}:
+    raise SystemExit("license evidence coverage mismatch")
+for entry in entries:
+    row = license_by_path[entry["path"]]
+    if row["sha256"] != entry["sha256"]:
+        raise SystemExit("license library digest mismatch")
+    entry["licenseDisposition"] = row["disposition"]
 event = {}
 if os.environ.get("GITHUB_EVENT_PATH"):
     event = json.loads(pathlib.Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
@@ -86,7 +98,7 @@ provenance = {"format": "file-storage-build-evidence-v1", "attestation": "UNSIGN
               "pullRequestHead": pr.get("head", {}).get("sha"), "pullRequestBase": pr.get("base", {}).get("sha"),
               "workflowRun": os.environ.get("GITHUB_RUN_ID"), "workflowAttempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
               "artifact": jar.name, "artifactSha256": digest(jar), "inventorySha256": digest(inventory_path),
-              "cycloneDxSha256": digest(bom_path), "osvEvidenceSha256": digest(target / "staging-osv-meta.json"), "buildCommand": "make ci"}
+              "cycloneDxSha256": digest(bom_path), "osvEvidenceSha256": digest(target / "staging-osv-meta.json"), "licenseEvidenceSha256": digest(license_path), "licenseNoticeArchiveSha256": license_evidence["noticeArchiveSha256"], "buildCommand": "make ci"}
 write("staging-provenance.json", provenance)
 write("staging-release-review.json", {"format": "file-storage-release-review-v1",
     "decision": "NO-GO", "artifactSha256": digest(jar), "cycloneDxSha256": digest(bom_path),
@@ -95,7 +107,8 @@ write("staging-release-review.json", {"format": "file-storage-release-review-v1"
     "vulnerabilityScan": scan_meta["status"], "vulnerabilityEvidence": scan_meta,
     "scanMatchedPackagedLibraries": sum(e["vulnerabilityScanCoverage"] == "MATCHED" for e in entries),
     "librariesWithoutLicenseMetadata": [e["path"] for e in entries if not e["licenseMetadata"]],
-    "licenseReview": "UNREVIEWED", "signature": "NOT_SIGNED",
+    "licenseReview": "REVIEW_REQUIRED", "licenseEvidenceSha256": digest(license_path),
+    "licenseNoticeArchiveSha256": license_evidence["noticeArchiveSha256"], "signature": "NOT_SIGNED",
     "libraries": entries})
 print(f"Release evidence: {len(entries)} packaged libraries, {len(components)} BOM components; {len(unmapped)} unmapped libraries, {len(extra)} unmatched BOM components; NO-GO pending review")
 print(f"Scan matched {sum(e['vulnerabilityScanCoverage'] == 'MATCHED' for e in entries)} packaged libraries; {sum(not e['licenseMetadata'] for e in entries)} libraries lack license metadata")
