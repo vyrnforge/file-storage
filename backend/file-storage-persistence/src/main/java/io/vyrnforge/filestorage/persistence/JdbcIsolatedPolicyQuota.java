@@ -55,6 +55,140 @@ public final class JdbcIsolatedPolicyQuota {
             return new Policy(revision,seconds,quotaLimit,evidenceTtlSeconds,now);
         });
     }
+    /** Exact quota values are independently reviewed against a retention revision. */
+    public record QuotaDraft(long expectedActive,long revision,long limit,long evidenceTtlSeconds){
+        public QuotaDraft{
+            if(expectedActive<0||revision<=expectedActive||limit<=0||evidenceTtlSeconds<1||evidenceTtlSeconds>86400)
+                throw new Failure(Code.INVALID);
+        }
+    }
+    public void draftQuota(ActorReference actor,TenantId tenant,QuotaDraft draft,CorrelationContext correlation){
+        require(actor,tenant,null,Action.DRAFT_ISOLATED_QUOTA);Objects.requireNonNull(draft);
+        tx.execute((c,events,audits)->{
+            lockTenant(c,tenant);
+            try(var ps=tx.statement(c,"INSERT INTO fs.isolated_quota_policy_draft VALUES (?,?,?,?,?,?,?)",
+                tenant.value(),draft.revision(),draft.expectedActive(),draft.limit(),draft.evidenceTtlSeconds(),actor.actorId(),utc(tx.now()))){
+                ps.executeUpdate();
+            }
+            MutationIntents.record(events,audits,clock,correlation,actor,tenant.value(),"file-storage.quota.isolated-drafted",
+                "file-storage.retention-policy",tenant.value().toString(),Map.of("revision",draft.revision(),"limit",draft.limit(),"evidenceTtlSeconds",draft.evidenceTtlSeconds()));
+            return null;
+        });
+    }
+    public void reviewQuota(ActorReference actor,TenantId tenant,long revision,CorrelationContext correlation){
+        require(actor,tenant,null,Action.REVIEW_ISOLATED_QUOTA);
+        tx.execute((c,events,audits)->{
+            lockTenant(c,tenant);
+            try(var ps=tx.statement(c,"INSERT INTO fs.isolated_quota_policy_review VALUES (?,?,?,?)",
+                tenant.value(),revision,actor.actorId(),utc(tx.now()))){ps.executeUpdate();}
+            MutationIntents.record(events,audits,clock,correlation,actor,tenant.value(),"file-storage.quota.isolated-reviewed",
+                "file-storage.retention-policy",tenant.value().toString(),Map.of("revision",revision,"state","REVIEWED_NOT_ACTIVE"));
+            return null;
+        });
+    }
+    /** Immutable reviewed values are loaded, then activation CAS and the database guard recheck
+     * the exact revision in the write transaction. No caller-supplied limit or TTL. */
+    public Policy activateReviewed(ActorReference actor,TenantId tenant,long expected,long revision,CorrelationContext correlation){
+        require(actor,tenant,null,Action.ACTIVATE_ISOLATED_POLICY);
+        QuotaDraft draft=tx.execute((c,events,audits)->{
+            try(var ps=tx.statement(c,"""
+                SELECT q.quota_limit,q.evidence_ttl_seconds
+                FROM fs.isolated_quota_policy_draft q JOIN fs.isolated_quota_policy_review r USING(tenant_id,revision)
+                WHERE q.tenant_id=? AND q.revision=? AND q.expected_active=?
+                """,tenant.value(),revision,expected);var rows=ps.executeQuery()){
+                if(!rows.next())throw conflict();
+                return new QuotaDraft(expected,revision,rows.getLong(1),rows.getLong(2));
+            }
+        });
+        return activate(actor,tenant,expected,revision,draft.limit(),draft.evidenceTtlSeconds(),correlation);
+    }
+
+    public enum FindingDisposition { ACKNOWLEDGED, NEEDS_INVESTIGATION }
+    public record Finding(UUID id,Long policyRevision,boolean integrated,Instant capturedAt,
+                          long missingReservations,long mismatchedReservations,long untrackedVersions,long uncertainTerminal,
+                          BigDecimal candidateReservedBytes,BigDecimal candidateChargedBytes,
+                          BigDecimal candidateReleasedBytes,long unresolvedSessions){}
+    /** Single database snapshot of metadata and ledger; only the finding and audit/outbox are written.
+     * Candidate bytes are estimates, never permission to apply historical accounting or remove objects. */
+    public Finding captureFinding(ActorReference actor,TenantId tenant,CorrelationContext correlation){
+        require(actor,tenant,null,Action.CAPTURE_QUOTA_FINDING);
+        return tx.execute((c,events,audits)->{
+            UUID id=UuidV7.generate();var now=tx.now();
+            Finding finding;
+            try(var ps=tx.statement(c,"""
+                WITH sessions AS (
+                  SELECT s.*,r.expected_size,q.session_id AS reserved_id,q.bytes,q.status,
+                    q.file_id AS qfile,q.version_id AS qversion,q.location_id AS qlocation,q.consumer AS qconsumer,
+                    v.state AS version_state,e.verdict,e.observed_size,
+                    EXISTS(SELECT 1 FROM fs.upload_terminal_recovery x WHERE x.session_id=s.session_id) AS recovered,
+                    EXISTS(SELECT 1 FROM fs.upload_transfer_handle h WHERE h.session_id=s.session_id AND h.claimed_at IS NOT NULL) AS claimed
+                  FROM fs.upload_session s
+                  LEFT JOIN fs.initiation_request r ON r.session_id=s.session_id AND r.tenant_id=s.tenant_id
+                  LEFT JOIN fs.isolated_quota_reservation q ON q.session_id=s.session_id AND q.tenant_id=s.tenant_id
+                  LEFT JOIN fs.file_version v ON v.version_id=s.version_id AND v.tenant_id=s.tenant_id AND v.file_id=s.file_id AND v.location_id=s.location_id
+                  LEFT JOIN fs.upload_scan_evidence e ON e.session_id=s.session_id
+                  WHERE s.tenant_id=?
+                ), classified AS (
+                  SELECT *,CASE
+                    WHEN expected_size IS NULL THEN 'UNRESOLVED'
+                    WHEN state='COMPLETED' AND version_state='AVAILABLE' AND verdict='CLEAN' AND observed_size=expected_size THEN 'CHARGED'
+                    WHEN state='INITIATED' AND version_state='PENDING' THEN 'RESERVED'
+                    WHEN state='VERIFYING' AND version_state='VERIFYING' THEN 'RESERVED'
+                    WHEN state IN ('FAILED','EXPIRED') AND version_state='FAILED' AND NOT claimed AND recovered THEN 'RELEASED'
+                    ELSE 'UNRESOLVED' END AS candidate
+                  FROM sessions
+                )
+                INSERT INTO fs.isolated_quota_finding
+                (finding_id,tenant_id,policy_revision,integrated,captured_at,requester,missing_reservations,mismatched_reservations,
+                 untracked_versions,uncertain_terminal,candidate_reserved_bytes,candidate_charged_bytes,candidate_released_bytes,unresolved_sessions)
+                SELECT ?,?,(SELECT max(revision) FROM fs.isolated_policy_activation WHERE tenant_id=?),
+                  EXISTS(SELECT 1 FROM fs.isolated_quota_fence WHERE tenant_id=? AND enabled_revision IS NOT NULL),?,?,
+                  count(*) FILTER(WHERE reserved_id IS NULL),
+                  count(*) FILTER(WHERE reserved_id IS NOT NULL AND
+                    (ROW(file_id,version_id,location_id,consumer,expected_size) IS DISTINCT FROM ROW(qfile,qversion,qlocation,qconsumer,bytes)
+                     OR status IS DISTINCT FROM CASE WHEN state='COMPLETED' THEN 'CHARGED'
+                          WHEN state IN ('FAILED','EXPIRED') AND NOT claimed THEN 'RELEASED' ELSE 'RESERVED' END
+                     OR (status='CHARGED' AND candidate<>'CHARGED'))),
+                  (SELECT count(*) FROM fs.file_version v WHERE v.tenant_id=? AND NOT EXISTS
+                    (SELECT 1 FROM fs.upload_session s WHERE s.tenant_id=v.tenant_id AND s.version_id=v.version_id)),
+                  count(*) FILTER(WHERE state IN ('FAILED','EXPIRED') AND claimed AND (status='RESERVED' OR reserved_id IS NULL)),
+                  COALESCE(sum(expected_size) FILTER(WHERE reserved_id IS NULL AND candidate='RESERVED'),0),
+                  COALESCE(sum(expected_size) FILTER(WHERE reserved_id IS NULL AND candidate='CHARGED'),0),
+                  COALESCE(sum(expected_size) FILTER(WHERE reserved_id IS NULL AND candidate='RELEASED'),0),
+                  count(*) FILTER(WHERE reserved_id IS NULL AND candidate='UNRESOLVED')
+                FROM classified RETURNING *
+                """,tenant.value(),id,tenant.value(),tenant.value(),tenant.value(),utc(now),actor.actorId(),tenant.value());var rows=ps.executeQuery()){
+                rows.next();finding=readFinding(rows);
+            }
+            MutationIntents.record(events,audits,clock,correlation,actor,tenant.value(),"file-storage.quota.finding-captured",
+                "file-storage.quota-finding",id.toString(),Map.of("missing",finding.missingReservations(),"mismatched",finding.mismatchedReservations(),"mode","DRY_RUN_ONLY"));
+            return finding;
+        });
+    }
+    public Finding finding(ActorReference actor,TenantId tenant,UUID id){
+        require(actor,tenant,null,Action.RECONCILE_ISOLATED_QUOTA);
+        return tx.execute((c,events,audits)->{
+            try(var ps=tx.statement(c,"SELECT * FROM fs.isolated_quota_finding WHERE tenant_id=? AND finding_id=?",
+                tenant.value(),id);var rows=ps.executeQuery()){if(!rows.next())throw missing();return readFinding(rows);}
+        });
+    }
+    public void reviewFinding(ActorReference actor,TenantId tenant,UUID id,FindingDisposition disposition,CorrelationContext correlation){
+        require(actor,tenant,null,Action.REVIEW_QUOTA_FINDING);Objects.requireNonNull(disposition);
+        tx.execute((c,events,audits)->{
+            try(var ps=tx.statement(c,"INSERT INTO fs.isolated_quota_finding_review VALUES (?,?,?,?,?)",
+                tenant.value(),id,actor.actorId(),utc(tx.now()),disposition.name())){ps.executeUpdate();}
+            MutationIntents.record(events,audits,clock,correlation,actor,tenant.value(),"file-storage.quota.finding-reviewed",
+                "file-storage.quota-finding",id.toString(),Map.of("disposition",disposition.name(),"mode","DRY_RUN_ONLY"));
+            return null;
+        });
+    }
+    private static Finding readFinding(ResultSet rows)throws SQLException{
+        return new Finding(rows.getObject("finding_id",UUID.class),rows.getObject("policy_revision",Long.class),
+            rows.getBoolean("integrated"),rows.getObject("captured_at",OffsetDateTime.class).toInstant(),
+            rows.getLong("missing_reservations"),rows.getLong("mismatched_reservations"),rows.getLong("untracked_versions"),
+            rows.getLong("uncertain_terminal"),rows.getBigDecimal("candidate_reserved_bytes"),rows.getBigDecimal("candidate_charged_bytes"),
+            rows.getBigDecimal("candidate_released_bytes"),rows.getLong("unresolved_sessions"));
+    }
     public Policy resolve(ActorReference actor,TenantId tenant,long expected){
         require(actor,tenant,null,Action.RESOLVE_ISOLATED_POLICY);
         return tx.execute((c,events,audits)->{lockTenant(c,tenant);return current(c,tenant,expected);});

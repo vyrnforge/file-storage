@@ -110,3 +110,11 @@ PR #85 accepted/merged 8ea998f (193 tests). [FS-310A6 isolated policy and quota]
 
 
 FS-310A7 candidate PR #88: [full CI 43801908520](https://github.com/vyrnforge/file-storage/actions/runs/43801908520) passed 199 tests (zero failures/errors/skips) at implementation head `74d22283d2254d482254b19fb68e92e3c8803dcf`; V17 repeatability and two new PostgreSQL regressions. Owner review/merge pending. Final review head verification is recorded on PR #88. Engineering choices: explicit empty isolated tenant, durable tenant fence even for non-enabled initiation (contention/load evidence deferred), transaction-triggered ledger changes and read-only reconciliation. No production activation or deployment.
+
+
+2026-11-16 (Asia/Jakarta): PR #88 accepted/squash merged 453cc93732bfac19e2b1dbffec3a6737af690a0e; exact-head CI 43802227997 passed 199 tests. Owner authorized FS-310A8 governed quota transitions and reconciliation safety (#13/#16/#33/#35/#36). V18 isolated candidate, independently reviewed quota limit/TTL and immutable dry-run findings. No production policy/limits, hold release, actual historical backfill, provider deletion or deployment. PR #87 excluded.
+
+- [FS-310A8 governed quota transitions and dry-run findings](docs/architecture/37_GOVERNED_QUOTA_TRANSITIONS.md) — V18 candidate; implementation CI passed, owner review pending.
+
+
+FS-310A8 candidate PR #91: [implementation CI 43803914425](https://github.com/vyrnforge/file-storage/actions/runs/43803914425) BUILD SUCCESS at `fb89dec83148525ace1c6c258e7cd3898b91358e` against main 453cc93: 203 tests, zero failures/errors/skips (58 persistence, 80 runtime, 40 domain/application/SPI/security, 13 S3/MinIO, 12 OSS). V18 migration repeatability and four new PostgreSQL regressions passed. Initial CI 43803640155 was superseded/cancelled; hardened CI 43803742192 failed V18 enablement guard dollar quoting and disposable migration rolled back; corrected full suite passed, no tests removed. Final review-head evidence recorded on PR #91. Owner review/merge pending. New initial and replacement activations require independently reviewed exact limit/TTL; new integration enablement requires reviewed activation. Historical rows retained; no actual historical backfill, production policy, hold release, provider deletion or deployment.
