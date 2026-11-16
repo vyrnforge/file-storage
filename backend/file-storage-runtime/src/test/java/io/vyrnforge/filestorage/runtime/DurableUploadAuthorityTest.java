@@ -324,6 +324,7 @@ class DurableUploadAuthorityTest {
                     var resultDownload=http.send(requestDownload,HttpResponse.BodyHandlers.ofByteArray());
                     assertEquals(200,resultDownload.statusCode());assertArrayEquals(content,resultDownload.body());
                     assertEquals(403,http.send(requestDownload,HttpResponse.BodyHandlers.ofString()).statusCode());
+                    awaitDrainedReaders(1);
                     assertEquals(4,credentialCloses.get());assertEquals(4,adapterCloses.get());
                     grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
                     grant("fixture-user","asset","RESTORE_FILE","OWNED_FILE",null);
@@ -338,6 +339,7 @@ class DurableUploadAuthorityTest {
                     var fresh=downloads(CLOCK).issue("user",TENANT,fileId(),view.version(),null).value();
                     var again=http.send(downloadRequest(uri.resolve("/transfer/v1/download").toString(),"user",fresh.handle()),HttpResponse.BodyHandlers.ofByteArray());
                     assertEquals(200,again.statusCode());assertArrayEquals(content,again.body());
+                    awaitDrainedReaders(2);
                     assertEquals(5,credentialCloses.get());assertEquals(5,adapterCloses.get());
                     assertEquals(2,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL"));
                 }
@@ -524,6 +526,7 @@ class DurableUploadAuthorityTest {
                 assertTrue(downloaded.headers().firstValue("Location").isEmpty());
                 assertEquals(403,http.send(downloadRequest,HttpResponse.BodyHandlers.ofString()).statusCode());
                 assertEquals(409,http.send(command(commandBase+"/complete","user","{\"sha256\":\""+"0".repeat(64)+"\"}"),HttpResponse.BodyHandlers.ofString()).statusCode());
+                awaitDrainedReaders(1);
                 assertEquals(4,closed.get());assertEquals(4,adapterCloses.get());
                 assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
                 for(String action:List.of("DELETE_FILE","RESTORE_FILE","LIST_DELETED_METADATA"))
@@ -551,6 +554,7 @@ class DurableUploadAuthorityTest {
                 var fresh=tools.jackson.databind.json.JsonMapper.builder().build().readTree(freshIssued.body()).get("handle").asText();
                 var freshBytes=http.send(downloadRequest(base+"/transfer/v1/download","user",fresh),HttpResponse.BodyHandlers.ofByteArray());
                 assertEquals(200,freshBytes.statusCode());assertArrayEquals(payload,freshBytes.body());
+                awaitDrainedReaders(2);
                 assertEquals(5,closed.get());assertEquals(5,adapterCloses.get());
                 assertEquals(2,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL"));
                 assertArrayEquals(payload,fixture.bytes("fixture-oss",key));
@@ -1589,6 +1593,20 @@ class DurableUploadAuthorityTest {
         var prepared=secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,1)).value();
         assertThrows(Failure.class,()->new JdbcPurgeSimulation(source,CLOCK,Duration.ofSeconds(5),2).claim(TENANT,prepared.operationId()));
         assertEquals(0,scalar("SELECT count(*) FROM fs.purge_simulation"));
+    }
+
+    // HTTP Content-Length can be satisfied before the server closes its provider
+    // resources and commits the durable acknowledgement. Wait on the evidence,
+    // not on client receipt of bytes; fail if the acknowledgement never arrives.
+    private static void awaitDrainedReaders(long expected)throws Exception{
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        long count;
+        do{
+            count=scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL");
+            if(count>=expected)break;
+            Thread.sleep(20);
+        }while(System.nanoTime()<deadline);
+        assertEquals(expected,count,"server-side reader drain acknowledgement");
     }
 
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
