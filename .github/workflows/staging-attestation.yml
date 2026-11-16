@@ -1,0 +1,118 @@
+name: staging candidate attestation
+# Explicit owner dispatch on approved main only. Not a deployment or release publisher.
+on:
+  workflow_dispatch:
+    inputs:
+      approved_commit:
+        description: Exact reviewed main commit SHA
+        required: true
+        type: string
+      approval_reference:
+        description: Approved release-evidence review reference (no secrets)
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.approved_commit == github.sha && inputs.approval_reference != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Rebuild and check candidate
+        run: |
+          make ci
+          target=backend/file-storage-runtime/target
+          python3 scripts/staging-build-evidence.py "$target/file-storage-runtime-0.0.1-SNAPSHOT.jar" "$target/staging-inventory.json"
+          python3 scripts/staging-osv-scan.py "$target"
+          python3 scripts/staging-license-evidence.py "$target"
+          python3 scripts/staging-release-evidence.py "$target"
+          python3 scripts/staging-security-gate.py "$target"
+      - name: Retain exact candidate bytes for attestation
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: approved-main-candidate
+          path: |
+            backend/file-storage-runtime/target/file-storage-runtime-0.0.1-SNAPSHOT.jar
+            backend/file-storage-runtime/target/bom.json
+            backend/file-storage-runtime/target/staging-provenance.json
+            backend/file-storage-runtime/target/staging-release-review.json
+            backend/file-storage-runtime/target/staging-license-evidence.json
+            backend/file-storage-runtime/target/staging-license-notices.zip
+            backend/file-storage-runtime/target/staging-osv.json
+            backend/file-storage-runtime/target/staging-osv-meta.json
+            backend/file-storage-runtime/target/staging-inventory.json
+          if-no-files-found: error
+          retention-days: 14
+  attest:
+    needs: build
+    if: ${{ github.ref == 'refs/heads/main' && inputs.approved_commit == github.sha && inputs.approval_reference != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: approved-main-candidate
+          path: candidate
+      - name: Verify transferred subject and evidence before signing
+        env:
+          APPROVED_COMMIT: ${{ inputs.approved_commit }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          p = pathlib.Path("candidate")
+          def sha(name):
+              return hashlib.sha256((p / name).read_bytes()).hexdigest()
+          v = json.loads((p / "staging-provenance.json").read_text())
+          r = json.loads((p / "staging-release-review.json").read_text())
+          assert v["checkoutCommit"] == os.environ["APPROVED_COMMIT"] == os.environ["GITHUB_SHA"]
+          assert v["workflowRun"] == os.environ["GITHUB_RUN_ID"]
+          assert v["artifactSha256"] == r["artifactSha256"] == sha("file-storage-runtime-0.0.1-SNAPSHOT.jar")
+          assert v["cycloneDxSha256"] == sha("bom.json")
+          assert v["inventorySha256"] == sha("staging-inventory.json")
+          assert v["osvEvidenceSha256"] == sha("staging-osv-meta.json")
+          assert v["licenseEvidenceSha256"] == sha("staging-license-evidence.json")
+          assert v["licenseNoticeArchiveSha256"] == sha("staging-license-notices.zip")
+          assert r["decision"] == "NO-GO"
+          assert r["vulnerabilityEvidence"]["advisoryCount"] == 0
+          assert r["vulnerabilityScan"] == "NO_FINDINGS_REVIEW_REQUIRED"
+          PY
+      - name: Attest build provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        with:
+          subject-path: candidate/file-storage-runtime-0.0.1-SNAPSHOT.jar
+      - name: Attest CycloneDX SBOM
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        with:
+          subject-path: candidate/file-storage-runtime-0.0.1-SNAPSHOT.jar
+          sbom-path: candidate/bom.json
+      - name: Verify exact workflow identity and source digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          subject=candidate/file-storage-runtime-0.0.1-SNAPSHOT.jar
+          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/staging-attestation.yml@refs/heads/main"
+          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --cert-identity "$identity" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --deny-self-hosted-runners --format json > provenance-verified.json
+          gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY" --cert-identity "$identity" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --deny-self-hosted-runners --predicate-type https://cyclonedx.org/bom --format json > sbom-verified.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: candidate-attestation-verification
+          path: |
+            provenance-verified.json
+            sbom-verified.json
+          if-no-files-found: error
+          retention-days: 14
