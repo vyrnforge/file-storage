@@ -1,0 +1,29 @@
+name: G3-01 Kernel consumer verification
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/g3-01-kernel-consumer.yml'
+permissions:
+  contents: read
+jobs:
+  consumer:
+    if: github.head_ref == 'verification/vf-fnd-g3-01-consumer-8e48e5a'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Existing consumer full verification
+        run: |
+          make prepare-s3-fixture
+          make ci
+          mvn -B -ntp --strict-checksums -f backend/pom.xml dependency:tree -Dincludes=io.github.vyrnforge:platform-kernel
+          echo '88bd473f9e909d3031b5efce02e1b4189df1d731893190b9910767c3d97eef2e  '"$HOME/.m2/repository/io/github/vyrnforge/platform-kernel/0.3.2/platform-kernel-0.3.2.jar" | sha256sum -c -
+          java -version
+          git rev-parse HEAD
