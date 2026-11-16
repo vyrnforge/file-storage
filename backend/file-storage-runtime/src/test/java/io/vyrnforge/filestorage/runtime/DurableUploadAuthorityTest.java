@@ -534,7 +534,15 @@ class DurableUploadAuthorityTest {
         var output=new java.io.ByteArrayOutputStream();gateway.download("user",current.handle(),output);
         assertArrayEquals(newer,output.toByteArray());assertEquals(newRef,requested.getLast());
         assertEquals(10,opens.get());assertEquals(10,adapterCloses.get());assertEquals(11,closes.get());
-        assertEquals(2,scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE' AND backend_id=?",id.value()));
+        // Verify both exact historical/current persisted pins, not just available object counts.
+        assertEquals(2,scalar("""
+            SELECT count(*) FROM fs.file_version v
+            JOIN fs.upload_session s ON s.tenant_id=v.tenant_id AND s.file_id=v.file_id
+                AND s.version_id=v.version_id AND s.location_id=v.location_id
+            JOIN fs.storage_location l ON l.location_id=v.location_id AND l.backend_id=s.backend_id
+            WHERE v.state='AVAILABLE' AND v.tenant_id=? AND s.backend_id=? AND v.location_id=?
+                AND ((v.version_id=? AND s.config_revision=1) OR (v.version_id=? AND s.config_revision=2))
+            """,TENANT.value(),id.value(),placement.id().value(),old.version().value(),fresh.version().value()));
     }
 
     private static String objectKeyUnchecked() {
