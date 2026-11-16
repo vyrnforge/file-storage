@@ -540,12 +540,12 @@ class ApiRuntimeCompositionTest {
                     assertFalse(denied.body().contains("fs.file_grant"));
                     status(403,call(ctx,"GET","/v1/usage","user",true,null));
                     assertEquals(before.get(filesBoundary).get(grantUnavailable)+2,
-                        telemetry.snapshot().get(filesBoundary).get(grantUnavailable));
+                        telemetry.snapshot().get(filesBoundary).get(grantUnavailable).longValue());
                 }finally{sql("GRANT a15_group_5 TO a15_login_5");}
                 status(200,call(ctx,"GET","/health/ready",null,false,null));
                 status(200,call(ctx,"GET","/v1/files","user",true,null));
                 assertEquals(before.get(filesBoundary).get(grantUnavailable)+2,
-                    telemetry.snapshot().get(filesBoundary).get(grantUnavailable));
+                    telemetry.snapshot().get(filesBoundary).get(grantUnavailable).longValue());
                 // Required-grant readiness is deliberately not the full effective ACL audit.
                 var grantProfile=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.GRANT_READ);
                 sql("GRANT SELECT ON fs.backend TO a15_group_5");

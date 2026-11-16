@@ -231,7 +231,8 @@ public final class SecuredFiles {
     private void deny(){SecurityObservation.emit(observations,FILES,AUTHORIZATION_DENIED);}
     private boolean matches(Caller caller,Action action,String purpose,Resource resource){
         try{
-            List<Grant> current = List.copyOf(grants.current(caller));
+            List<Grant> current = SecurityObservation.authority(observations,FILES,GRANT_SOURCE_UNAVAILABLE,
+                    ()->List.copyOf(grants.current(caller)));
             Instant now=clock.instant();
             for(Grant g:current){
                 if(!g.active(now)||!g.tenant().equals(caller.tenant())||!g.actor().equals(caller.actor())

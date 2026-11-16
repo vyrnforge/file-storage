@@ -97,6 +97,36 @@ class SecuredFilesTest {
         assertEquals(1,db.rows.size());
     }
 
+    @Test void administrativeAndIdentityAuthorityOutagesRemainDenied(){
+        var seen=new ArrayList<String>();
+        var sink=(SecurityObservation)(boundary,reason)->seen.add(boundary.name()+":"+reason.name());
+        var clock=Clock.fixed(NOW,ZoneOffset.UTC);
+        Verifier verifier=bearer->tokens.get(bearer);
+        var policy=new SecuredPolicyAdmin(new Trust(ISS,AUD),verifier,
+            (i,s,a,t)->Optional.of(ALICE),(actor,t)->true,(t,m)->null,
+            (actor,scope,action)->true,clock,sink);
+        security(SecurityCode.ACCESS_DENIED,()->policy.authorize("alice",SCOPE,null,SecuredPolicyAdmin.Action.POLICY_READ));
+        assertTrue(seen.contains("POLICY_ADMIN:ENTITLEMENT_UNAVAILABLE"));
+        seen.clear();
+        var backend=new SecuredBackendAdmin(new Trust(ISS,AUD),verifier,
+            (i,s,a)->Optional.of(ALICE),(actor,action,id)->{throw new IllegalStateException("private authority failure");},clock,sink);
+        security(SecurityCode.ACCESS_DENIED,()->backend.authorize("alice",null,SecuredBackendAdmin.Action.LIST,null));
+        assertTrue(seen.contains("BACKEND_ADMIN:PERMISSION_UNAVAILABLE"));
+        seen.clear();
+        var file=new SecuredFiles(new Trust(ISS,AUD),verifier,(i,s,a)->Optional.of(ASSET),
+            (actor,t)->{throw new IllegalStateException("private membership failure");},
+            (t,m)->new ModuleEntitlement(A.value(),"file-storage",true,NOW),caller->grants,
+            db,clock,Duration.ofMinutes(5),sink);
+        security(SecurityCode.ACCESS_DENIED,()->file.initiate("alice",A,null,command()));
+        assertTrue(seen.contains("FILES:MEMBERSHIP_UNAVAILABLE"));assertTrue(db.rows.isEmpty());
+        seen.clear();
+        var bindingDown=new SecuredFiles(new Trust(ISS,AUD),verifier,(i,s,a)->{throw new IllegalStateException("private binding failure");},
+            (actor,t)->true,(t,m)->new ModuleEntitlement(A.value(),"file-storage",true,NOW),caller->grants,
+            db,clock,Duration.ofMinutes(5),sink);
+        security(SecurityCode.ACCESS_DENIED,()->bindingDown.initiate("alice",A,null,command()));
+        assertTrue(seen.contains("FILES:BINDING_UNAVAILABLE"));assertTrue(db.rows.isEmpty());
+    }
+
     @Test void i01_validContextAndCorrelation(){
         var f=facade();UUID correlation=id(9);
         var a=f.initiate("alice",A,correlation,command());var b=f.initiate("alice",A,correlation,command());
