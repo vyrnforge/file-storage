@@ -1,0 +1,81 @@
+name: backend-quality-audit
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'scripts/backend-quality-inventory.py'
+      - '.github/workflows/backend-quality-audit.yml'
+      - 'docs/project/12_BACKEND_QUALITY_AUDIT.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: backend-quality-audit-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  audit:
+    name: backend-quality-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Java 21
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Source inventory and existing architecture guards
+        run: |
+          mkdir -p audit-output
+          python3 scripts/backend-quality-inventory.py > audit-output/source-inventory.json
+          python3 scripts/check-domain-boundaries.py
+          python3 scripts/check-pom-format.py
+          python3 scripts/check-repository-hygiene.py
+          git rev-parse HEAD > audit-output/checkout.txt
+      - name: Prepare disposable S3 fixture
+        run: make prepare-s3-fixture
+      - name: Full Java tests with coverage
+        run: mvn -B -ntp --strict-checksums -f backend/pom.xml clean org.jacoco:jacoco-maven-plugin:0.8.13:prepare-agent verify
+      - name: Aggregate coverage across all test modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp --strict-checksums -f backend/pom.xml -N org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get -Dartifact=org.jacoco:org.jacoco.cli:0.8.13:jar:nodeps
+          cli="$HOME/.m2/repository/org/jacoco/org.jacoco.cli/0.8.13/org.jacoco.cli-0.8.13-nodeps.jar"
+          args=()
+          for module in backend/file-storage-*; do
+            test -s "$module/target/jacoco.exec"
+            test -d "$module/target/classes"
+            args+=("$module/target/jacoco.exec")
+          done
+          java -jar "$cli" merge "${args[@]}" --destfile audit-output/merged.exec
+          args=()
+          for module in backend/file-storage-*; do
+            args+=(--classfiles "$module/target/classes" --sourcefiles "$module/src/main/java")
+          done
+          java -jar "$cli" report audit-output/merged.exec "${args[@]}" --xml audit-output/coverage.xml --html audit-output/coverage-html --name "File Storage backend"
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('audit-output/coverage.xml').getroot()
+          for c in root.findall('counter'):
+              print('coverage', c.attrib)
+          PY
+      - name: SpotBugs report-only bytecode review
+        run: |
+          mvn -B -ntp --strict-checksums -f backend/pom.xml -DskipTests -Dspotbugs.xmlOutput=true -Dspotbugs.effort=Max -Dspotbugs.threshold=Low verify com.github.spotbugs:spotbugs-maven-plugin:4.10.5.0:spotbugs
+          for module in backend/file-storage-*; do
+            test -s "$module/target/spotbugsXml.xml"
+            cp "$module/target/spotbugsXml.xml" "audit-output/$(basename "$module")-spotbugs.xml"
+          done
+      - name: Retain audit evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: backend-quality-audit-evidence
+          path: audit-output/
+          if-no-files-found: error
+          retention-days: 14
