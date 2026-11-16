@@ -68,7 +68,7 @@ class DurableUploadAuthorityTest {
     @AfterAll static void stop() { DB.stop(); }
 
     @BeforeEach void seed() throws Exception {
-        sql("TRUNCATE fs.backend,fs.policy_revision,fs.retention_policy_draft,fs.file,fs.file_grant,fs_kernel.platform_idempotency,fs_kernel.platform_audit_event,fs_kernel.platform_event_outbox CASCADE");
+        sql("TRUNCATE fs.backend,fs.policy_revision,fs.retention_policy_draft,fs.file,fs.file_grant,fs.accounting_source_epoch,fs.accounting_manifest_principal,fs_kernel.platform_idempotency,fs_kernel.platform_audit_event,fs_kernel.platform_event_outbox CASCADE");
         var registry = new JdbcRegistry(source, CLOCK);
         var config = new JdbcConfiguration(source, CLOCK);
         var correlation = CorrelationContext.create();
@@ -2224,28 +2224,37 @@ class DurableUploadAuthorityTest {
             sql("GRANT EXECUTE ON FUNCTION fs.touch_quota_fence(uuid) TO a9_initiator");
             sql("GRANT SELECT,INSERT,UPDATE,DELETE ON fs_kernel.platform_idempotency TO a9_initiator");
             sql("GRANT SELECT,INSERT ON fs_kernel.platform_audit_event,fs_kernel.platform_event_outbox TO a9_initiator");
+            // Kernel v0.3.2 event replay uses ON CONFLICT DO UPDATE SET event_id=EXCLUDED.event_id.
+            // Permit only the identity column, not payload, delivery status or deletion.
+            sql("GRANT UPDATE(event_id) ON fs_kernel.platform_event_outbox TO a9_initiator");
             var login=manifestLogin("a9_initiator");
             try(var c=login.getConnection();var st=c.createStatement()){
                 try(var rows=st.executeQuery("SELECT session_user,current_user")){assertTrue(rows.next());assertEquals("a9_initiator",rows.getString(1));assertEquals("a9_initiator",rows.getString(2));}
                 for(String denied:List.of("DELETE FROM fs.isolated_quota_reservation","UPDATE fs.isolated_policy_activation SET quota_limit=99",
-                    "UPDATE fs.isolated_quota_fence SET enabled_revision=NULL","TRUNCATE fs.upload_session","SELECT * FROM fs.accounting_manifest_principal")){
+                    "UPDATE fs.isolated_quota_fence SET enabled_revision=NULL","TRUNCATE fs.upload_session","SELECT * FROM fs.accounting_manifest_principal","UPDATE fs_kernel.platform_event_outbox SET status='PUBLISHED'","UPDATE fs_kernel.platform_event_outbox SET payload_json='{}'","DELETE FROM fs_kernel.platform_event_outbox","UPDATE fs_kernel.platform_audit_event SET action='changed'")){
                     assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
                 }
                 assertEquals("23514",assertThrows(SQLException.class,()->st.execute("UPDATE fs.backend SET endpoint='https://changed.example.test'")).getSQLState());
             }
             var client=secured(CLOCK,login);
             var cmd=new Initiate("attachment","restricted.txt",5,"text/plain","a9-restricted");
+            long auditBefore=scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.upload.initiated'");
+            long eventBefore=scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.initiated'");
             sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_a9_initiate CHECK (event_type <> 'file-storage.upload.initiated') NOT VALID");
             try{
                 assertThrows(RuntimeException.class,()->client.initiate("user",TENANT,null,cmd));
                 assertEquals(0,scalar("SELECT count(*) FROM fs.upload_session"));
                 assertEquals(0,scalar("SELECT count(*) FROM fs.isolated_quota_reservation"));
+                assertEquals(auditBefore,scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.upload.initiated'"));
+                assertEquals(eventBefore,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.initiated'"));
             }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_a9_initiate");}
             var created=client.initiate("user",TENANT,null,cmd).value();
             assertEquals(created.session(),client.initiate("user",TENANT,null,cmd).value().session());
             assertEquals(1,scalar("SELECT count(*) FROM fs.isolated_quota_reservation WHERE session_id=? AND policy_revision=? AND status='RESERVED' AND bytes=5",created.session().value(),revision));
             assertEquals(Code.CONFLICT,assertThrows(Failure.class,()->client.initiate("user",TENANT,null,new Initiate("attachment","too-many.txt",1,"text/plain","a9-too-many"))).code());
             assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session"));
+            assertEquals(auditBefore+1,scalar("SELECT count(*) FROM fs_kernel.platform_audit_event WHERE action='file-storage.upload.initiated'"));
+            assertEquals(eventBefore+1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.upload.initiated'"));
         }finally{
             sql("DROP OWNED BY a9_initiator");
             sql("DROP ROLE a9_initiator");
