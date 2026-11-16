@@ -89,6 +89,7 @@
                 <version>${spring-boot.version}</version>
                 <configuration>
                     <mainClass>io.vyrnforge.filestorage.runtime.RuntimeApplication</mainClass>
+                    <includeTools>false</includeTools>
                 </configuration>
                 <executions>
                     <execution>

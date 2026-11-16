@@ -66,8 +66,17 @@ with zipfile.ZipFile(jar) as z:
                         "advisoryIds": sorted(scanned.get(key, [])),
                         "vulnerabilityDisposition": "UNREVIEWED", "licenseDisposition": "UNREVIEWED"})
 unmapped = [e["path"] for e in entries if not e["bomRef"]]
+if unmapped:
+    raise SystemExit(f"packaged libraries absent from CycloneDX BOM: {unmapped}")
 used = {e["bomRef"] for e in entries if e["bomRef"]}
 extra = sorted(c.get("bom-ref", c.get("name", "unknown")) for c in components if c.get("bom-ref") not in used)
+# Spring Boot starter modules are dependency aggregators, omitted by repackage.
+# Preserve the full formal Maven graph; do not pretend graph-only entries are nested JARs.
+expected_starters = {"spring-boot-starter", "spring-boot-starter-jackson", "spring-boot-starter-logging",
+                     "spring-boot-starter-tomcat", "spring-boot-starter-tomcat-runtime", "spring-boot-starter-webmvc"}
+if any(c.get("group") != "org.springframework.boot" or c.get("name") not in expected_starters
+       for c in components if c.get("bom-ref") not in used):
+    raise SystemExit(f"unexpected graph-only CycloneDX components: {extra}")
 event = {}
 if os.environ.get("GITHUB_EVENT_PATH"):
     event = json.loads(pathlib.Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
