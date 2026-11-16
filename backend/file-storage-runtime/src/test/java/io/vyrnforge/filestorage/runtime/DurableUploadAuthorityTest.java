@@ -2798,6 +2798,65 @@ class DurableUploadAuthorityTest {
         }
     }
 
+
+    @Test void quarantinedRestoreUsesSeparateOwnerAndExplicitDispatcherRestart() throws Exception {
+        // Source is synthetic, and no broker/provider is contacted.
+        var pending=scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PENDING'");
+        assertTrue(pending>0&&pending<100);
+        var dispatcherProfile=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.DISPATCHER);
+        sql("CREATE ROLE a13_migration LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        sql("CREATE ROLE a13_restore_dispatch LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try{
+            sql("CREATE DATABASE a13_restore OWNER a13_migration");
+            sql("REVOKE CONNECT,TEMP ON DATABASE a13_restore FROM PUBLIC");
+            try{
+                var migration=manifestLogin("a13_migration");migration.setDatabaseName("a13_restore");
+                var dispatcher=manifestLogin("a13_restore_dispatch");dispatcher.setDatabaseName("a13_restore");dispatcher.setCurrentSchema("fs_kernel");
+                assertThrows(SQLException.class,dispatcher::getConnection);
+                var dump=DB.execInContainer("pg_dump","-U",DB.getUsername(),"-d",DB.getDatabaseName(),"-Fc","--no-owner","--no-privileges","-f","/tmp/a13-rehearsal.dump");
+                assertEquals(0,dump.getExitCode());
+                var restore=DB.execInContainer("pg_restore","-U",DB.getUsername(),"-d","a13_restore","--role=a13_migration",
+                    "--no-owner","--no-privileges","--exit-on-error","/tmp/a13-rehearsal.dump");
+                assertEquals(0,restore.getExitCode(),restore.getStderr());
+                RuntimeComposition.migrate(migration);assertTrue(StorageMigrations.ready(migration));
+                try(var c=migration.getConnection();var st=c.createStatement()){
+                    try(var rows=st.executeQuery("SELECT count(*) FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname IN ('fs','fs_kernel') AND r.relowner<>current_user::regrole")){
+                        assertTrue(rows.next());assertEquals(0,rows.getLong(1));
+                    }
+                    try(var rows=st.executeQuery("SELECT count(*) FROM fs.upload_session")){assertTrue(rows.next());assertEquals(1,rows.getLong(1));}
+                    try(var rows=st.executeQuery("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PENDING'")){assertTrue(rows.next());assertEquals(pending,rows.getLong(1));}
+                }
+                assertThrows(SQLException.class,dispatcher::getConnection);
+                // A reviewed restart explicitly grants CONNECT plus narrow dispatcher privileges.
+                // Fixture simulates a clean restart, not approval to replay real external events.
+                var bootstrap=new PGSimpleDataSource();bootstrap.setURL(DB.getJdbcUrl());bootstrap.setDatabaseName("a13_restore");
+                bootstrap.setUser(DB.getUsername());bootstrap.setPassword(DB.getPassword());
+                dispatcherProfile.provision(bootstrap,"a13_restore_group");
+                sql("GRANT a13_restore_group TO a13_restore_dispatch");
+                sql("GRANT CONNECT ON DATABASE a13_restore TO a13_restore_dispatch");
+                var delivered=new ArrayList<UUID>();
+                var publisher=new io.vyrnforge.platform.kernel.persistence.jdbc.JdbcOutboxPublisher(dispatcher,
+                    new io.vyrnforge.platform.kernel.persistence.jdbc.JacksonRecordCodec(),event->delivered.add(event.eventId()),
+                    CLOCK,3,Duration.ZERO,Duration.ofSeconds(30));
+                publisher.publishBatch(100);assertEquals(pending,delivered.size());
+                publisher.publishBatch(100);assertEquals(pending,delivered.size());
+                try(var c=dispatcher.getConnection();var st=c.createStatement()){
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute("SELECT * FROM fs.file")).getSQLState());
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute("CREATE TABLE fs_kernel.prohibited(id int)")).getSQLState());
+                }
+                assertEquals(pending,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PENDING'"));
+                sql("REVOKE CONNECT ON DATABASE a13_restore FROM a13_restore_dispatch");
+                assertThrows(SQLException.class,dispatcher::getConnection);
+            }finally{
+                sql("DROP DATABASE a13_restore WITH (FORCE)");
+                DB.execInContainer("rm","-f","/tmp/a13-rehearsal.dump");
+            }
+        }finally{
+            for(String role:List.of("a13_restore_dispatch","a13_restore_group","a13_migration"))
+                if(scalar("SELECT count(*) FROM pg_roles WHERE rolname=?",role)>0){sql("DROP OWNED BY "+role);sql("DROP ROLE "+role);}
+        }
+    }
+
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
         sql("""
             INSERT INTO fs.file_retention_evidence(tenant_id,file_id,lifecycle_revision,policy_revision,hold_state,retain_until,observed_at,valid_until)

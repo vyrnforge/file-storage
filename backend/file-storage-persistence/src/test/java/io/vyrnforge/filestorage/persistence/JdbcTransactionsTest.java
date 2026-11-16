@@ -59,6 +59,9 @@ class JdbcTransactionsTest {
                 .schemas("fs").defaultSchema("fs").locations("classpath:db/filestorage")
                 .target("20").load().migrate();
         sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability) VALUES ('legacy_fixture',?,'legacy-actor','CAPTURE')", A.value());
+        org.flywaydb.core.Flyway.configure().dataSource(dataSource)
+                .schemas("fs").defaultSchema("fs").locations("classpath:db/filestorage")
+                .target("21").load().migrate();
         StorageMigrations.migrate(dataSource);
         StorageMigrations.migrate(dataSource);
         assertEquals(1, scalar("SELECT count(*) FROM fs.accounting_manifest_principal WHERE login_role='legacy_fixture' AND execution_mode='DISABLED' AND actor='legacy-actor' AND capability='CAPTURE'"));
