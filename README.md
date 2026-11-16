@@ -96,3 +96,5 @@ PR #80 accepted/merged 02814b4 (180 tests). [FS-310A1 reversible logical lifecyc
 PR #81 accepted/merged 660f14b (183 tests). [FS-310A2 lifecycle safety](docs/architecture/31_LIFECYCLE_SAFETY.md) — V12 recovery catalog and retention assessment in review; physical purge disabled.
 
 PR #82 accepted/merged a1fd681 (185 tests). [FS-310A3 purge preparation](docs/architecture/32_PURGE_PREPARATION.md) — V13 candidate; executable purge disabled.
+
+PR #83 accepted/merged 65b6ec4 (187 tests). [FS-310A4 reader safety and simulation](docs/architecture/33_READER_SAFETY_SIMULATION.md) — V14 candidate; physical purge disabled.

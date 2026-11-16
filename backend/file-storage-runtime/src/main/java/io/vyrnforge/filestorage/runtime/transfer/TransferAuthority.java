@@ -10,4 +10,9 @@ package io.vyrnforge.filestorage.runtime.transfer;
 @FunctionalInterface
 public interface TransferAuthority {
     TransferInstruction claim(String bearer, String handle, TransferInstruction.Action action);
+
+    /** Only called after successful provider stream and lease close. Legacy fixture authorities have no lease. */
+    default void acknowledge(TransferInstruction instruction) {
+        if(instruction.readerToken()!=null)throw new TransferFailure(TransferFailure.Code.UNAVAILABLE);
+    }
 }

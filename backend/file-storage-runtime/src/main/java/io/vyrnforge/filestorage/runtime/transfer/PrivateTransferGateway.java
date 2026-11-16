@@ -105,12 +105,16 @@ public final class PrivateTransferGateway {
             }
             if (instruction == null || instruction.action() != action || !clock.instant().isBefore(instruction.expiresAt()))
                 throw new TransferFailure(Code.DENIED);
+            if(action==Action.DOWNLOAD&&instruction.readerToken()!=null)
+                deadline.bound(Duration.between(clock.instant(),instruction.expiresAt()));
             if (instruction.size() > limits.maxBytes()) throw new TransferFailure(Code.TOO_LARGE);
             deadline.check();
             try (var lease = Objects.requireNonNull(resolver.resolve(instruction))) {
                 deadline.check();
                 work.run(instruction, Objects.requireNonNull(lease.provider()), deadline);
             }
+            // No acknowledgement on uncertain I/O, resolver/close failure or crash.
+            if(action==Action.DOWNLOAD&&instruction.readerToken()!=null)authority.acknowledge(instruction);
         } catch (TransferFailure ex) {
             throw ex;
         } catch (StorageFailure ex) {
@@ -137,8 +141,12 @@ public final class PrivateTransferGateway {
     /** Monotonic cooperative deadline; blocking transport deadlines belong to adapter/container. */
     private static final class Deadline {
         private final long start = System.nanoTime();
-        private final long nanos;
+        private long nanos;
         Deadline(Duration timeout) { nanos = timeout.toNanos(); }
+        void bound(Duration remaining) {
+            if(remaining.isNegative()||remaining.isZero())throw new TransferFailure(Code.TIMEOUT);
+            if(remaining.compareTo(Duration.ofNanos(nanos))<0)nanos=Math.min(nanos,System.nanoTime()-start+remaining.toNanos());
+        }
         void check() {
             if (Thread.currentThread().isInterrupted() || System.nanoTime() - start >= nanos)
                 throw new TransferFailure(Code.TIMEOUT);

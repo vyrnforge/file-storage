@@ -30,7 +30,7 @@ public final class JdbcDownloadTransfers {
         @Override public String toString(){return "Issued[redacted]";}
     }
     public record Pin(Caller caller,FileId file,VersionId version,BackendId backend,long revision,
-                      Locator locator,long size,String digest,Instant expiresAt){
+                      Locator locator,long size,String digest,Instant expiresAt,UUID readerToken){
         @Override public String toString(){return "DownloadPin[redacted]";}
     }
     private record Resource(Pin pin,String purpose,String ownerActor,String ownerConsumer,long lifecycleRevision){}
@@ -88,8 +88,37 @@ public final class JdbcDownloadTransfers {
                 if(!rows.next())throw denied();
                 Instant expiry=rows.getObject(1,OffsetDateTime.class).toInstant();
                 if(!clock.instant().isBefore(expiry))throw denied();
+                UUID readerToken=io.vyrnforge.platform.kernel.ids.UuidV7.generate();
+                try(var lease=tx.statement(c,"""
+                    INSERT INTO fs.download_reader(handle_hash,lease_token,claimed_at,expires_at) VALUES (?,?,?,?)
+                    """,hash(handle),readerToken,now,expiry.atOffset(ZoneOffset.UTC))){
+                    if(lease.executeUpdate()!=1)throw denied();
+                }
                 record(events,audits,correlation,pin,"claimed");
-                return new Pin(caller,file,version,pin.backend(),pin.revision(),pin.locator(),pin.size(),pin.digest(),expiry);
+                return new Pin(caller,file,version,pin.backend(),pin.revision(),pin.locator(),pin.size(),pin.digest(),expiry,readerToken);
+            }
+        });
+    }
+
+    /** Trusted gateway acknowledgement after successful stream AND provider lease close.
+     * Late acknowledgement is valid positive evidence; expiry alone never drains a reader.
+     */
+    public boolean acknowledge(TenantId tenant,FileId file,VersionId version,UUID token){
+        Objects.requireNonNull(token);
+        return tx.execute((c,events,audits)->{
+            try(var ps=tx.statement(c,"""
+                UPDATE fs.download_reader d SET drained_at=?
+                FROM fs.download_transfer_handle h
+                WHERE d.handle_hash=h.handle_hash AND d.lease_token=? AND d.drained_at IS NULL
+                  AND h.tenant_id=? AND h.file_id=? AND h.version_id=? AND d.claimed_at<=?
+                """,tx.now().atOffset(ZoneOffset.UTC),token,tenant.value(),file.value(),version.value(),tx.now().atOffset(ZoneOffset.UTC))){
+                if(ps.executeUpdate()==1)return true;
+            }
+            try(var ps=tx.statement(c,"""
+                SELECT 1 FROM fs.download_reader d JOIN fs.download_transfer_handle h USING(handle_hash)
+                WHERE d.lease_token=? AND h.tenant_id=? AND h.file_id=? AND h.version_id=? AND d.drained_at IS NOT NULL
+                """,token,tenant.value(),file.value(),version.value());var rows=ps.executeQuery()){
+                return rows.next();
             }
         });
     }
@@ -124,7 +153,7 @@ public final class JdbcDownloadTransfers {
             if(!rows.next())throw denied();
             var pin=new Pin(caller,file,version,new BackendId(rows.getObject(1,UUID.class)),rows.getLong(2),
                 new Locator(new LocationId(rows.getObject(3,UUID.class)),rows.getString(4),null),
-                rows.getLong(5),rows.getString(6),Instant.EPOCH);
+                rows.getLong(5),rows.getString(6),Instant.EPOCH,null);
             return new Resource(pin,rows.getString(7),rows.getString(8),rows.getString(9),rows.getLong(10));
         }
     }

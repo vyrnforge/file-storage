@@ -1,6 +1,6 @@
 # FS-310A3 — Durable purge preparation
 
-Status: owner-authorized isolated candidate; PR #82 accepted/merged a1fd681, exact CI 43712395352 passed 185 tests. #36. No production migration, retention policy or physical deletion.
+Status: accepted/merged PR #83 at 65b6ec4, exact CI 43779802955 passed 187 tests. #36. No production migration, retention policy or physical deletion.
 
 ## Internal review command
 
@@ -17,3 +17,5 @@ V13 disallows PURGE_VERSION in fs.storage_operation (existing reserved rows woul
 ## Verification
 
 PostgreSQL migration repeatability; explicit action and external/local grant intersection; missing, unknown, held, unresolved, active, expired and changed evidence; wrong version/tenant/requester; exact identity, immutable records, concurrent replay, audit/outbox rollback, restore race, re-delete, generic enqueue and database purge gates. Existing upload, scan, download and recovery tests retained. Exact CI evidence recorded on PR after execution.
+
+[FS-310A4](33_READER_SAFETY_SIMULATION.md) adds reader evidence and a separate simulation ledger; preparation remains immutable and not executable.

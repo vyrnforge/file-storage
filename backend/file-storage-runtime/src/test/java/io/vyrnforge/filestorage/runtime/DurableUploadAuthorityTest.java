@@ -324,6 +324,7 @@ class DurableUploadAuthorityTest {
                     var resultDownload=http.send(requestDownload,HttpResponse.BodyHandlers.ofByteArray());
                     assertEquals(200,resultDownload.statusCode());assertArrayEquals(content,resultDownload.body());
                     assertEquals(403,http.send(requestDownload,HttpResponse.BodyHandlers.ofString()).statusCode());
+                    awaitDrainedReaders(1);
                     assertEquals(4,credentialCloses.get());assertEquals(4,adapterCloses.get());
                     grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
                     grant("fixture-user","asset","RESTORE_FILE","OWNED_FILE",null);
@@ -338,7 +339,9 @@ class DurableUploadAuthorityTest {
                     var fresh=downloads(CLOCK).issue("user",TENANT,fileId(),view.version(),null).value();
                     var again=http.send(downloadRequest(uri.resolve("/transfer/v1/download").toString(),"user",fresh.handle()),HttpResponse.BodyHandlers.ofByteArray());
                     assertEquals(200,again.statusCode());assertArrayEquals(content,again.body());
+                    awaitDrainedReaders(2);
                     assertEquals(5,credentialCloses.get());assertEquals(5,adapterCloses.get());
+                    assertEquals(2,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL"));
                 }
             }
         }
@@ -523,6 +526,7 @@ class DurableUploadAuthorityTest {
                 assertTrue(downloaded.headers().firstValue("Location").isEmpty());
                 assertEquals(403,http.send(downloadRequest,HttpResponse.BodyHandlers.ofString()).statusCode());
                 assertEquals(409,http.send(command(commandBase+"/complete","user","{\"sha256\":\""+"0".repeat(64)+"\"}"),HttpResponse.BodyHandlers.ofString()).statusCode());
+                awaitDrainedReaders(1);
                 assertEquals(4,closed.get());assertEquals(4,adapterCloses.get());
                 assertEquals(1,scalar("SELECT count(*) FROM fs.upload_transfer_handle WHERE claimed_at IS NOT NULL"));
                 for(String action:List.of("DELETE_FILE","RESTORE_FILE","LIST_DELETED_METADATA"))
@@ -550,7 +554,9 @@ class DurableUploadAuthorityTest {
                 var fresh=tools.jackson.databind.json.JsonMapper.builder().build().readTree(freshIssued.body()).get("handle").asText();
                 var freshBytes=http.send(downloadRequest(base+"/transfer/v1/download","user",fresh),HttpResponse.BodyHandlers.ofByteArray());
                 assertEquals(200,freshBytes.statusCode());assertArrayEquals(payload,freshBytes.body());
+                awaitDrainedReaders(2);
                 assertEquals(5,closed.get());assertEquals(5,adapterCloses.get());
+                assertEquals(2,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL"));
                 assertArrayEquals(payload,fixture.bytes("fixture-oss",key));
             }
         }
@@ -1462,6 +1468,145 @@ class DurableUploadAuthorityTest {
         assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
         assertEquals(1,scalar("SELECT count(*) FROM fs.purge_preparation"));
         assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+    }
+
+    @Test void readerDrainAndSimulationFenceAcrossRestoreAndExpiredWorker() throws Exception {
+        var fixture=available();
+        for(String action:List.of("DELETE_FILE","RESTORE_FILE","DOWNLOAD_TRANSFER","PREPARE_PURGE"))
+            grant("fixture-user","asset",action,"OWNED_FILE",null);
+        var authority=downloads(CLOCK);
+        var issued=authority.issue("user",TENANT,fileId(),view.version(),null).value();
+        var gateway=new PrivateTransferGateway(DurableDownloadAuthority.combine(authority(),authority),fixture,
+            new TransferLimits(1024,1,1024,Duration.ofSeconds(10)),CLOCK);
+        var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
+        var output=new java.io.ByteArrayOutputStream(){
+            @Override public synchronized void write(byte[] b,int off,int len){
+                entered.countDown();
+                try{if(!release.await(10,TimeUnit.SECONDS))throw new AssertionError("test wait");}
+                catch(InterruptedException ex){Thread.currentThread().interrupt();throw new AssertionError(ex);}
+                super.write(b,off,len);
+            }
+        };
+        var simulation=new JdbcPurgeSimulation(source,CLOCK,Duration.ofSeconds(5),3);
+        PurgePreparation prepared;
+        try(var executor=Executors.newVirtualThreadPerTaskExecutor()){
+            var reading=executor.submit(()->gateway.download("user",issued.handle(),output));
+            try{
+                assertTrue(entered.await(5,TimeUnit.SECONDS));
+                assertEquals(1,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NULL"));
+                secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+                seedPurgeEvidence(1,1,"CLEAR",NOW);
+                prepared=secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,1)).value();
+                assertThrows(Failure.class,()->simulation.claim(TENANT,prepared.operationId()));
+                assertThrows(TransferFailure.class,()->authority.claim("user",issued.handle(),TransferInstruction.Action.DOWNLOAD));
+                assertEquals(0,scalar("SELECT count(*) FROM fs.purge_simulation"));
+            }finally{release.countDown();}
+            reading.get(10,TimeUnit.SECONDS);
+        }
+        assertArrayEquals(fixture.bytes,output.toByteArray());
+        assertEquals(1,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL"));
+        assertThrows(Failure.class,()->simulation.claim(OTHER,prepared.operationId()));
+        var first=simulation.claim(TENANT,prepared.operationId());
+        assertThrows(Failure.class,()->simulation.claim(TENANT,prepared.operationId()));
+        var later=new JdbcPurgeSimulation(source,Clock.fixed(NOW.plusSeconds(5),ZoneOffset.UTC),Duration.ofSeconds(5),3);
+        assertFalse(later.complete(first));
+        var second=later.claim(TENANT,prepared.operationId());
+        assertEquals(2,second.attempt());assertNotEquals(first.token(),second.token());
+        assertFalse(later.complete(first));
+        sql("UPDATE fs.file_retention_evidence SET hold_state='HELD'");
+        assertThrows(Failure.class,()->later.complete(second));
+        sql("UPDATE fs.file_retention_evidence SET hold_state='CLEAR'");
+        sql("ALTER TABLE fs_kernel.platform_event_outbox ADD CONSTRAINT reject_purge_simulated CHECK (event_type <> 'file-storage.file.purge-simulated') NOT VALID");
+        try{
+            assertThrows(RuntimeException.class,()->later.complete(second));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.purge_simulation WHERE status='SIMULATED'"));
+        }finally{sql("ALTER TABLE fs_kernel.platform_event_outbox DROP CONSTRAINT reject_purge_simulated");}
+        assertTrue(later.complete(second));assertFalse(later.complete(second));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_simulation WHERE status='SIMULATED'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE event_type='file-storage.file.purge-simulated'"));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.file_version WHERE state='AVAILABLE'"));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.purge_simulation SET status='CLAIMED',finished_at=NULL"));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,1);
+        assertThrows(Failure.class,()->later.complete(second));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,2);
+        seedPurgeEvidence(3,1,"CLEAR",NOW);
+        var next=secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),3,1)).value();
+        var third=simulation.claim(TENANT,next.operationId());
+        secured.lifecycle("user",TENANT,null,fileId(),Action.RESTORE_FILE,3);
+        assertThrows(Failure.class,()->simulation.complete(third));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.purge_simulation WHERE status='SIMULATED'"));
+    }
+
+    @Test void expiredReaderAndUntrackedClaimRemainBlockedUntilPositiveDrain() throws Exception {
+        available();
+        for(String action:List.of("DELETE_FILE","DOWNLOAD_TRANSFER","PREPARE_PURGE"))
+            grant("fixture-user","asset",action,"OWNED_FILE",null);
+        var authority=downloads(CLOCK);
+        var handle=authority.issue("user",TENANT,fileId(),view.version(),null).value();
+        var instruction=authority.claim("user",handle.handle(),TransferInstruction.Action.DOWNLOAD);
+        assertNotNull(instruction.readerToken());
+        var repo=new JdbcDownloadTransfers(source,CLOCK,Duration.ofMinutes(1),5);
+        assertFalse(repo.acknowledge(OTHER,fileId(),view.version(),instruction.readerToken()));
+        assertFalse(repo.acknowledge(TENANT,fileId(),view.version(),UUID.randomUUID()));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        seedPurgeEvidence(1,1,"CLEAR",NOW);
+        sql("UPDATE fs.file_retention_evidence SET valid_until=?",NOW.plusSeconds(300).atOffset(ZoneOffset.UTC));
+        var prepared=secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,1)).value();
+        var lateClock=Clock.fixed(NOW.plusSeconds(61),ZoneOffset.UTC);
+        var simulation=new JdbcPurgeSimulation(source,lateClock,Duration.ofSeconds(5),2);
+        assertThrows(Failure.class,()->simulation.claim(TENANT,prepared.operationId()));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NULL"));
+        var lateRepo=new JdbcDownloadTransfers(source,lateClock,Duration.ofMinutes(1),5);
+        assertTrue(lateRepo.acknowledge(TENANT,fileId(),view.version(),instruction.readerToken()));
+        assertTrue(lateRepo.acknowledge(TENANT,fileId(),view.version(),instruction.readerToken()));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.download_reader SET drained_at=NULL"));
+        assertThrows(SQLException.class,()->sql("DELETE FROM fs.download_transfer_handle WHERE claimed_at IS NOT NULL"));
+        var first=simulation.claim(TENANT,prepared.operationId());
+        var later=new JdbcPurgeSimulation(source,Clock.fixed(NOW.plusSeconds(66),ZoneOffset.UTC),Duration.ofSeconds(5),2);
+        var second=later.claim(TENANT,prepared.operationId());
+        var exhausted=new JdbcPurgeSimulation(source,Clock.fixed(NOW.plusSeconds(71),ZoneOffset.UTC),Duration.ofSeconds(5),2);
+        assertThrows(Failure.class,()->exhausted.claim(TENANT,prepared.operationId()));
+        assertFalse(exhausted.complete(first));assertFalse(exhausted.complete(second));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.purge_simulation WHERE status='SIMULATED'"));
+    }
+
+    @Test void uncertainCloseAndOldRuntimeClaimNeverDrain() throws Exception {
+        var fixture=available();
+        for(String action:List.of("DELETE_FILE","DOWNLOAD_TRANSFER","PREPARE_PURGE"))
+            grant("fixture-user","asset",action,"OWNED_FILE",null);
+        var authority=downloads(CLOCK);
+        var handle=authority.issue("user",TENANT,fileId(),view.version(),null).value();
+        fixture.failClose=true;
+        var gateway=new PrivateTransferGateway(DurableDownloadAuthority.combine(authority(),authority),fixture,
+            new TransferLimits(1024,1,1024,Duration.ofSeconds(10)),CLOCK);
+        assertThrows(TransferFailure.class,()->gateway.download("user",handle.handle(),new java.io.ByteArrayOutputStream()));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NULL"));
+        var old=authority.issue("user",TENANT,fileId(),view.version(),null).value();
+        // Emulate a pre-V14 claimant in a mixed-version runtime: no corresponding lease.
+        sql("UPDATE fs.download_transfer_handle SET claimed_at=? WHERE claimed_at IS NULL",NOW.atOffset(ZoneOffset.UTC));
+        assertEquals(2,scalar("SELECT count(*) FROM fs.download_transfer_handle WHERE claimed_at IS NOT NULL"));
+        assertEquals(1,scalar("SELECT count(*) FROM fs.download_reader"));
+        assertThrows(SQLException.class,()->sql("DELETE FROM fs.download_transfer_handle WHERE claimed_at IS NOT NULL"));
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        seedPurgeEvidence(1,1,"CLEAR",NOW);
+        var prepared=secured.preparePurge("user",TENANT,null,new PurgeRequest(fileId(),view.version(),1,1)).value();
+        assertThrows(Failure.class,()->new JdbcPurgeSimulation(source,CLOCK,Duration.ofSeconds(5),2).claim(TENANT,prepared.operationId()));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.purge_simulation"));
+    }
+
+    // HTTP Content-Length can be satisfied before the server closes its provider
+    // resources and commits the durable acknowledgement. Wait on the evidence,
+    // not on client receipt of bytes; fail if the acknowledgement never arrives.
+    private static void awaitDrainedReaders(long expected)throws Exception{
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        long count;
+        do{
+            count=scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL");
+            if(count>=expected)break;
+            Thread.sleep(20);
+        }while(System.nanoTime()<deadline);
+        assertEquals(expected,count,"server-side reader drain acknowledgement");
     }
 
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
