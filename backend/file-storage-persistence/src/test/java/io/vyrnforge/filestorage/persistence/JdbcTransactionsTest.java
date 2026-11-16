@@ -62,6 +62,9 @@ class JdbcTransactionsTest {
         org.flywaydb.core.Flyway.configure().dataSource(dataSource)
                 .schemas("fs").defaultSchema("fs").locations("classpath:db/filestorage")
                 .target("21").load().migrate();
+        org.flywaydb.core.Flyway.configure().dataSource(dataSource)
+                .schemas("fs").defaultSchema("fs").locations("classpath:db/filestorage")
+                .target("22").load().migrate();
         StorageMigrations.migrate(dataSource);
         StorageMigrations.migrate(dataSource);
         assertEquals(1, scalar("SELECT count(*) FROM fs.accounting_manifest_principal WHERE login_role='legacy_fixture' AND execution_mode='DISABLED' AND actor='legacy-actor' AND capability='CAPTURE'"));
