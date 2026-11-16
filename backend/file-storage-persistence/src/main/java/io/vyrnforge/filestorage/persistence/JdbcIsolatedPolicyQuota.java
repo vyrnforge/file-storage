@@ -45,7 +45,7 @@ public final class JdbcIsolatedPolicyQuota {
                 if(actor.actorId().equals(rows.getString(2))||actor.actorId().equals(rows.getString(3))
                     ||rows.getObject(4,OffsetDateTime.class).toInstant().isAfter(tx.now()))throw conflict();
             }
-            if(current!=null&&seconds<current.retentionSeconds())throw conflict();
+            if(current!=null&&(seconds<current.retentionSeconds()||current.activatedAt().isAfter(tx.now())))throw conflict();
             if(total(c,tenant).compareTo(BigDecimal.valueOf(quotaLimit))>0)throw conflict();
             var now=tx.now();
             try(var ps=tx.statement(c,"INSERT INTO fs.isolated_policy_activation VALUES (?,?,?,?,?,?)",
@@ -79,8 +79,8 @@ public final class JdbcIsolatedPolicyQuota {
             try(var ps=tx.statement(c,"SELECT 1 FROM fs.governed_legal_hold WHERE tenant_id=? AND file_id=? LIMIT 1",
                 tenant.value(),file.value());var rows=ps.executeQuery()){if(rows.next())hold=Hold.HELD;}
             // Never shorten previously observed retention, including earlier generations.
-            try(var ps=tx.statement(c,"SELECT max(retain_until) FROM fs.file_retention_evidence WHERE tenant_id=? AND file_id=?",
-                tenant.value(),file.value());var rows=ps.executeQuery()){
+            try(var ps=tx.statement(c,"SELECT max(retain_until) FROM (SELECT retain_until FROM fs.file_retention_evidence WHERE tenant_id=? AND file_id=? UNION ALL SELECT retain_until FROM fs.isolated_retention_observation WHERE tenant_id=? AND file_id=?) deadlines",
+                tenant.value(),file.value(),tenant.value(),file.value());var rows=ps.executeQuery()){
                 rows.next();var previous=rows.getObject(1,OffsetDateTime.class);if(previous!=null&&previous.toInstant().isAfter(retain))retain=previous.toInstant();
             }
             var until=now.plusSeconds(policy.evidenceTtlSeconds());

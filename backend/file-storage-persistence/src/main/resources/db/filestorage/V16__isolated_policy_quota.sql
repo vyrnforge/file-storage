@@ -14,7 +14,7 @@ CREATE TABLE fs.isolated_retention_observation (
  observation_id uuid PRIMARY KEY, tenant_id uuid NOT NULL, file_id varchar(512) NOT NULL,
  lifecycle_revision bigint NOT NULL CHECK(lifecycle_revision>0 AND lifecycle_revision%2=1),
  policy_revision bigint NOT NULL, retain_until timestamptz NOT NULL,
- hold_state text NOT NULL CHECK(hold_state IN ('UNKNOWN','HELD','CLEAR')),
+ hold_state text NOT NULL CHECK(hold_state IN ('UNKNOWN','HELD')),
  observed_at timestamptz NOT NULL, valid_until timestamptz NOT NULL CHECK(valid_until>observed_at),
  actor varchar(128) NOT NULL,
  FOREIGN KEY(tenant_id,file_id) REFERENCES fs.file(tenant_id,file_id),

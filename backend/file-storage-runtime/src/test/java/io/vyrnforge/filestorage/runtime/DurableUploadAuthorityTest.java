@@ -1841,6 +1841,35 @@ class DurableUploadAuthorityTest {
         assertThrows(SQLException.class,()->sql("UPDATE fs.isolated_quota_reservation SET status='RELEASED',finished_at=? WHERE session_id=?",future.instant().atOffset(ZoneOffset.UTC),other.session().value()));
     }
 
+    @Test void isolatedActivationInvalidatesLegacyPreparationAndRetentionProjection() throws Exception {
+        available();
+        grant("fixture-user","asset","DELETE_FILE","OWNED_FILE",null);
+        grant("fixture-user","asset","PREPARE_PURGE","OWNED_FILE",null);
+        secured.lifecycle("user",TENANT,null,fileId(),Action.DELETE_FILE,0);
+        seedPurgeEvidence(1,1,"CLEAR",NOW);
+        var request=new PurgeRequest(fileId(),view.version(),1,1);
+        var prep=secured.preparePurge("user",TENANT,null,request).value();
+        var simulation=new JdbcPurgeSimulation(source,CLOCK,Duration.ofSeconds(5),2);
+        var old=simulation.claim(TENANT,prep.operationId());
+        var assessment=new JdbcRetentionSafety(source,CLOCK);
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.REVIEW_REQUIRED,assessment.assess(TENANT,fileId()));
+        long rev=reviewedPolicy(CLOCK,0,10);
+        isolatedQuota(CLOCK).activate(POLICY_ACTIVATOR,TENANT,0,rev,10,60,CorrelationContext.create());
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.EVIDENCE_STALE,assessment.assess(TENANT,fileId()));
+        assertThrows(Failure.class,()->simulation.complete(old));
+        assertThrows(Failure.class,()->secured.preparePurge("user",TENANT,null,request));
+        var later=Clock.fixed(NOW.plusSeconds(1),ZoneOffset.UTC);
+        var q=isolatedQuota(later);
+        q.observe(ADMIN,TENANT,fileId(),1,rev,CorrelationContext.create());
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.HOLD_UNKNOWN,
+            new JdbcRetentionSafety(source,later).assess(TENANT,fileId()));
+        assertThrows(SQLException.class,()->sql("UPDATE fs.isolated_retention_observation SET hold_state='CLEAR'"));
+        sql("UPDATE fs.file_retention_evidence SET hold_state='CLEAR'");
+        assertEquals(io.vyrnforge.filestorage.domain.RetentionSafety.Assessment.EVIDENCE_STALE,
+            new JdbcRetentionSafety(source,later).assess(TENANT,fileId()));
+        assertEquals(0,scalar("SELECT count(*) FROM fs.purge_simulation WHERE status='SIMULATED'"));
+    }
+
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
         sql("""
             INSERT INTO fs.file_retention_evidence(tenant_id,file_id,lifecycle_revision,policy_revision,hold_state,retain_until,observed_at,valid_until)
