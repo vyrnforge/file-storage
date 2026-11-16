@@ -1,0 +1,350 @@
+{
+  "format": "file-storage-versioned-upstream-license-sources-v1",
+  "scope": "Pinned upstream public source-tag files; corroboration only. No binary-to-source proof or distribution approval.",
+  "families": [
+    {
+      "id": "dom4j",
+      "repository": "dom4j/dom4j",
+      "tag": "version-2.1.4",
+      "commit": "8db3742e13860c6767971867458073e8dd0fa1d1",
+      "components": [
+        "pkg:maven/org.dom4j/dom4j@2.1.4?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_CORROBORATION",
+      "documents": [
+        {
+          "path": "LICENSE",
+          "gitBlobSha": "1a02acb149474fb2f31fe70c3d1a9a98b44a1674"
+        }
+      ]
+    },
+    {
+      "id": "logback",
+      "repository": "qos-ch/logback",
+      "tag": "v_1.5.38",
+      "commit": "d04984a41fce42977466f45a2f076f0ee5cc4207",
+      "components": [
+        "pkg:maven/ch.qos.logback/logback-core@1.5.38?type=jar",
+        "pkg:maven/ch.qos.logback/logback-classic@1.5.38?type=jar"
+      ],
+      "scope": "LICENSE_DECLARATION_ONLY",
+      "documents": [
+        {
+          "path": "LICENSE.txt",
+          "gitBlobSha": "55db596024ff8936b274fd0e12197dd116af0472"
+        },
+        {
+          "path": "logback-core/LICENSE.txt",
+          "gitBlobSha": "b87c4d056e26378e6d237c251bd86da8b00a708b"
+        },
+        {
+          "path": "logback-classic/LICENSE.txt",
+          "gitBlobSha": "b87c4d056e26378e6d237c251bd86da8b00a708b"
+        }
+      ]
+    },
+    {
+      "id": "netty",
+      "repository": "netty/netty",
+      "tag": "netty-4.1.138.Final",
+      "commit": "26e68a2c3935e459b374891c87760f6d6c5e2550",
+      "components": [
+        "pkg:maven/io.netty/netty-buffer@4.1.138.Final?type=jar",
+        "pkg:maven/io.netty/netty-codec@4.1.138.Final?type=jar",
+        "pkg:maven/io.netty/netty-codec-http@4.1.138.Final?type=jar",
+        "pkg:maven/io.netty/netty-codec-http2@4.1.138.Final?type=jar",
+        "pkg:maven/io.netty/netty-common@4.1.138.Final?type=jar",
+        "pkg:maven/io.netty/netty-handler@4.1.138.Final?type=jar",
+        "pkg:maven/io.netty/netty-resolver@4.1.138.Final?type=jar",
+        "pkg:maven/io.netty/netty-transport@4.1.138.Final?type=jar",
+        "pkg:maven/io.netty/netty-transport-classes-epoll@4.1.138.Final?type=jar",
+        "pkg:maven/io.netty/netty-transport-native-unix-common@4.1.138.Final?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_AND_NOTICE_CORROBORATION",
+      "documents": [
+        {
+          "path": "LICENSE.txt",
+          "gitBlobSha": "62589edd12a37dd28b6b6fed1e2d728ac9f05c8d"
+        },
+        {
+          "path": "NOTICE.txt",
+          "gitBlobSha": "971865b7c1c23ba891ae4c344a085b6e2ec98f50"
+        },
+        {
+          "path": "license/LICENSE.aalto-xml.txt",
+          "gitBlobSha": "db3502e5f7b46d876582c43a0cf9c744532ceb89"
+        },
+        {
+          "path": "license/LICENSE.base64.txt",
+          "gitBlobSha": "31ebc840539c1a88450cd6999d7b0d6d0a59c2ed"
+        },
+        {
+          "path": "license/LICENSE.bouncycastle.txt",
+          "gitBlobSha": "aa21043dc106471ebd674998552113b3c894dc19"
+        },
+        {
+          "path": "license/LICENSE.brotli4j.txt",
+          "gitBlobSha": "20e4bd85661f5fbc86e0a8aac3934ddabe776160"
+        },
+        {
+          "path": "license/LICENSE.caliper.txt",
+          "gitBlobSha": "62589edd12a37dd28b6b6fed1e2d728ac9f05c8d"
+        },
+        {
+          "path": "license/LICENSE.commons-lang.txt",
+          "gitBlobSha": "92a8d0d2e2edb608692ef371d01ab84a399dda1e"
+        },
+        {
+          "path": "license/LICENSE.commons-logging.txt",
+          "gitBlobSha": "92a8d0d2e2edb608692ef371d01ab84a399dda1e"
+        },
+        {
+          "path": "license/LICENSE.compress-lzf.txt",
+          "gitBlobSha": "d3dfbd0e523917e04ca4865ff13180544d464ad6"
+        },
+        {
+          "path": "license/LICENSE.dnsinfo.txt",
+          "gitBlobSha": "29dd192fcfbcff0e1a324b319a7e9765a0047d59"
+        },
+        {
+          "path": "license/LICENSE.harmony.txt",
+          "gitBlobSha": "92a8d0d2e2edb608692ef371d01ab84a399dda1e"
+        },
+        {
+          "path": "license/LICENSE.hpack.txt",
+          "gitBlobSha": "9b259bdfcf9022e7f4999a318ab7261300644e11"
+        },
+        {
+          "path": "license/LICENSE.hyper-hpack.txt",
+          "gitBlobSha": "d24c351e1889b5b7837e4c9c1dc59334191c7f2c"
+        },
+        {
+          "path": "license/LICENSE.jboss-marshalling.txt",
+          "gitBlobSha": "a4546c5c30633e6ca62d84e2af19f94538ca3fa1"
+        },
+        {
+          "path": "license/LICENSE.jbzip2.txt",
+          "gitBlobSha": "6d6f1d40c06836f2f38b2971e47c96ecf9dad92b"
+        },
+        {
+          "path": "license/LICENSE.jctools.txt",
+          "gitBlobSha": "92a8d0d2e2edb608692ef371d01ab84a399dda1e"
+        },
+        {
+          "path": "license/LICENSE.jfastlz.txt",
+          "gitBlobSha": "6f27e141f6b7ce98b44aa9b5dd2a8130216f95dd"
+        },
+        {
+          "path": "license/LICENSE.jsr166y.txt",
+          "gitBlobSha": "b1c292b54cb2b24b1b0b9481cc59ba45bd4c7a7e"
+        },
+        {
+          "path": "license/LICENSE.jzlib.txt",
+          "gitBlobSha": "29ad562af0a5ed0b2c0171dc77ae1e7dfced01de"
+        },
+        {
+          "path": "license/LICENSE.libdivsufsort.txt",
+          "gitBlobSha": "3bad2dcc18c42901a3f47ebfb6d64161adf4ae9b"
+        },
+        {
+          "path": "license/LICENSE.log4j.txt",
+          "gitBlobSha": "92a8d0d2e2edb608692ef371d01ab84a399dda1e"
+        },
+        {
+          "path": "license/LICENSE.lz4.txt",
+          "gitBlobSha": "62589edd12a37dd28b6b6fed1e2d728ac9f05c8d"
+        },
+        {
+          "path": "license/LICENSE.lzma-java.txt",
+          "gitBlobSha": "62589edd12a37dd28b6b6fed1e2d728ac9f05c8d"
+        },
+        {
+          "path": "license/LICENSE.mvn-wrapper.txt",
+          "gitBlobSha": "62589edd12a37dd28b6b6fed1e2d728ac9f05c8d"
+        },
+        {
+          "path": "license/LICENSE.nghttp2-hpack.txt",
+          "gitBlobSha": "80201792ec7234674ea584ef1303d5f428558ae9"
+        },
+        {
+          "path": "license/LICENSE.protobuf.txt",
+          "gitBlobSha": "0ab3bdb01a4266fed543846ae5e16677993de192"
+        },
+        {
+          "path": "license/LICENSE.slf4j.txt",
+          "gitBlobSha": "777b1de8451092f845a4832d8e68872d0c12151d"
+        },
+        {
+          "path": "license/LICENSE.snappy.txt",
+          "gitBlobSha": "ba6a3ae553a5eb2d501b46a2a6fac267f088b8e4"
+        },
+        {
+          "path": "license/LICENSE.webbit.txt",
+          "gitBlobSha": "47a75441060a4d9c3a8aed483a137e12910a7bb0"
+        },
+        {
+          "path": "license/LICENSE.zstd-jni.txt",
+          "gitBlobSha": "7bdccb6a9c343a2215525dee0d3af915bf969f72"
+        },
+        {
+          "path": "license/NOTICE.harmony.txt",
+          "gitBlobSha": "c37ec28276ed63eaaa4fc3c8165beb6c60764a01"
+        }
+      ]
+    },
+    {
+      "id": "otel",
+      "repository": "open-telemetry/opentelemetry-java",
+      "tag": "v1.68.0",
+      "commit": "6700a70601092dab677d0b6103484ef21e766393",
+      "components": [
+        "pkg:maven/io.opentelemetry/opentelemetry-api@1.68.0?type=jar",
+        "pkg:maven/io.opentelemetry/opentelemetry-common@1.68.0?type=jar",
+        "pkg:maven/io.opentelemetry/opentelemetry-context@1.68.0?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_CORROBORATION",
+      "documents": [
+        {
+          "path": "LICENSE",
+          "gitBlobSha": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+        }
+      ]
+    },
+    {
+      "id": "opentracing",
+      "repository": "opentracing/opentracing-java",
+      "tag": "0.33.0",
+      "commit": "dcf4df293afbef0f262c4232fff8ff4fbf196b18",
+      "components": [
+        "pkg:maven/io.opentracing/opentracing-api@0.33.0?type=jar",
+        "pkg:maven/io.opentracing/opentracing-noop@0.33.0?type=jar",
+        "pkg:maven/io.opentracing/opentracing-util@0.33.0?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_CORROBORATION",
+      "documents": [
+        {
+          "path": "LICENSE",
+          "gitBlobSha": "8f71f43fee3f78649d238238cbde51e6d7055c82"
+        }
+      ]
+    },
+    {
+      "id": "gson",
+      "repository": "google/gson",
+      "tag": "gson-parent-2.11.0",
+      "commit": "828a97be0f8d58108b140b77df8dc76b657f4a87",
+      "components": [
+        "pkg:maven/com.google.code.gson/gson@2.11.0?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_CORROBORATION",
+      "documents": [
+        {
+          "path": "LICENSE",
+          "gitBlobSha": "d645695673349e3947e8e5ae42332d0ac3164cd7"
+        }
+      ]
+    },
+    {
+      "id": "errorprone",
+      "repository": "google/error-prone",
+      "tag": "v2.27.0",
+      "commit": "ebe0a014edf7a50345c3b9e958e876e8a9177f60",
+      "components": [
+        "pkg:maven/com.google.errorprone/error_prone_annotations@2.27.0?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_CORROBORATION",
+      "documents": [
+        {
+          "path": "COPYING",
+          "gitBlobSha": "d645695673349e3947e8e5ae42332d0ac3164cd7"
+        }
+      ]
+    },
+    {
+      "id": "jspecify",
+      "repository": "jspecify/jspecify",
+      "tag": "v1.0.0",
+      "commit": "b2a10e14bb81c1b7cb6e488c112fe55cb2218d7d",
+      "components": [
+        "pkg:maven/org.jspecify/jspecify@1.0.0?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_CORROBORATION",
+      "documents": [
+        {
+          "path": "LICENSE",
+          "gitBlobSha": "d645695673349e3947e8e5ae42332d0ac3164cd7"
+        }
+      ]
+    },
+    {
+      "id": "reactivestreams",
+      "repository": "reactive-streams/reactive-streams-jvm",
+      "tag": "v1.0.4",
+      "commit": "944163a4b2477a2bebaaada86b0ba910b6302f2f",
+      "components": [
+        "pkg:maven/org.reactivestreams/reactive-streams@1.0.4?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_CORROBORATION",
+      "documents": [
+        {
+          "path": "LICENSE",
+          "gitBlobSha": "1e141c13ddba2ddfb78f7d4893ea56d810eda16d"
+        }
+      ]
+    },
+    {
+      "id": "flyway",
+      "repository": "flyway/flyway",
+      "tag": "flyway-13.12.1",
+      "commit": "1559183fb61b0e70fa605134e0349ce3b79940ad",
+      "components": [
+        "pkg:maven/org.flywaydb/flyway-database-postgresql@13.12.1?type=jar",
+        "pkg:maven/org.flywaydb/flyway-database-cockroachdb@13.12.1?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_CORROBORATION",
+      "documents": [
+        {
+          "path": "LICENSE.md",
+          "gitBlobSha": "88893d561f89b8573b571afbfc151b2e861c70f2"
+        },
+        {
+          "path": "LICENSE.txt",
+          "gitBlobSha": "7e8888bd226ddcef08a0aaef5bc195dfe132ff94"
+        }
+      ]
+    },
+    {
+      "id": "kernel",
+      "repository": "vyrnforge/platform-kernel",
+      "tag": "v0.3.2",
+      "commit": "c86eb33a46fae2843c75181c6b395cd0dc6710fe",
+      "components": [
+        "pkg:maven/io.github.vyrnforge/platform-kernel@0.3.2?type=jar",
+        "pkg:maven/io.github.vyrnforge/platform-kernel-jdbc@0.3.2?type=jar"
+      ],
+      "scope": "FULL_PROJECT_LICENSE_CORROBORATION",
+      "documents": [
+        {
+          "path": "LICENSE",
+          "gitBlobSha": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64"
+        }
+      ]
+    },
+    {
+      "id": "aliyun-oss",
+      "repository": "aliyun/aliyun-oss-java-sdk",
+      "tag": "3.18.4",
+      "commit": "8e0c3f54f56e44df414f5382ee2105f442b2be8f",
+      "components": [
+        "pkg:maven/com.aliyun.oss/aliyun-sdk-oss@3.18.4?type=jar"
+      ],
+      "scope": "COPYRIGHT_DECLARATION_ONLY",
+      "documents": [
+        {
+          "path": "META-INF/LICENSE.txt",
+          "gitBlobSha": "cf53741ade02a50a766c6d5d033d310202f9dd99"
+        }
+      ]
+    }
+  ]
+}
