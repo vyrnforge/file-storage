@@ -37,6 +37,7 @@ jobs:
           python3 scripts/staging-license-evidence.py "$target"
           python3 scripts/staging-release-evidence.py "$target"
           python3 scripts/staging-security-gate.py "$target"
+          python3 scripts/staging-distribution-review.py --self-test
           python3 scripts/staging-distribution-review.py "$target" --supplemental-sources
           python3 scripts/staging-attestation-statements.py --self-test
       - name: Retain exact candidate bytes for attestation
@@ -90,6 +91,7 @@ jobs:
           r = json.loads((p / "staging-release-review.json").read_text())
           assert v["checkoutCommit"] == os.environ["APPROVED_COMMIT"] == os.environ["GITHUB_SHA"]
           assert v["workflowRun"] == os.environ["GITHUB_RUN_ID"]
+          assert v["workflowAttempt"] == os.environ["GITHUB_RUN_ATTEMPT"]
           assert v["artifactSha256"] == r["artifactSha256"] == sha("file-storage-runtime-0.0.1-SNAPSHOT.jar")
           assert v["cycloneDxSha256"] == sha("bom.json")
           assert v["inventorySha256"] == sha("staging-inventory.json")

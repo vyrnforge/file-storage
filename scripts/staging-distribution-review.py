@@ -39,23 +39,23 @@ def obligations(row):
     names = license_names(row)
     if row["disposition"] == "FIRST_PARTY_APACHE_2_0":
         return "FIRST_PARTY", "Apache-2.0; include root LICENSE, applicable NOTICE and changed-file notices if source is distributed."
-    if "aliyun-java-sdk-kms@" in ref or "aliyun-java-sdk-ram@" in ref:
+    if "aliyun-java-sdk-kms@2.11.0?" in ref or "aliyun-java-sdk-ram@3.1.0?" in ref:
         return "SOURCE_CORROBORATION", "Apache-2.0 source headers corroborate; retain copyright, full license and notices; review non-Java files and exact source terms."
-    if "/FastInfoset@" in ref:
+    if "/FastInfoset@1.2.16?" in ref:
         return "TERMS_CONFLICT", "BOM Apache-2.0 + BSD-3-Clause; embedded LICENSE Apache-2.0, NOTICE declares BSD-3-Clause. Retain both texts and resolve component/third-party scope; do not assume OR."
-    if "javax.activation/javax.activation-api@" in ref:
+    if "javax.activation/javax.activation-api@1.2.0?" in ref:
         return "TERMS_CONFLICT", "BOM CDDL-1.0 OR GPL with classpath exception; embedded license begins CDDL 1.1. Resolve version and actual election; covered source/offer and exception obligations require review."
-    if "javax.xml.bind/jaxb-api@" in ref:
+    if "javax.xml.bind/jaxb-api@2.3.1?" in ref:
         return "SOURCE_OBLIGATIONS", "CDDL 1.1 or GPL with classpath exception as applicable; confirm election, covered source, notices and source availability for redistribution."
-    if "jakarta.annotation/jakarta.annotation-api@" in ref:
+    if "jakarta.annotation/jakarta.annotation-api@3.0.0?" in ref:
         return "SOURCE_OBLIGATIONS", "EPL-2.0; secondary GPL with classpath exception conditional per NOTICE. Prefer EPL only after review; make covered source available and preserve notices on redistribution."
-    if "ch.qos.logback/logback-" in ref:
+    if ref.split("?")[0] in ("pkg:maven/ch.qos.logback/logback-core@1.5.38", "pkg:maven/ch.qos.logback/logback-classic@1.5.38"):
         return "SOURCE_OBLIGATIONS", "Declared EPL-2.0/LGPL-2.1; verify exact upstream license/election. Prefer EPL if allowed; satisfy covered source and notices, or LGPL relinking/source requirements if elected."
-    if "org.dom4j/dom4j@" in ref:
+    if "org.dom4j/dom4j@2.1.4?" in ref:
         return "CUSTOM_TERMS", "Plexus metadata label is not exact DOM4J license evidence; obtain version-specific copyright/terms and confirm redistribution conditions."
-    if "org.bouncycastle/bcprov-jdk18on@" in ref:
+    if "org.bouncycastle/bcprov-jdk18on@1.87?" in ref:
         return "CUSTOM_TERMS", "Embedded LICENSE.md is MIT-form; preserve exact copyright/permission text, review crypto/export and retain binary license-class evidence separately."
-    if "org.jdom/jdom2@" in ref:
+    if "org.jdom/jdom2@2.0.6.1?" in ref:
         return "CUSTOM_TERMS", "Embedded JDOM custom terms: reproduce copyright, conditions/disclaimer in binary materials; no endorsement or JDOM naming without permission; acknowledgment requested."
     if len(names) != 1 or " OR " in names[0] or " AND " in names[0]:
         return "TERMS_UNRESOLVED", "Resolve exact terms/election; retain all notices; determine source and redistribution requirements."
@@ -84,7 +84,8 @@ def fetch(url, limit):
 
 def source_terms(component):
     g, a, v = (component.get(k, "") for k in ("group", "name", "version"))
-    require(all(re.fullmatch(r"[A-Za-z0-9_.+-]+", s) for s in (g, a, v)), "invalid Maven coordinates")
+    require(re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*", g) and
+            all(re.fullmatch(r"[A-Za-z0-9_.+-]+", s) and s not in (".", "..") for s in (a, v)), "invalid Maven coordinates")
     url = "https://repo.maven.apache.org/maven2/" + g.replace(".", "/") + f"/{a}/{v}/{a}-{v}-sources.jar"
     evidence = {"url": url, "status": "UNAVAILABLE", "documents": []}
     payloads = []
@@ -148,6 +149,8 @@ def build(target, supplemental=False):
     with zipfile.ZipFile(io.BytesIO(raw_archive)) as archive, zipfile.ZipFile(
             target / "staging-distribution-notices.zip", "w", compression=zipfile.ZIP_DEFLATED) as out:
         require(len(archive.namelist()) == len(set(archive.namelist())), "duplicate notice entries")
+        internal = read_json(archive.read("license-manifest.json"))
+        require(internal == {k: v for k, v in m.items() if k != "noticeArchiveSha256"}, "embedded notice manifest mismatch")
         consumed = set()
         def retain(doc, destination):
             entry = doc["archiveEntry"]
@@ -198,9 +201,64 @@ def build(target, supplemental=False):
     print("A18 distribution review:", len(report["libraries"]), "packaged;", len(report["graphOnly"]), "graph-only;", report["counts"], report["classifications"])
     print("Notice candidate SHA256:", report["distributionNoticeArchiveSha256"], "NO-GO; distribution approval outstanding")
 
+def self_test():
+    import tempfile
+    # Small artifact-bound fixture: notice bytes and all evidence hashes are real.
+    with tempfile.TemporaryDirectory() as tmp:
+        p = pathlib.Path(tmp)
+        doc = b"Copyright Example; permission granted."
+        root = b"Apache-2.0 fixture"
+        ref = "pkg:maven/example/demo@1?type=jar"
+        lic = [{"license": {"id": "MIT"}}]
+        row = {"bomRef": ref, "path": "BOOT-INF/lib/demo-1.jar", "sha256": "a" * 64,
+               "licenses": lic, "disposition": "DECLARED_REVIEW_REQUIRED",
+               "embeddedNotices": [{"entry": "META-INF/LICENSE", "archiveEntry": "libraries/0000/LICENSE",
+                                     "sha256": sha(doc), "bytes": len(doc)}]}
+        bom = dump({"components": [{"bom-ref": ref, "licenses": lic}]})
+        inv = dump({"libraries": [{"path": row["path"], "sha256": row["sha256"]}]})
+        m = {"artifactSha256": "b" * 64, "bomSha256": sha(bom), "libraries": [row],
+             "runtimeNotices": [], "repositoryLicenseSha256": sha(root)}
+        archive = p / "staging-license-notices.zip"
+        with zipfile.ZipFile(archive, "w") as z:
+            z.writestr("first-party/LICENSE", root)
+            z.writestr("libraries/0000/LICENSE", doc)
+            z.writestr("license-manifest.json", dump(m))
+        m["noticeArchiveSha256"] = sha(archive.read_bytes())
+        prov = {"artifactSha256": m["artifactSha256"], "cycloneDxSha256": sha(bom),
+                "inventorySha256": sha(inv), "licenseEvidenceSha256": sha(dump(m)),
+                "licenseNoticeArchiveSha256": m["noticeArchiveSha256"]}
+        for name, content in (("bom.json", bom), ("staging-inventory.json", inv),
+                              ("staging-license-evidence.json", dump(m)), ("staging-provenance.json", dump(prov))):
+            (p / name).write_bytes(content)
+        build(p)
+        review = read_json((p / "staging-distribution-review.json").read_bytes())
+        require(review["decision"] == "NO-GO" and review["counts"] == {"EMBEDDED_TEXT_PRESENT": 1}, "valid fixture failed")
+        require(not is_text("third-party.jar", b"PK"), "binary archive accepted")
+        require(not is_text("LICENSE.class", b"\xca\xfe\xba\xbe"), "class accepted")
+        require(is_text("LICENSE.txt", doc), "text rejected")
+        for name in ("staging-license-notices.zip", "bom.json", "staging-inventory.json", "staging-license-evidence.json"):
+            path = p / name
+            saved = path.read_bytes()
+            path.write_bytes(saved + b" ")
+            try:
+                build(p)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("tampered evidence accepted: " + name)
+            finally:
+                path.write_bytes(saved)
+    print("A18 distribution review self-tests: 8 passed")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("target", type=pathlib.Path)
+    parser.add_argument("target", type=pathlib.Path, nargs="?")
+    parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--supplemental-sources", action="store_true")
     args = parser.parse_args()
-    build(args.target, args.supplemental_sources)
+    if args.self_test:
+        self_test()
+    elif args.target:
+        build(args.target, args.supplemental_sources)
+    else:
+        parser.error("target or --self-test required")
