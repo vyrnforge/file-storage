@@ -26,3 +26,8 @@ Status: **NO-GO — environment and security review outstanding**. This is a rev
 6. Reconcile pending work, drain ingress and scheduler, preserve immutable file identity, revoke credentials if necessary, restore quarantined only with approved recovery point, validate role/migration state before reopening. Actual SLO, RPO/RTO and alert thresholds approved by environment owner.
 
 **Approval requested for repository candidate only.** Deployment, provider deletion, hold release, production policy/limits, historical backfill and publication are separate gates.
+
+
+## A17 security gate update
+
+A16 approved engineering baseline only, merged b9420b5d4ef507be32328040b5ea11ad3c330308. A17 pins patched crypto/telemetry and requires all formal/packaged Maven components scanned, zero reported advisories, exact digest bindings and no scan unavailability before candidate CI succeeds. License/notice evidence includes root license, nested notices and exact historical public source corroboration; legal/distribution dispositions remain separate. Manual main-only attestation workflow requires separate approved exact commit/approval reference; no signing or deployment performed by A17 PR CI. Environment and deployment decision remain NO-GO. See [A17 contract](../architecture/46_RELEASE_SECURITY_REMEDIATION.md).

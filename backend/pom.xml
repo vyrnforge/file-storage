@@ -4,6 +4,13 @@
     <artifactId>file-storage-parent</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <packaging>pom</packaging>
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
     <modules>
         <module>file-storage-domain</module>
         <module>file-storage-provider-spi</module>
@@ -19,9 +26,24 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <kernel.version>0.3.2</kernel.version>
         <junit.version>6.1.3</junit.version>
+        <!-- FS-310A17: remediate A16 OSS transitive advisories; keep OTel family aligned. -->
+        <bouncycastle.version>1.87</bouncycastle.version>
+        <opentelemetry.version>1.68.0</opentelemetry.version>
     </properties>
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>io.github.vyrnforge</groupId>
                 <artifactId>platform-kernel</artifactId>

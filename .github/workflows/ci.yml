@@ -36,6 +36,8 @@ jobs:
         run: python3 scripts/staging-build-evidence.py backend/file-storage-runtime/target/file-storage-runtime-0.0.1-SNAPSHOT.jar backend/file-storage-runtime/target/staging-inventory.json
       - name: Offline Maven vulnerability review evidence
         run: python3 scripts/staging-osv-scan.py backend/file-storage-runtime/target
+      - name: Collect artifact-bound license and notice evidence
+        run: python3 scripts/staging-license-evidence.py backend/file-storage-runtime/target
       - name: Bind CycloneDX and packaged runtime review evidence
         run: python3 scripts/staging-release-evidence.py backend/file-storage-runtime/target
       - name: Retain candidate evidence only
@@ -49,5 +51,11 @@ jobs:
             backend/file-storage-runtime/target/staging-release-review.json
             backend/file-storage-runtime/target/staging-osv.json
             backend/file-storage-runtime/target/staging-osv-meta.json
+            backend/file-storage-runtime/target/staging-license-evidence.json
+            backend/file-storage-runtime/target/staging-license-notices.zip
           if-no-files-found: error
           retention-days: 14
+      - name: A17 security regression gate
+        run: |
+          python3 scripts/staging-security-gate.py --self-test
+          python3 scripts/staging-security-gate.py backend/file-storage-runtime/target
