@@ -53,8 +53,17 @@ class JdbcTransactionsTest {
                 .schemas("fs_kernel").defaultSchema("fs_kernel").locations("classpath:db/migration").load().migrate();
         var historical = application().initiate(ALICE, command("v18-populated-rehearsal"));
         assertEquals(1, count("upload_session"));
+        // Rehearse a populated V20 upgrade with a legacy principal. V21 must
+        // preserve the mapping and require explicit audited-mode provisioning.
+        org.flywaydb.core.Flyway.configure().dataSource(dataSource)
+                .schemas("fs").defaultSchema("fs").locations("classpath:db/filestorage")
+                .target("20").load().migrate();
+        sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability) VALUES ('legacy_fixture',?,'legacy-actor','CAPTURE')", A.value());
         StorageMigrations.migrate(dataSource);
         StorageMigrations.migrate(dataSource);
+        assertEquals(1, scalar("SELECT count(*) FROM fs.accounting_manifest_principal WHERE login_role='legacy_fixture' AND execution_mode='REHEARSAL' AND actor='legacy-actor' AND capability='CAPTURE'"));
+        assertEquals(0, count("accounting_manifest_intent"));
+        sql("DELETE FROM fs.accounting_manifest_principal WHERE login_role='legacy_fixture'");
         assertTrue(StorageMigrations.ready(dataSource));
         assertEquals(historical, application().initiate(ALICE, command("v18-populated-rehearsal")));
         assertEquals(1, count("upload_session"));
