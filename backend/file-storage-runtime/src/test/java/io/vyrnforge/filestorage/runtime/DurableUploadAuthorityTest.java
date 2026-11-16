@@ -2666,6 +2666,217 @@ class DurableUploadAuthorityTest {
         }
     }
 
+
+    @Test void separatedMetadataTransferAndBackendAdministrationProfiles() throws Exception {
+        var kinds=List.of(IsolatedRoleProfiles.Kind.METADATA_API,IsolatedRoleProfiles.Kind.TRANSFER,IsolatedRoleProfiles.Kind.BACKEND_ADMIN);
+        try{
+            for(int i=0;i<kinds.size();i++){
+                var profile=new IsolatedRoleProfiles(kinds.get(i));
+                String group="a13_group_"+i,login="a13_login_"+i;
+                profile.provision(source,group);
+                sql("CREATE ROLE "+login+" LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+                sql("GRANT "+group+" TO "+login);
+                profile.verify(source,login,group);
+            }
+            var api=manifestLogin("a13_login_0");var transfer=manifestLogin("a13_login_1");var admin=manifestLogin("a13_login_2");
+            var apiClient=secured(CLOCK,api);
+            grant("fixture-user","asset","LIST_METADATA","OWNED_FILE",null);
+            view=apiClient.initiate("user",TENANT,null,new Initiate("attachment","a13.txt",5,"text/plain","a13-api")).value();
+            assertEquals(view.session(),apiClient.session("user",TENANT,null,view.session()).value().session());
+            assertEquals(2,apiClient.catalog("user",TENANT,null,null,10).value().items().size());
+            allow();grant("fixture-user","asset","DOWNLOAD_TRANSFER","OWNED_FILE",null);
+            var transferClient=secured(CLOCK,transfer);
+            var transfers=new JdbcUploadTransfers(transfer,CLOCK,Duration.ofMinutes(1),5);
+            var upload=new DurableUploadAuthority(transferClient,transfers);
+            var issued=upload.issue("user",TENANT,view.session(),null);
+            deny(upload,"other",issued.handle());
+            assertEquals(view.version(),upload.claim("user",issued.handle(),TransferInstruction.Action.UPLOAD).version());
+            deny(upload,"user",issued.handle());
+            var fixture=new IntegrityFixture();fixture.bytes="hello".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            var verify=new UploadIntegrityVerification(transferClient,new JdbcUploadVerification(transfers),fixture,
+                new TransferLimits(1024*1024,2,1024,Duration.ofSeconds(15)),CLOCK);
+            assertTrue(verify.verify("user",TENANT,view.session(),sha256(fixture.bytes),null).integrityMatched());
+            // Existing lifecycle profile is deliberately separate from the transfer identity.
+            var lifecycle=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.LIFECYCLE);
+            lifecycle.provision(source,"a13_lifecycle_group");
+            sql("CREATE ROLE a13_lifecycle LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+            sql("GRANT a13_lifecycle_group TO a13_lifecycle");
+            lifecycle.verify(source,"a13_lifecycle","a13_lifecycle_group");
+            var workerLogin=manifestLogin("a13_lifecycle");
+            var scans=new JdbcUploadScan(new JdbcUploadTransfers(workerLogin,CLOCK,Duration.ofMinutes(1),5),
+                new JdbcOperations(workerLogin,CLOCK,Duration.ofSeconds(10),Duration.ZERO,4),ADMIN,3);
+            new UploadCompletion(transferClient,scans).begin("user",TENANT,view.session(),null);
+            var job=scans.load(scans.claim(1).claims().getFirst());
+            scans.finish(job,new Content(5,sha256(fixture.bytes),"text/plain"),Scan.CLEAN);
+            var downloads=new DurableDownloadAuthority(transferClient,new JdbcDownloadTransfers(transfer,CLOCK,Duration.ofMinutes(1),5));
+            var download=downloads.issue("user",TENANT,fileId(),view.version(),null).value();
+            var pin=downloads.claim("user",download.handle(),TransferInstruction.Action.DOWNLOAD);
+            assertEquals(sha256(fixture.bytes),pin.sha256());downloads.acknowledge(pin);
+            assertEquals(1,scalar("SELECT count(*) FROM fs.download_reader WHERE drained_at IS NOT NULL"));
+            // Gateway may take row locks but cannot alter identity or lifecycle/placement state.
+            try(var c=transfer.getConnection();var st=c.createStatement()){
+                for(String denied:List.of("UPDATE fs.file SET state='SOFT_DELETED'","UPDATE fs.upload_session SET state='FAILED'",
+                    "UPDATE fs.storage_operation SET status='DEAD'","UPDATE fs.backend_revision SET status='RETIRED'",
+                    "DELETE FROM fs.download_reader","INSERT INTO fs.file(file_id,tenant_id,name,state) VALUES ('bad','01900000-0000-7000-8000-000000000001','bad','ACTIVE')"))
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
+                for(String denied:List.of("UPDATE fs.file_version SET version_id='00000000-0000-0000-0000-000000000001'",
+                    "UPDATE fs.upload_session SET session_id='00000000-0000-0000-0000-000000000001'",
+                    "UPDATE fs.storage_operation SET operation_id='00000000-0000-0000-0000-000000000001'"))
+                    assertEquals("23514",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
+            }
+            var registry=new JdbcRegistry(admin,CLOCK);var config=new JdbcConfiguration(admin,CLOCK);
+            var corr=CorrelationContext.create();
+            var next=registry.registerBackend(ADMIN,corr,TARGET,new CredentialRef("ref:fixture/a13"));
+            var nextLocation=registry.registerLocation(ADMIN,corr,next,"fixture-a13-bucket","objects");
+            registry.validateDraft(ADMIN,corr,next,1,Set.of(TARGET),candidate->{
+                Map<LocationId,Set<BackendValidator.Check>> checks=new HashMap<>();
+                for(var item:candidate.locations())checks.put(item.id(),EnumSet.allOf(BackendValidator.Check.class));
+                return new BackendValidator.Report(candidate.backend(),candidate.revision(),checks);
+            });
+            assertEquals(1,config.activateBackend(ADMIN,corr,next,0,1));
+            assertEquals(2,config.publishPolicy(ADMIN,corr,SCOPE,1,List.of(new JdbcConfiguration.PolicyRule(nextLocation,0,true))));
+            assertEquals(next,registry.active(next).orElseThrow().backend());
+            try(var c=admin.getConnection();var st=c.createStatement()){
+                for(String denied:List.of("UPDATE fs.file SET state='SOFT_DELETED'","UPDATE fs.upload_session SET state='FAILED'",
+                    "UPDATE fs.isolated_quota_fence SET enabled_revision=NULL","DELETE FROM fs.backend_revision",
+                    "UPDATE fs_kernel.platform_event_outbox SET status='PUBLISHED'"))
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute(denied)).getSQLState());
+            }
+            try(var c=api.getConnection();var st=c.createStatement()){
+                assertEquals("42501",assertThrows(SQLException.class,()->st.execute("UPDATE fs.backend_revision SET status='RETIRED'")).getSQLState());
+                assertEquals("42501",assertThrows(SQLException.class,()->st.execute("UPDATE fs.upload_transfer_handle SET claimed_at=NULL")).getSQLState());
+            }
+            assertEquals(1,scalar("SELECT count(*) FROM fs.upload_session WHERE session_id=? AND backend_id=? AND config_revision=1",view.session().value(),backend.value()));
+            assertEquals(0,scalar("SELECT count(*) FROM fs.storage_operation WHERE kind='PURGE_VERSION'"));
+        }finally{
+            var roles=new ArrayList<String>(List.of("a13_lifecycle","a13_lifecycle_group"));
+            for(int i=kinds.size()-1;i>=0;i--){roles.add("a13_login_"+i);roles.add("a13_group_"+i);}
+            for(String role:roles)if(scalar("SELECT count(*) FROM pg_roles WHERE rolname=?",role)>0){sql("DROP OWNED BY "+role);sql("DROP ROLE "+role);}
+        }
+    }
+
+    @Test void profileV2DetectsGrantOptionsDefaultAclAndCredentialRotation() throws Exception {
+        var profile=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.METADATA_API);
+        profile.provision(source,"a13_api_group");
+        sql("CREATE ROLE a13_api LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try{
+            sql("GRANT a13_api_group TO a13_api");profile.verify(source,"a13_api","a13_api_group");
+            sql("GRANT UPDATE(endpoint) ON fs.backend TO a13_api WITH GRANT OPTION");
+            assertTrue(profile.drift(source,"a13_api","a13_api_group").stream().anyMatch(x->x.contains("backend.endpoint")));
+            sql("REVOKE UPDATE(endpoint) ON fs.backend FROM a13_api");
+            sql("GRANT USAGE ON SCHEMA fs TO a13_api WITH GRANT OPTION");
+            assertTrue(profile.drift(source,"a13_api","a13_api_group").stream().anyMatch(x->x.contains("schema fs")));
+            sql("REVOKE USAGE ON SCHEMA fs FROM a13_api");
+            sql("GRANT EXECUTE ON FUNCTION fs.touch_quota_fence(uuid) TO a13_api WITH GRANT OPTION");
+            assertTrue(profile.drift(source,"a13_api","a13_api_group").stream().anyMatch(x->x.contains("touch_quota_fence")));
+            sql("REVOKE EXECUTE ON FUNCTION fs.touch_quota_fence(uuid) FROM a13_api");
+            sql("GRANT CREATE ON DATABASE "+DB.getDatabaseName()+" TO a13_api");
+            assertTrue(profile.drift(source,"a13_api","a13_api_group").contains("database/public schema privileges"));
+            sql("REVOKE CREATE ON DATABASE "+DB.getDatabaseName()+" FROM a13_api");
+            sql("ALTER DEFAULT PRIVILEGES IN SCHEMA fs GRANT SELECT ON TABLES TO a13_api");
+            assertTrue(profile.drift(source,"a13_api","a13_api_group").contains("explicit default ACL"));
+            sql("ALTER DEFAULT PRIVILEGES IN SCHEMA fs REVOKE SELECT ON TABLES FROM a13_api");
+            profile.verify(source,"a13_api","a13_api_group");
+            var old=manifestLogin("a13_api");
+            try(var existing=old.getConnection();var st=existing.createStatement()){
+                sql("ALTER ROLE a13_api PASSWORD 'fixture-only-a13-rotated'");
+                assertThrows(SQLException.class,old::getConnection);
+                var rotated=manifestLogin("a13_api");rotated.setPassword("fixture-only-a13-rotated");
+                assertEquals(view.session(),secured(CLOCK,rotated).session("user",TENANT,null,view.session()).value().session());
+                // Password rotation does not kill existing connections; revoke and drain explicitly.
+                try(var rows=st.executeQuery("SELECT count(*) FROM fs.file")){assertTrue(rows.next());assertEquals(1,rows.getLong(1));}
+                sql("REVOKE a13_api_group FROM a13_api");
+                assertEquals("42501",assertThrows(SQLException.class,()->st.execute("SELECT * FROM fs.file")).getSQLState());
+                assertThrows(RuntimeException.class,()->secured(CLOCK,rotated).session("user",TENANT,null,view.session()));
+                sql("ALTER ROLE a13_api NOLOGIN");
+                assertThrows(SQLException.class,rotated::getConnection);
+            }
+        }finally{
+            sql("ALTER DEFAULT PRIVILEGES IN SCHEMA fs REVOKE SELECT ON TABLES FROM a13_api");
+            sql("DROP OWNED BY a13_api");sql("DROP ROLE a13_api");
+            sql("DROP OWNED BY a13_api_group");sql("DROP ROLE a13_api_group");
+        }
+    }
+
+
+    @Test void quarantinedRestoreUsesSeparateOwnerAndExplicitDispatcherRestart() throws Exception {
+        // Source is synthetic, and no broker/provider is contacted.
+        var pending=scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PENDING'");
+        assertTrue(pending>0&&pending<100);
+        var dispatcherProfile=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.DISPATCHER);
+        sql("CREATE ROLE a13_migration LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        sql("CREATE ROLE a13_restore_dispatch LOGIN PASSWORD 'fixture-only-a9' NOSUPERUSER NOCREATEDB NOCREATEROLE");
+        try{
+            sql("INSERT INTO fs.accounting_manifest_principal(login_role,tenant_id,actor,capability,execution_mode) VALUES ('a13_restore_dispatch',?,'a13-restore-fixture','CAPTURE','AUDITED')",TENANT.value());
+            sql("CREATE DATABASE a13_restore OWNER a13_migration");
+            sql("REVOKE CONNECT,TEMP ON DATABASE a13_restore FROM PUBLIC");
+            try{
+                var migration=manifestLogin("a13_migration");migration.setDatabaseName("a13_restore");
+                var dispatcher=manifestLogin("a13_restore_dispatch");dispatcher.setDatabaseName("a13_restore");dispatcher.setCurrentSchema("fs_kernel");
+                assertThrows(SQLException.class,dispatcher::getConnection);
+                var dump=DB.execInContainer("pg_dump","-U",DB.getUsername(),"-d",DB.getDatabaseName(),"-Fc","--no-owner","--no-privileges","-f","/tmp/a13-rehearsal.dump");
+                assertEquals(0,dump.getExitCode());
+                var restore=DB.execInContainer("pg_restore","-U",DB.getUsername(),"-d","a13_restore","--role=a13_migration",
+                    "--no-owner","--no-privileges","--exit-on-error","/tmp/a13-rehearsal.dump");
+                assertEquals(0,restore.getExitCode(),restore.getStderr());
+                RuntimeComposition.migrate(migration);assertTrue(StorageMigrations.ready(migration));
+                // --no-privileges resets routines to default PUBLIC EXECUTE. Quarantine
+                // repairs the privilege boundary before any service connection is permitted.
+                try(var c=migration.getConnection();var st=c.createStatement()){
+                    c.setAutoCommit(false);
+                    st.execute("REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA fs,fs_kernel FROM PUBLIC");
+                    st.execute("REVOKE ALL ON ALL TABLES IN SCHEMA fs,fs_kernel FROM PUBLIC");
+                    st.execute("REVOKE ALL ON SCHEMA fs,fs_kernel FROM PUBLIC");
+                    st.execute("ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC");
+                    st.execute("UPDATE fs.accounting_manifest_principal SET execution_mode='DISABLED'");
+                    c.commit();
+                }
+                try(var c=migration.getConnection();var st=c.createStatement()){
+                    try(var rows=st.executeQuery("SELECT count(*) FROM fs.accounting_manifest_principal WHERE execution_mode='DISABLED'")){
+                        assertTrue(rows.next());assertEquals(1,rows.getLong(1));
+                    }
+                    try(var rows=st.executeQuery("SELECT has_function_privilege('a13_restore_dispatch','fs.capture_accounting_manifest(uuid,uuid,bigint)','EXECUTE'),has_function_privilege('a13_restore_dispatch','fs.audited_accounting_manifest(uuid,uuid,bigint,text,text,uuid,uuid,uuid)','EXECUTE')")){
+                        assertTrue(rows.next());assertFalse(rows.getBoolean(1));assertFalse(rows.getBoolean(2));
+                    }
+                    try(var rows=st.executeQuery("SELECT count(*) FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname IN ('fs','fs_kernel') AND r.relowner<>current_user::regrole")){
+                        assertTrue(rows.next());assertEquals(0,rows.getLong(1));
+                    }
+                    try(var rows=st.executeQuery("SELECT count(*) FROM fs.upload_session")){assertTrue(rows.next());assertEquals(1,rows.getLong(1));}
+                    try(var rows=st.executeQuery("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PENDING'")){assertTrue(rows.next());assertEquals(pending,rows.getLong(1));}
+                }
+                assertThrows(SQLException.class,dispatcher::getConnection);
+                // A reviewed restart explicitly grants CONNECT plus narrow dispatcher privileges.
+                // Fixture simulates a clean restart, not approval to replay real external events.
+                var bootstrap=new PGSimpleDataSource();bootstrap.setURL(DB.getJdbcUrl());bootstrap.setDatabaseName("a13_restore");
+                bootstrap.setUser(DB.getUsername());bootstrap.setPassword(DB.getPassword());
+                dispatcherProfile.provision(bootstrap,"a13_restore_group");
+                sql("GRANT a13_restore_group TO a13_restore_dispatch");
+                sql("GRANT CONNECT ON DATABASE a13_restore TO a13_restore_dispatch");
+                var delivered=new ArrayList<UUID>();
+                var publisher=new io.vyrnforge.platform.kernel.persistence.jdbc.JdbcOutboxPublisher(dispatcher,
+                    new io.vyrnforge.platform.kernel.persistence.jdbc.JacksonRecordCodec(),event->delivered.add(event.eventId()),
+                    CLOCK,3,Duration.ZERO,Duration.ofSeconds(30));
+                publisher.publishBatch(100);assertEquals(pending,delivered.size());
+                publisher.publishBatch(100);assertEquals(pending,delivered.size());
+                try(var c=dispatcher.getConnection();var st=c.createStatement()){
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute("SELECT * FROM fs.file")).getSQLState());
+                    assertEquals("42501",assertThrows(SQLException.class,()->st.execute("CREATE TABLE fs_kernel.prohibited(id int)")).getSQLState());
+                }
+                assertEquals(pending,scalar("SELECT count(*) FROM fs_kernel.platform_event_outbox WHERE status='PENDING'"));
+                assertEquals(1,scalar("SELECT count(*) FROM fs.accounting_manifest_principal WHERE login_role='a13_restore_dispatch' AND execution_mode='AUDITED'"));
+                sql("REVOKE CONNECT ON DATABASE a13_restore FROM a13_restore_dispatch");
+                assertThrows(SQLException.class,dispatcher::getConnection);
+            }finally{
+                sql("DROP DATABASE a13_restore WITH (FORCE)");
+                DB.execInContainer("rm","-f","/tmp/a13-rehearsal.dump");
+            }
+        }finally{
+            sql("DELETE FROM fs.accounting_manifest_principal WHERE login_role='a13_restore_dispatch'");
+            for(String role:List.of("a13_restore_dispatch","a13_restore_group","a13_migration"))
+                if(scalar("SELECT count(*) FROM pg_roles WHERE rolname=?",role)>0){sql("DROP OWNED BY "+role);sql("DROP ROLE "+role);}
+        }
+    }
+
     private void seedPurgeEvidence(long generation,long policy,String hold,Instant retainUntil)throws Exception{
         sql("""
             INSERT INTO fs.file_retention_evidence(tenant_id,file_id,lifecycle_revision,policy_revision,hold_state,retain_until,observed_at,valid_until)
