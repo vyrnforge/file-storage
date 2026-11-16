@@ -131,6 +131,12 @@ public final class SecuredFiles {
         return execute(bearer,tenant,correlationId,Action.LIST_METADATA,null,
             (app,caller,correlation)->app.usage(caller,catalogGrants(caller)));
     }
+    /** Internal review request only; deliberately not exposed by an HTTP route. */
+    public Result<PurgePreparation> preparePurge(String bearer,TenantId tenant,UUID correlationId,PurgeRequest request){
+        Objects.requireNonNull(request);
+        return execute(bearer,tenant,correlationId,Action.PREPARE_PURGE,null,
+            (app,caller,correlation)->app.preparePurge(caller,request,resourceGrants(caller,Action.PREPARE_PURGE),correlation));
+    }
     public Result<LifecycleView> lifecycle(String bearer,TenantId tenant,UUID correlationId,FileId file,Action action,long expected){
         if(action!=Action.DELETE_FILE&&action!=Action.RESTORE_FILE)throw new Failure(Code.INVALID);
         return execute(bearer,tenant,correlationId,action,null,

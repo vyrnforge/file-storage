@@ -25,6 +25,7 @@ public final class JdbcTransactions implements Transactions {
     private final java.time.Clock clock;
     private final InitiationReliability reliability;
     private final JdbcFileLifecycle lifecycle;
+    private final JdbcPurgePreparation purgePreparation;
 
     public JdbcTransactions(DataSource dataSource, java.time.Clock clock, java.time.Duration leaseTtl) {
         this.clock = Objects.requireNonNull(clock);
@@ -33,6 +34,7 @@ public final class JdbcTransactions implements Transactions {
                 new JacksonRecordCodec(), clock);
         this.reliability = new InitiationReliability(dataSource, clock, leaseTtl);
         this.lifecycle = new JdbcFileLifecycle(dataSource,clock);
+        this.purgePreparation = new JdbcPurgePreparation(dataSource,clock);
     }
 
     @Override
@@ -80,6 +82,11 @@ public final class JdbcTransactions implements Transactions {
             return new Failure(Code.INVALID);
         }
         return new PersistenceFailure();
+    }
+
+    @Override
+    public PurgePreparation preparePurge(Caller caller,PurgeRequest request,List<CatalogGrant> grants,CorrelationContext correlation){
+        return purgePreparation.prepare(caller,request,grants,correlation);
     }
 
     @Override

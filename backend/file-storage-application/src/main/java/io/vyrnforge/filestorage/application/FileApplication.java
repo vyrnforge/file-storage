@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * No object-store operations run inside the transaction.
  */
 public final class FileApplication {
-    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER, LIST_METADATA, DELETE_FILE, RESTORE_FILE, LIST_DELETED_METADATA }
+    public enum Action { INITIATE, READ_METADATA, READ_SESSION, UPLOAD_TRANSFER, DOWNLOAD_TRANSFER, LIST_METADATA, DELETE_FILE, RESTORE_FILE, LIST_DELETED_METADATA, PREPARE_PURGE }
     public enum Code { DENIED, NOT_FOUND, NO_PLACEMENT, CONFLICT, IN_PROGRESS, INVALID }
     public static final class Failure extends RuntimeException {
         private final Code code;
@@ -83,6 +83,9 @@ public final class FileApplication {
      */
     public interface Transactions {
         <T> T execute(Function<Unit,T> work);
+        default PurgePreparation preparePurge(Caller caller,PurgeRequest request,List<CatalogGrant> grants,CorrelationContext correlation) {
+            throw new Failure(Code.DENIED);
+        }
         default LifecycleView lifecycle(Caller caller,FileId file,Action action,long expected,List<CatalogGrant> grants,CorrelationContext correlation) {
             throw new Failure(Code.DENIED);
         }
@@ -137,6 +140,21 @@ public final class FileApplication {
     public record UsageBucket(VersionState state,long fileCount,String declaredBytes,String availableBytes) {}
     public record CatalogUsage(List<UsageBucket> states) {
         public CatalogUsage {states=List.copyOf(states);}
+    }
+
+    /** Request for review only: neither a purge permit nor a worker claim. */
+    public record PurgeRequest(FileId file,VersionId version,long lifecycleRevision,long policyRevision) {
+        public PurgeRequest {
+            Objects.requireNonNull(file);Objects.requireNonNull(version);
+            if(lifecycleRevision<=0||lifecycleRevision%2!=1||policyRevision<=0)throw new Failure(Code.INVALID);
+        }
+    }
+    public enum PurgeDisposition { REVIEW_REQUIRED }
+    public record PurgePreparation(UUID operationId,FileReference file,VersionId version,long lifecycleRevision,
+                                   long policyRevision,PurgeDisposition disposition) {}
+    public PurgePreparation preparePurge(Caller caller,PurgeRequest request,List<CatalogGrant> grants,CorrelationContext correlation) {
+        if(caller==null)throw new Failure(Code.DENIED);
+        return transactions.preparePurge(caller,Objects.requireNonNull(request),catalogScope(grants),Objects.requireNonNull(correlation));
     }
 
     public record LifecycleView(FileReference file,FileState fileState,long lifecycleRevision) {}
