@@ -189,3 +189,8 @@ Owner explicitly approved #109 and AQ-02; #109 squash merged `e16f016c20e3338d50
 ## FS-65 Q15 accepted; AQ-03 evidence candidate
 
 Owner approved #110 and AQ-03. Q15 squash merged `dd3feae440ee601259bd77af983cfaeedb842cd0`; CI 43913331781 and audit 43913331656, 229 tests and zero new substantive findings. AQ-03 first slice verifies separated staging durable catalog grants (empty legacy fallback), revocation and outage/recovery, IAM key-source outage, and extends disposable role drift evidence to sequence and routine/schema ownership. No runtime policy, migration, public API, or production ACL changes. CI/owner acceptance pending; Q10/Q11 remain open for full review; frontend hold remains.
+
+
+## FS-65 Q11 history integrity sentinel candidate
+
+AQ-03B review identified table-only history write admission missed column-only grants and reachable role paths. Separate correction checks both histories and all membership-reachable role effective write/owner authority, with disposable regression and restoration. No migration or grant changes. Pending verification/owner acceptance; overall audit remains open.

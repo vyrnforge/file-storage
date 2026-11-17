@@ -261,6 +261,7 @@ class ApiRuntimeCompositionTest {
             }
             separated=new RuntimeDatabaseRoles(bindings);
             assertTrue(separated.ready());
+            verifyHistoryWriteAdmission();
             fixtureGrant("INITIATE","INITIATE_PURPOSE");
             for(String action:List.of("READ_SESSION","READ_METADATA","LIST_METADATA","UPLOAD_TRANSFER","DELETE_FILE","RESTORE_FILE","PREPARE_PURGE"))
                 fixtureGrant(action,"OWNED_FILE");
@@ -388,6 +389,44 @@ class ApiRuntimeCompositionTest {
                 sql("DROP OWNED BY "+role);sql("DROP ROLE "+role);
             }
         }
+    }
+
+    /** Disposable-only negative admission rehearsal: grants are removed before HTTP startup. */
+    private static void verifyHistoryWriteAdmission() throws Exception {
+        String login="a14_login_6",group="a14_group_6",extra="a14_history_extra";
+        var profile=new IsolatedRoleProfiles(IsolatedRoleProfiles.Kind.READINESS);
+        // Direct column UPDATE bypasses a table-only check; prove the privilege in the real catalog.
+        sql("GRANT UPDATE(checksum) ON fs.flyway_schema_history TO "+login);
+        try{
+            assertEquals(0,scalar("SELECT has_table_privilege('"+login+"','fs.flyway_schema_history','UPDATE')::int"));
+            assertEquals(1,scalar("SELECT has_any_column_privilege('"+login+"','fs.flyway_schema_history','UPDATE')::int"));
+            assertFalse(separated.ready());
+            assertTrue(profile.drift(source,login,group).contains("column fs.flyway_schema_history.checksum UPDATE"));
+        }finally{sql("REVOKE UPDATE(checksum) ON fs.flyway_schema_history FROM "+login);}
+        assertTrue(separated.ready());
+        // Inherited column INSERT in the other service-owned schema.
+        sql("GRANT INSERT(version) ON fs_kernel.flyway_schema_history TO "+group);
+        try{
+            assertEquals(0,scalar("SELECT has_table_privilege('"+login+"','fs_kernel.flyway_schema_history','INSERT')::int"));
+            assertEquals(1,scalar("SELECT has_any_column_privilege('"+login+"','fs_kernel.flyway_schema_history','INSERT')::int"));
+            assertFalse(separated.ready());
+        }finally{sql("REVOKE INSERT(version) ON fs_kernel.flyway_schema_history FROM "+group);}
+        assertTrue(separated.ready());
+        // Even a non-inheriting membership can permit SET ROLE. Reject reachable history-write authority.
+        sql("CREATE ROLE "+extra+" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS");
+        try{
+            sql("GRANT UPDATE(checksum) ON fs_kernel.flyway_schema_history TO "+extra);
+            sql("GRANT "+extra+" TO "+login+" WITH INHERIT FALSE, SET TRUE");
+            assertEquals(0,scalar("SELECT has_any_column_privilege('"+login+"','fs_kernel.flyway_schema_history','UPDATE')::int"));
+            assertEquals(1,scalar("SELECT pg_has_role('"+login+"','"+extra+"','MEMBER')::int"));
+            assertFalse(separated.ready());
+            sql("REVOKE "+extra+" FROM "+login);
+            assertTrue(separated.ready());
+        }finally{
+            sql("DROP OWNED BY "+extra);sql("DROP ROLE "+extra);
+        }
+        profile.verify(source,login,group);
+        assertTrue(separated.ready());
     }
 
     static final class StagingFixture {
