@@ -49,6 +49,27 @@ class WyrmgateJwtVerifierTest {
         var e=assertThrows(SecurityFailure.class,()->v.verify(token));
         assertEquals(SecurityCode.AUTHENTICATION_FAILED,e.code());assertEquals("AUTHENTICATION_FAILED",e.getMessage());
     }
+    @Test void snapshotFailureIsDistinctInternallyButPublicAuthenticationRemainsNeutral()throws Exception{
+        var v=verifier();
+        var seen=new ArrayList<SecurityObservation.Reason>();
+        var sink=(SecurityObservation)(boundary,reason)->seen.add(reason);
+        String token=valid(current);
+        var clock=Clock.fixed(NOW,ZoneOffset.UTC);
+        unavailable=true;
+        var error=assertThrows(SecurityFailure.class,()->AccessAuthentication.verify(new Trust(ISS,AUD),v,clock,token,
+            sink,SecurityObservation.Boundary.FILES));
+        assertEquals(SecurityCode.AUTHENTICATION_FAILED,error.code());assertNull(error.getCause());
+        assertEquals(List.of(SecurityObservation.Reason.KEY_SOURCE_UNAVAILABLE),seen);
+        unavailable=false;seen.clear();snapshot=new WyrmgateJwtVerifier.KeySnapshot(ISS,jwks(current),NOW.minusSeconds(600));
+        assertThrows(SecurityFailure.class,()->AccessAuthentication.verify(new Trust(ISS,AUD),v,clock,token,sink,SecurityObservation.Boundary.FILES));
+        assertEquals(List.of(SecurityObservation.Reason.KEY_SOURCE_UNAVAILABLE),seen);
+        snapshot=new WyrmgateJwtVerifier.KeySnapshot(ISS,jwks(current),NOW);seen.clear();
+        assertThrows(SecurityFailure.class,()->AccessAuthentication.verify(new Trust(ISS,AUD),v,clock,valid(previous),sink,SecurityObservation.Boundary.FILES));
+        assertEquals(List.of(SecurityObservation.Reason.AUTHENTICATION_FAILED),seen);
+        seen.clear();assertEquals("alice",AccessAuthentication.verify(new Trust(ISS,AUD),v,clock,token,sink,SecurityObservation.Boundary.FILES).subject());
+        assertTrue(seen.isEmpty());
+    }
+
     @Test void j01_validRealSignature() throws Exception{
         var v=verifier().verify(valid(current));assertEquals("alice",v.subject());assertEquals(Set.of(AUD),v.audiences());
         assertEquals(TokenKind.ACCESS,v.kind());assertNull(v.authenticatedAt());assertFalse(v.toString().contains("alice"));

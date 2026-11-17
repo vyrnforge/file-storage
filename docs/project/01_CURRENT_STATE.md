@@ -194,3 +194,8 @@ Owner approved #110 and AQ-03. Q15 squash merged `dd3feae440ee601259bd77af983cfa
 ## FS-65 Q11 history integrity sentinel candidate
 
 AQ-03B review identified table-only history write admission missed column-only grants and reachable role paths. Separate correction checks both histories and all membership-reachable role effective write/owner authority, with disposable regression and restoration. No migration or grant changes. Pending verification/owner acceptance; overall audit remains open.
+
+
+## FS-65 AQ-03A accepted; AQ-03B observability candidate
+
+Owner approved #111 and AQ-03B; #111 merged `2273545a64a0b1c6cceb5eae85d2edb73e751454`, 231 tests, zero new findings. AQ-03B adds bounded process-local failure observations in existing file/policy/backend authority boundaries, trusted key snapshot distinction, neutral public errors and observer fault isolation. No new routes, dependencies, migrations, grants or authorization policy. Candidate verification pending; broader SQL/target ACL audit and telemetry export remain open.

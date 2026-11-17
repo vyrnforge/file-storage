@@ -8,9 +8,10 @@ import java.util.Objects;
 final class AccessAuthentication {
     private AccessAuthentication() {}
 
-    static VerifiedAccess verify(Trust trust, Verifier verifier, Clock clock, String bearer) {
-        if (bearer == null || bearer.isBlank()) throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);
+    static VerifiedAccess verify(Trust trust, Verifier verifier, Clock clock, String bearer,
+                                 SecurityObservation observations, SecurityObservation.Boundary boundary) {
         try {
+            if (bearer == null || bearer.isBlank()) throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);
             var verified = Objects.requireNonNull(verifier.verify(bearer));
             var now = clock.instant();
             if (!trust.issuer().equals(verified.issuer()) || !verified.audiences().contains(trust.audience())
@@ -20,6 +21,10 @@ final class AccessAuthentication {
             }
             return verified;
         } catch (RuntimeException ex) {
+            var reason = ex instanceof SecurityFailure failure ? failure.reason() : SecurityObservation.Reason.AUTHENTICATION_FAILED;
+            // Only the concrete verifier can distinguish a rejected key snapshot from a bad token.
+            SecurityObservation.emit(observations, boundary, reason == SecurityObservation.Reason.KEY_SOURCE_UNAVAILABLE
+                    ? reason : SecurityObservation.Reason.AUTHENTICATION_FAILED);
             throw new SecurityFailure(SecurityCode.AUTHENTICATION_FAILED);
         }
     }

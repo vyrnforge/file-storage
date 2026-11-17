@@ -100,26 +100,33 @@ public final class WyrmgateJwtVerifier implements SecuredFiles.Verifier {
                     ||c.getClaim("act")!=null||c.getClaim("cnf")!=null)throw denied();
             return new SecuredFiles.VerifiedAccess(c.getIssuer(),c.getSubject(),Set.of(trust.audience()),
                     SecuredFiles.TokenKind.ACCESS,nbf==null?null:nbf.toInstant(),exp.toInstant(),null);
-        }catch(Exception ex){throw denied();}
+        }catch(SecuredFiles.SecurityFailure ex){throw ex;}
+        catch(java.text.ParseException | com.nimbusds.jose.JOSEException | RuntimeException ex){throw denied();}
     }
-    private RSAKey selectKey(JWSHeader h,Instant now) throws Exception {
-        KeySnapshot snapshot=Objects.requireNonNull(keys.current());
-        if(!trust.issuer().equals(snapshot.issuer())||snapshot.jwks().length()>MAX_JWKS
-                ||snapshot.acquiredAt().isAfter(now)
-                ||Duration.between(snapshot.acquiredAt(),now).compareTo(maxSnapshotAge)>=0)throw denied();
-        List<JWK> set=JWKSet.parse(snapshot.jwks()).getKeys();
-        if(set.isEmpty()||set.size()>MAX_KEYS)throw denied();
-        Set<String> seen=new HashSet<>();
+    private RSAKey selectKey(JWSHeader h,Instant now) {
         RSAKey selected=null;
-        for(JWK jwk:set){
-            if(!(jwk instanceof RSAKey rsa)||rsa.isPrivate()||rsa.size()<2048
-                    ||rsa.getKeyID()==null||rsa.getKeyID().isBlank()||rsa.getKeyID().length()>256
-                    ||!seen.add(rsa.getKeyID())||!KeyUse.SIGNATURE.equals(rsa.getKeyUse())
-                    ||!RSA.contains(rsa.getAlgorithm())
-                    ||(rsa.getKeyOperations()!=null&&!rsa.getKeyOperations().equals(Set.of(KeyOperation.VERIFY))))
-                throw denied();
-            if(h.getKeyID().equals(rsa.getKeyID()))selected=rsa;
-        }
+        try {
+            KeySnapshot snapshot=Objects.requireNonNull(keys.current());
+            if(!trust.issuer().equals(snapshot.issuer())||snapshot.jwks().length()>MAX_JWKS
+                    ||snapshot.acquiredAt().isAfter(now)
+                    ||Duration.between(snapshot.acquiredAt(),now).compareTo(maxSnapshotAge)>=0)throw denied();
+            List<JWK> set=JWKSet.parse(snapshot.jwks()).getKeys();
+            if(set.isEmpty()||set.size()>MAX_KEYS)throw denied();
+            Set<String> seen=new HashSet<>();
+            boolean usable=false;
+            for(JWK jwk:set){
+                if(!(jwk instanceof RSAKey rsa)||rsa.isPrivate()||rsa.size()<2048
+                        ||rsa.getKeyID()==null||rsa.getKeyID().isBlank()||rsa.getKeyID().length()>256
+                        ||!seen.add(rsa.getKeyID())||!KeyUse.SIGNATURE.equals(rsa.getKeyUse())
+                        ||!RSA.contains(rsa.getAlgorithm())
+                        ||(rsa.getKeyOperations()!=null&&!rsa.getKeyOperations().equals(Set.of(KeyOperation.VERIFY))))
+                    throw denied();
+                usable|=algorithms.contains(rsa.getAlgorithm());
+                if(h.getKeyID().equals(rsa.getKeyID()))selected=rsa;
+            }
+            if(!usable)throw denied();
+        }catch(java.text.ParseException|RuntimeException ex){throw new SecuredFiles.SecurityFailure(SecuredFiles.SecurityCode.AUTHENTICATION_FAILED,
+                SecurityObservation.Reason.KEY_SOURCE_UNAVAILABLE);}
         if(selected==null||!h.getAlgorithm().equals(selected.getAlgorithm()))throw denied();
         return selected;
     }
