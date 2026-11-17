@@ -74,7 +74,9 @@ public final class RuntimeDatabaseRoles {
                         case GOVERNANCE -> "has_table_privilege(current_user,'fs.retention_policy_draft','INSERT')";
                         case DISPATCHER -> "has_schema_privilege(current_user,'fs_kernel','USAGE') AND NOT has_schema_privilege(current_user,'fs','USAGE') AND has_column_privilege(current_user,'fs_kernel.platform_event_outbox','status','UPDATE')";
                     };
-                    try(var rs=st.executeQuery("SELECT ("+required+") AND NOT has_table_privilege(current_user,(SELECT r.oid FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname='fs' AND r.relname='flyway_schema_history'),'INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_table_privilege(current_user,(SELECT r.oid FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname='fs_kernel' AND r.relname='flyway_schema_history'),'INSERT,UPDATE,DELETE,TRUNCATE')")){
+                    // Table-level ACLs alone do not see column-only INSERT/UPDATE or
+                    // privileges accessible through a non-inheriting membership/SET ROLE path.
+                    try(var rs=st.executeQuery("SELECT ("+required+") AND ("+HISTORY_WRITE_DENIED+")")){
                         if(!rs.next()||!rs.getBoolean(1))return false;
                     }
                 }
@@ -82,5 +84,16 @@ public final class RuntimeDatabaseRoles {
             return io.vyrnforge.filestorage.persistence.StorageMigrations.ready(source(Role.READINESS));
         }catch(SQLException|RuntimeException ex){return false;}
     }
+    private static final String HISTORY_WRITE_DENIED = """
+        SELECT count(*)=2 AND bool_and(NOT EXISTS(
+            SELECT 1 FROM pg_roles p
+            WHERE pg_has_role(current_user,p.oid,'MEMBER')
+              AND (p.oid=r.relowner
+                   OR has_table_privilege(p.oid,r.oid,'INSERT,UPDATE,DELETE,TRUNCATE')
+                   OR has_any_column_privilege(p.oid,r.oid,'INSERT,UPDATE'))))
+        FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace
+        WHERE n.nspname IN ('fs','fs_kernel') AND r.relname='flyway_schema_history'
+        """;
+
     public void requireReady(){if(!ready())throw new IllegalStateException("separated database admission failed");}
 }
