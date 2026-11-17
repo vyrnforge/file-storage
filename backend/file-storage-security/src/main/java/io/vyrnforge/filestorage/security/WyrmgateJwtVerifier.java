@@ -101,7 +101,7 @@ public final class WyrmgateJwtVerifier implements SecuredFiles.Verifier {
             return new SecuredFiles.VerifiedAccess(c.getIssuer(),c.getSubject(),Set.of(trust.audience()),
                     SecuredFiles.TokenKind.ACCESS,nbf==null?null:nbf.toInstant(),exp.toInstant(),null);
         }catch(SecuredFiles.SecurityFailure ex){throw ex;}
-        catch(Exception ex){throw denied();}
+        catch(java.text.ParseException | com.nimbusds.jose.JOSEException | RuntimeException ex){throw denied();}
     }
     private RSAKey selectKey(JWSHeader h,Instant now) {
         RSAKey selected=null;
